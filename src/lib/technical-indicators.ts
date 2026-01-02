@@ -114,6 +114,10 @@ export function calculateIndicators(prices: HistoricalPrice[]): {
 
 /**
  * Determine if stock is in "wait zone" (don't buy)
+ * Stricter thresholds for value investing:
+ * - RSI > 40 = getting expensive
+ * - > 15% above SMA = extended
+ * - Below SMA200 = downtrend
  */
 export function checkWaitZone(data: {
   currentPrice: number | null;
@@ -123,22 +127,26 @@ export function checkWaitZone(data: {
 }): { isWaitZone: boolean; reasons: string[] } {
   const reasons: string[] = [];
 
-  if (data.rsi14 && data.rsi14 > 70) {
-    reasons.push(`RSI ${data.rsi14.toFixed(0)} > 70 (overbought)`);
+  // RSI > 40 = stock is not in value territory
+  if (data.rsi14 && data.rsi14 > 40) {
+    reasons.push(`RSI ${data.rsi14.toFixed(0)} > 40 (not value)`);
   }
 
+  // > 15% above SMA50 = short-term extended
   if (data.currentPrice && data.sma50) {
     const pctAbove = ((data.currentPrice - data.sma50) / data.sma50) * 100;
-    if (pctAbove > 20) {
+    if (pctAbove > 15) {
       reasons.push(`${pctAbove.toFixed(0)}% above SMA50 (extended)`);
     }
   }
 
+  // > 15% above SMA200 = long-term extended
   if (data.currentPrice && data.sma200) {
     const pctAbove = ((data.currentPrice - data.sma200) / data.sma200) * 100;
-    if (pctAbove > 40) {
-      reasons.push(`${pctAbove.toFixed(0)}% above SMA200 (very extended)`);
+    if (pctAbove > 15) {
+      reasons.push(`${pctAbove.toFixed(0)}% above SMA200 (extended)`);
     }
+    // Below SMA200 = downtrend (still a wait condition)
     if (data.currentPrice < data.sma200) {
       reasons.push("Below SMA200 (downtrend)");
     }

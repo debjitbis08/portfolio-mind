@@ -78,6 +78,33 @@ if (!user) {
             </p>
           </div>
         </div>
+
+        <!-- Available Funds Input -->
+        <div class="mt-6 pt-6 border-t border-surface1">
+          <label class="block text-sm text-subtext0 mb-2"
+            >Available Funds for Investment</label
+          >
+          <div class="flex gap-2 items-center max-w-xs">
+            <div class="relative w-full">
+              <span class="absolute left-3 top-2 text-subtext0">₹</span>
+              <input
+                type="number"
+                id="available-funds"
+                class="w-full bg-surface1 border border-surface1 rounded-lg py-2 pl-7 pr-3 text-text focus:outline-none focus:border-mauve transition-colors"
+                placeholder="0"
+              />
+            </div>
+            <button
+              id="save-funds-btn"
+              class="px-4 py-2 bg-surface1 hover:bg-surface2 text-text text-sm rounded-lg transition-colors"
+            >
+              Save
+            </button>
+            <span id="funds-status" class="text-xs text-green hidden"
+              >Saved ✓</span
+            >
+          </div>
+        </div>
       </section>
 
       <!-- Holdings Table -->
@@ -109,6 +136,52 @@ if (!user) {
           </thead>
           <tbody id="holdings-body" class="divide-y divide-surface1"> </tbody>
         </table>
+      </section>
+
+      <!-- AI Discovery Section -->
+      <section
+        class="bg-surface0 border border-surface1 rounded-2xl overflow-hidden"
+      >
+        <div
+          class="p-4 border-b border-surface1 flex items-center justify-between"
+        >
+          <div class="flex items-center gap-3">
+            <h2 class="text-lg text-subtext0">🤖 AI Discovery</h2>
+            <button
+              id="run-discovery-btn"
+              class="px-4 py-1.5 bg-mauve hover:bg-mauve/90 text-crust font-medium text-sm rounded-lg transition-colors"
+            >
+              Run Discovery Cycle
+            </button>
+          </div>
+          <span id="discovery-status" class="text-sm text-subtext0"></span>
+        </div>
+
+        <!-- Progress bar (hidden by default) -->
+        <div
+          id="discovery-progress"
+          class="hidden px-4 py-3 border-b border-surface1"
+        >
+          <div class="flex justify-between text-xs text-subtext0 mb-1">
+            <span id="progress-message">Starting...</span>
+            <span id="progress-percent">0%</span>
+          </div>
+          <div class="h-2 bg-surface2 rounded-full overflow-hidden">
+            <div
+              id="progress-bar"
+              class="h-full bg-mauve transition-all duration-300"
+              style="width: 0%"
+            >
+            </div>
+          </div>
+        </div>
+
+        <div id="suggestions-container" class="divide-y divide-surface1">
+          <div id="suggestions-loading" class="p-6 text-center text-subtext0">
+            Click "Run Discovery Cycle" to analyze your portfolio with AI
+          </div>
+          <div id="suggestions-list" class="hidden"></div>
+        </div>
       </section>
 
       <!-- Import Section (Collapsed) -->
@@ -367,6 +440,244 @@ if (!user) {
     document.cookie = "sb-access-token=; Max-Age=0; path=/";
     document.cookie = "sb-refresh-token=; Max-Age=0; path=/";
     window.location.href = "/login";
+  });
+
+  // Load pending suggestions
+  async function loadSuggestions() {
+    const loadingEl = document.getElementById("suggestions-loading")!;
+    const listEl = document.getElementById("suggestions-list")!;
+
+    try {
+      const response = await fetch("/api/suggestions?status=pending");
+      const data = await response.json();
+
+      if (data.suggestions && data.suggestions.length > 0) {
+        listEl.innerHTML = data.suggestions
+          .map((s: any) => {
+            let actionColor = "text-subtext0";
+            let actionBg = "bg-surface2";
+            let actionIcon = "•";
+            let details = "";
+
+            if (s.action === "BUY") {
+              actionColor = "text-green";
+              actionBg = "bg-green/20";
+              actionIcon = "BUY";
+              details = s.quantity
+                ? `<span class="text-xs text-subtext1 ml-2">Qty: ${s.quantity} (₹${s.allocation_amount?.toLocaleString()})</span>`
+                : "";
+            } else if (s.action === "SELL") {
+              actionColor = "text-red";
+              actionBg = "bg-red/20";
+              actionIcon = "SELL";
+              details = s.quantity
+                ? `<span class="text-xs text-subtext1 ml-2">Qty: ${s.quantity}</span>`
+                : "";
+            } else if (s.action === "MOVE") {
+              actionColor = "text-mauve";
+              actionBg = "bg-mauve/20";
+              actionIcon = "MOVE";
+              details = `<span class="text-xs text-subtext1 ml-2">Sell ${s.sell_quantity} ${s.sell_symbol} → Buy ${s.quantity} ${s.symbol}</span>`;
+            }
+
+            return `
+              <div class="p-4 flex items-center justify-between hover:bg-surface1/50 transition-colors" data-id="${s.id}">
+                <div class="flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium text-text">${s.stock_name || s.symbol}</span>
+                    <span class="px-2 py-0.5 text-xs font-bold rounded ${actionBg} ${actionColor}">${actionIcon}</span>
+                    <span class="text-xs text-subtext0">Score: ${s.technical_score}</span>
+                    ${details}
+                  </div>
+                  <p class="text-sm text-subtext0 mt-1">${s.rationale}</p>
+                </div>
+                <div class="flex gap-2 ml-4">
+                  <button class="approve-btn px-3 py-1 text-sm bg-green/20 hover:bg-green/30 text-green rounded transition-colors">
+                    ✓
+                  </button>
+                  <button class="reject-btn px-3 py-1 text-sm bg-red/20 hover:bg-red/30 text-red rounded transition-colors">
+                    ✗
+                  </button>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+
+        loadingEl.classList.add("hidden");
+        listEl.classList.remove("hidden");
+
+        // Add click handlers for approve/reject
+        listEl.querySelectorAll("[data-id]").forEach((el) => {
+          const id = el.getAttribute("data-id");
+          el.querySelector(".approve-btn")?.addEventListener(
+            "click",
+            async () => {
+              await updateSuggestion(id!, "approved");
+              el.remove();
+              if (listEl.children.length === 0) {
+                loadingEl.textContent = "No pending suggestions";
+                loadingEl.classList.remove("hidden");
+                listEl.classList.add("hidden");
+              }
+            }
+          );
+          el.querySelector(".reject-btn")?.addEventListener(
+            "click",
+            async () => {
+              await updateSuggestion(id!, "rejected");
+              el.remove();
+              if (listEl.children.length === 0) {
+                loadingEl.textContent = "No pending suggestions";
+                loadingEl.classList.remove("hidden");
+                listEl.classList.add("hidden");
+              }
+            }
+          );
+        });
+      } else {
+        loadingEl.textContent =
+          "No pending suggestions. Run a discovery cycle!";
+      }
+    } catch (err) {
+      console.error("Failed to load suggestions:", err);
+    }
+  }
+
+  async function updateSuggestion(id: string, status: string) {
+    await fetch("/api/suggestions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status }),
+    });
+  }
+
+  // Run Discovery Cycle with Job Queue + SSE
+  document
+    .getElementById("run-discovery-btn")
+    ?.addEventListener("click", async () => {
+      const statusEl = document.getElementById("discovery-status")!;
+      const btn = document.getElementById(
+        "run-discovery-btn"
+      ) as HTMLButtonElement;
+      const loadingEl = document.getElementById("suggestions-loading")!;
+      const progressDiv = document.getElementById("discovery-progress")!;
+      const progressBar = document.getElementById("progress-bar")!;
+      const progressMsg = document.getElementById("progress-message")!;
+      const progressPct = document.getElementById("progress-percent")!;
+
+      btn.disabled = true;
+      loadingEl.classList.add("hidden");
+      progressDiv.classList.remove("hidden");
+      document.getElementById("suggestions-list")!.classList.add("hidden");
+
+      try {
+        // Step 1: Create the job
+        const createRes = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "discovery_cycle" }),
+        });
+        const { job } = await createRes.json();
+
+        if (!job?.id) {
+          throw new Error("Failed to create job");
+        }
+
+        // Step 2: Connect to SSE for progress updates
+        const eventSource = new EventSource(`/api/jobs/${job.id}/status`);
+
+        eventSource.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+
+          if (data.progress !== undefined) {
+            progressBar.style.width = `${data.progress}%`;
+            progressPct.textContent = `${data.progress}%`;
+          }
+          if (data.message) {
+            progressMsg.textContent = data.message;
+          }
+
+          if (data.status === "completed") {
+            eventSource.close();
+            progressDiv.classList.add("hidden");
+            statusEl.textContent = `✓ ${data.result?.actionable || 0} actionable suggestions`;
+            setTimeout(() => {
+              statusEl.textContent = "";
+            }, 5000);
+            loadSuggestions();
+            btn.disabled = false;
+          } else if (data.status === "failed") {
+            eventSource.close();
+            progressDiv.classList.add("hidden");
+            statusEl.textContent = `Error: ${data.error}`;
+            loadingEl.textContent = data.error || "Discovery failed";
+            loadingEl.classList.remove("hidden");
+            btn.disabled = false;
+          }
+        };
+
+        eventSource.onerror = () => {
+          eventSource.close();
+          progressDiv.classList.add("hidden");
+          statusEl.textContent = "Connection lost";
+          btn.disabled = false;
+        };
+      } catch (err) {
+        progressDiv.classList.add("hidden");
+        statusEl.textContent = "Discovery failed";
+        loadingEl.textContent = "Error starting discovery cycle";
+        loadingEl.classList.remove("hidden");
+        btn.disabled = false;
+      }
+    });
+
+  // Load existing suggestions on page load
+  loadSuggestions();
+
+  // Settings Handlers
+  const fundsInput = document.getElementById(
+    "available-funds"
+  ) as HTMLInputElement;
+  const saveFundsBtn = document.getElementById("save-funds-btn");
+  const fundsStatus = document.getElementById("funds-status");
+
+  // Load settings
+  async function loadSettings() {
+    try {
+      const res = await fetch("/api/settings");
+      const { settings } = await res.json();
+      if (settings?.available_funds) {
+        fundsInput.value = settings.available_funds;
+      }
+    } catch (err) {
+      console.error("Failed to load settings:", err);
+    }
+  }
+  loadSettings();
+
+  // Save settings
+  saveFundsBtn?.addEventListener("click", async () => {
+    const funds = parseFloat(fundsInput.value) || 0;
+    saveFundsBtn.textContent = "Saving...";
+    (saveFundsBtn as HTMLButtonElement).disabled = true;
+
+    try {
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ available_funds: funds }),
+      });
+
+      saveFundsBtn.textContent = "Save";
+      fundsStatus?.classList.remove("hidden");
+      setTimeout(() => fundsStatus?.classList.add("hidden"), 3000);
+    } catch (err) {
+      console.error("Failed to save settings:", err);
+      saveFundsBtn.textContent = "Error";
+    } finally {
+      (saveFundsBtn as HTMLButtonElement).disabled = false;
+    }
   });
 
   // Import form handler

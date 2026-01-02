@@ -226,13 +226,13 @@ export const GET: APIRoute = async ({ request, cookies }) => {
       // Determine wait zone reasons
       const waitReasons: string[] = [];
       if (tech) {
-        if (tech.rsi_14 && Number(tech.rsi_14) > 70) {
+        if (tech.rsi_14 && Number(tech.rsi_14) > 40) {
           waitReasons.push(`RSI ${Number(tech.rsi_14).toFixed(0)}`);
         }
-        if (tech.price_vs_sma50 && Number(tech.price_vs_sma50) > 20) {
+        if (tech.price_vs_sma50 && Number(tech.price_vs_sma50) > 15) {
           waitReasons.push(`+${Number(tech.price_vs_sma50).toFixed(0)}% SMA50`);
         }
-        if (tech.price_vs_sma200 && Number(tech.price_vs_sma200) > 40) {
+        if (tech.price_vs_sma200 && Number(tech.price_vs_sma200) > 15) {
           waitReasons.push(
             `+${Number(tech.price_vs_sma200).toFixed(0)}% SMA200`
           );
