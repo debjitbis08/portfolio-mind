@@ -10,10 +10,7 @@ import {
   PUBLIC_SUPABASE_ANON_KEY,
 } from "astro:env/client";
 import { SUPABASE_SERVICE_ROLE_KEY, GEMINI_API_KEY } from "astro:env/server";
-import {
-  analyzePortfolio,
-  type HoldingForAnalysis,
-} from "../../../../lib/gemini";
+import { GeminiService, type HoldingForAnalysis } from "../../../../lib/gemini";
 
 export const GET: APIRoute = async ({ params, cookies }) => {
   const jobId = params.id;
@@ -106,9 +103,44 @@ export const GET: APIRoute = async ({ params, cookies }) => {
 
         const availableFunds = settings?.available_funds || 0;
 
-        // Step 2: Fetch technical data
+        // Step 2b: Fetch Fundamentals
         await updateProgress(
           20,
+          "Gathering fundamental intel (PE, ROE, etc)..."
+        );
+
+        // Check which symbols need update (simplify: just update all for now or check missing)
+        const symbols = dbHoldings.map((h: any) => h.symbol);
+
+        // This runs in background, we can await it or let it run.
+        // For accurate analysis, we should await.
+        try {
+          // Import dynamically to avoid top-level issues if any
+          const { IntelService } = await import("../../../../lib/intel");
+          await IntelService.updateFundamentals(symbols);
+        } catch (err) {
+          console.error(
+            "Intel update failed, proceeding without new fundamentals:",
+            err
+          );
+        }
+
+        // Fetch rich data from DB
+        const { data: stockIntel } = await supabase
+          .from("stock_intel")
+          .select("*")
+          .in("symbol", symbols);
+
+        const intelMap = new Map<string, any>();
+        if (stockIntel) {
+          for (const i of stockIntel) {
+            intelMap.set(i.symbol, i);
+          }
+        }
+
+        // Step 2: Fetch technical data
+        await updateProgress(
+          30,
           `Found ${dbHoldings.length} holdings. Loading technical data...`
         );
 
@@ -124,13 +156,17 @@ export const GET: APIRoute = async ({ params, cookies }) => {
         }
 
         // Step 3: Build holdings for analysis
-        await updateProgress(30, "Preparing data for AI analysis...");
+        await updateProgress(40, "Preparing data for AI analysis...");
 
         const holdings: HoldingForAnalysis[] = dbHoldings.map((h: any) => {
           const tech =
             techMap.get(h.symbol) ||
             techMap.get(`${h.symbol}.NS`) ||
             techMap.get(`${h.symbol}.BO`);
+          const intel =
+            intelMap.get(h.symbol) ||
+            intelMap.get(`${h.symbol}.NS`) ||
+            intelMap.get(`${h.symbol}.BO`);
 
           const priceVsSma50 = tech?.price_vs_sma50
             ? Number(tech.price_vs_sma50)
@@ -164,6 +200,10 @@ export const GET: APIRoute = async ({ params, cookies }) => {
             price_vs_sma200: priceVsSma200,
             is_wait_zone: waitReasons.length > 0,
             wait_reasons: waitReasons,
+            // Attach fundamentals
+            fundamentals: intel?.fundamentals,
+            // Attach qualitative intel (The Story)
+            qualitative: intel?.social_sentiment,
           };
         });
 
@@ -174,7 +214,10 @@ export const GET: APIRoute = async ({ params, cookies }) => {
         );
 
         // Pass available funds to analysis
-        const suggestions = await analyzePortfolio(holdings, availableFunds);
+        const suggestions = await GeminiService.analyzePortfolio(
+          holdings,
+          availableFunds
+        );
 
         // Step 5: Filter actionable suggestions only (BUY/SELL/MOVE)
         await updateProgress(80, "Processing actionable suggestions...");

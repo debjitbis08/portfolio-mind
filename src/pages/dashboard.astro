@@ -41,6 +41,12 @@ if (!user) {
         >
           Refresh
         </button>
+        <a
+          href="/settings"
+          class="px-4 py-2 bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors flex items-center gap-2"
+        >
+          ⚙️ Settings
+        </a>
         <button
           id="logout-btn"
           class="px-4 py-2 bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
@@ -79,63 +85,36 @@ if (!user) {
           </div>
         </div>
 
-        <!-- Available Funds Input -->
-        <div class="mt-6 pt-6 border-t border-surface1">
-          <label class="block text-sm text-subtext0 mb-2"
-            >Available Funds for Investment</label
-          >
-          <div class="flex gap-2 items-center max-w-xs">
-            <div class="relative w-full">
-              <span class="absolute left-3 top-2 text-subtext0">₹</span>
-              <input
-                type="number"
-                id="available-funds"
-                class="w-full bg-surface1 border border-surface1 rounded-lg py-2 pl-7 pr-3 text-text focus:outline-none focus:border-mauve transition-colors"
-                placeholder="0"
-              />
-            </div>
+        <!-- Holdings Table -->
+        <section
+          class="bg-surface0 border border-surface1 rounded-2xl overflow-hidden"
+        >
+          <div class="p-4 border-b border-surface1 flex gap-2">
             <button
-              id="save-funds-btn"
-              class="px-4 py-2 bg-surface1 hover:bg-surface2 text-text text-sm rounded-lg transition-colors"
+              id="refresh-tech-btn"
+              class="px-3 py-1 text-sm bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
             >
-              Save
+              ⚡ Refresh Technical Data
             </button>
-            <span id="funds-status" class="text-xs text-green hidden"
-              >Saved ✓</span
-            >
+            <span id="tech-status" class="text-sm text-subtext0 self-center"
+            ></span>
           </div>
-        </div>
-      </section>
-
-      <!-- Holdings Table -->
-      <section
-        class="bg-surface0 border border-surface1 rounded-2xl overflow-hidden"
-      >
-        <div class="p-4 border-b border-surface1 flex gap-2">
-          <button
-            id="refresh-tech-btn"
-            class="px-3 py-1 text-sm bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
-          >
-            ⚡ Refresh Technical Data
-          </button>
-          <span id="tech-status" class="text-sm text-subtext0 self-center"
-          ></span>
-        </div>
-        <div id="holdings-loading" class="p-6 text-center text-subtext0">
-          Loading holdings...
-        </div>
-        <table id="holdings-table" class="w-full hidden">
-          <thead class="border-b border-surface1">
-            <tr class="text-left text-sm text-subtext0">
-              <th class="p-4">Company</th>
-              <th class="p-4 text-center">Technical</th>
-              <th class="p-4 text-right">Market price</th>
-              <th class="p-4 text-right">Returns (%)</th>
-              <th class="p-4 text-right">Current (Invested)</th>
-            </tr>
-          </thead>
-          <tbody id="holdings-body" class="divide-y divide-surface1"> </tbody>
-        </table>
+          <div id="holdings-loading" class="p-6 text-center text-subtext0">
+            Loading holdings...
+          </div>
+          <table id="holdings-table" class="w-full hidden">
+            <thead class="border-b border-surface1">
+              <tr class="text-left text-sm text-subtext0">
+                <th class="p-4">Company</th>
+                <th class="p-4 text-center">Technical</th>
+                <th class="p-4 text-right">Market price</th>
+                <th class="p-4 text-right">Returns (%)</th>
+                <th class="p-4 text-right">Current (Invested)</th>
+              </tr>
+            </thead>
+            <tbody id="holdings-body" class="divide-y divide-surface1"> </tbody>
+          </table>
+        </section>
       </section>
 
       <!-- AI Discovery Section -->
@@ -242,120 +221,117 @@ if (!user) {
       </details>
     </main>
   </div>
-</Layout>
 
-<script>
-  import { supabase } from "../lib/supabase";
+  <script>
+    import { supabase } from "../lib/supabase";
 
-  // Format currency
-  function formatCurrency(value: number): string {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 0,
-    }).format(value);
-  }
+    // Format currency
+    function formatCurrency(value: number): string {
+      return new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+        maximumFractionDigits: 0,
+      }).format(value);
+    }
 
-  // Format decimal currency
-  function formatCurrencyDecimal(value: number): string {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  }
+    // Format decimal currency
+    function formatCurrencyDecimal(value: number): string {
+      return new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(value);
+    }
 
-  // Load holdings data
-  async function loadHoldings() {
-    const loadingEl = document.getElementById("holdings-loading")!;
-    const tableEl = document.getElementById("holdings-table")!;
-    const bodyEl = document.getElementById("holdings-body")!;
+    // Load holdings data
+    async function loadHoldings() {
+      const loadingEl = document.getElementById("holdings-loading")!;
+      const tableEl = document.getElementById("holdings-table")!;
+      const bodyEl = document.getElementById("holdings-body")!;
 
-    loadingEl.classList.remove("hidden");
-    tableEl.classList.add("hidden");
+      loadingEl.classList.remove("hidden");
+      tableEl.classList.add("hidden");
 
-    try {
-      const response = await fetch("/api/holdings");
-      const data = await response.json();
+      try {
+        const response = await fetch("/api/holdings");
+        const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to load holdings");
-      }
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load holdings");
+        }
 
-      // Update summary
-      if (data.summary) {
-        document.getElementById("holdings-count")!.textContent =
-          `(${data.summary.holdings_count})`;
-        document.getElementById("current-value")!.textContent = formatCurrency(
-          data.summary.current_value
-        );
-        document.getElementById("invested-value")!.textContent = formatCurrency(
-          data.summary.invested_value
-        );
+        // Update summary
+        if (data.summary) {
+          document.getElementById("holdings-count")!.textContent =
+            `(${data.summary.holdings_count})`;
+          document.getElementById("current-value")!.textContent =
+            formatCurrency(data.summary.current_value);
+          document.getElementById("invested-value")!.textContent =
+            formatCurrency(data.summary.invested_value);
 
-        const returnsEl = document.getElementById("total-returns")!;
-        const isPositive = data.summary.total_returns >= 0;
-        returnsEl.textContent = `${isPositive ? "+" : ""}${formatCurrency(data.summary.total_returns)} (${data.summary.total_returns_percent.toFixed(2)}%)`;
-        returnsEl.className = `text-xl font-semibold ${isPositive ? "text-green" : "text-red"}`;
-      }
+          const returnsEl = document.getElementById("total-returns")!;
+          const isPositive = data.summary.total_returns >= 0;
+          returnsEl.textContent = `${isPositive ? "+" : ""}${formatCurrency(data.summary.total_returns)} (${data.summary.total_returns_percent.toFixed(2)}%)`;
+          returnsEl.className = `text-xl font-semibold ${isPositive ? "text-green" : "text-red"}`;
+        }
 
-      // Update table
-      if (data.holdings && data.holdings.length > 0) {
-        bodyEl.innerHTML = data.holdings
-          .map((h: any) => {
-            const isPositive = h.returns >= 0;
+        // Update table
+        if (data.holdings && data.holdings.length > 0) {
+          bodyEl.innerHTML = data.holdings
+            .map((h: any) => {
+              const isPositive = h.returns >= 0;
 
-            // Build technical badges
-            let techBadges = "";
+              // Build technical badges
+              let techBadges = "";
 
-            // RSI badge
-            if (h.rsi_14 !== null) {
-              const rsiColor =
-                h.rsi_14 > 70
-                  ? "bg-red/20 text-red"
-                  : h.rsi_14 < 30
-                    ? "bg-green/20 text-green"
-                    : "bg-surface2 text-subtext0";
-              techBadges += `<span class="px-2 py-0.5 text-xs rounded ${rsiColor}">RSI ${h.rsi_14.toFixed(0)}</span>`;
-            }
+              // RSI badge
+              if (h.rsi_14 !== null) {
+                const rsiColor =
+                  h.rsi_14 > 70
+                    ? "bg-red/20 text-red"
+                    : h.rsi_14 < 30
+                      ? "bg-green/20 text-green"
+                      : "bg-surface2 text-subtext0";
+                techBadges += `<span class="px-2 py-0.5 text-xs rounded ${rsiColor}">RSI ${h.rsi_14.toFixed(0)}</span>`;
+              }
 
-            // SMA50 badge - show % above/below
-            if (h.price_vs_sma50 !== null) {
-              const isAbove = h.price_vs_sma50 >= 0;
-              const sma50Color =
-                h.price_vs_sma50 > 20
-                  ? "text-red"
-                  : h.price_vs_sma50 < -10
-                    ? "text-yellow"
-                    : isAbove
-                      ? "text-green"
-                      : "text-subtext0";
-              techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-surface2 ${sma50Color}">${isAbove ? "+" : ""}${h.price_vs_sma50.toFixed(0)}% 50D</span>`;
-            }
+              // SMA50 badge - show % above/below
+              if (h.price_vs_sma50 !== null) {
+                const isAbove = h.price_vs_sma50 >= 0;
+                const sma50Color =
+                  h.price_vs_sma50 > 20
+                    ? "text-red"
+                    : h.price_vs_sma50 < -10
+                      ? "text-yellow"
+                      : isAbove
+                        ? "text-green"
+                        : "text-subtext0";
+                techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-surface2 ${sma50Color}">${isAbove ? "+" : ""}${h.price_vs_sma50.toFixed(0)}% 50D</span>`;
+              }
 
-            // SMA200 badge - show % above/below
-            if (h.price_vs_sma200 !== null) {
-              const isAbove = h.price_vs_sma200 >= 0;
-              const sma200Color =
-                h.price_vs_sma200 > 40
-                  ? "text-red"
-                  : h.price_vs_sma200 < 0
-                    ? "text-yellow"
-                    : "text-green";
-              techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-surface2 ${sma200Color}">${isAbove ? "+" : ""}${h.price_vs_sma200.toFixed(0)}% 200D</span>`;
-            }
+              // SMA200 badge - show % above/below
+              if (h.price_vs_sma200 !== null) {
+                const isAbove = h.price_vs_sma200 >= 0;
+                const sma200Color =
+                  h.price_vs_sma200 > 40
+                    ? "text-red"
+                    : h.price_vs_sma200 < 0
+                      ? "text-yellow"
+                      : "text-green";
+                techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-surface2 ${sma200Color}">${isAbove ? "+" : ""}${h.price_vs_sma200.toFixed(0)}% 200D</span>`;
+              }
 
-            // Wait zone badge
-            if (h.is_wait_zone) {
-              techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-yellow/20 text-yellow">⚠️ Wait</span>`;
-            }
+              // Wait zone badge
+              if (h.is_wait_zone) {
+                techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-yellow/20 text-yellow">⚠️ Wait</span>`;
+              }
 
-            if (!h.rsi_14 && !h.price_vs_sma50 && !h.is_wait_zone) {
-              techBadges = '<span class="text-xs text-subtext0">—</span>';
-            }
+              if (!h.rsi_14 && !h.price_vs_sma50 && !h.is_wait_zone) {
+                techBadges = '<span class="text-xs text-subtext0">—</span>';
+              }
 
-            return `
+              return `
             <tr class="hover:bg-surface1/50 transition-colors">
               <td class="p-4">
                 <div class="font-medium text-text">${h.stock_name}</div>
@@ -378,109 +354,111 @@ if (!user) {
               </td>
             </tr>
           `;
-          })
-          .join("");
+            })
+            .join("");
 
-        loadingEl.classList.add("hidden");
-        tableEl.classList.remove("hidden");
-      } else {
-        loadingEl.textContent =
-          "No holdings found. Import your transactions above.";
-      }
-    } catch (err) {
-      loadingEl.textContent =
-        err instanceof Error ? err.message : "Failed to load holdings";
-    }
-  }
-
-  // Initial load
-  loadHoldings();
-
-  // Refresh button
-  document
-    .getElementById("refresh-btn")
-    ?.addEventListener("click", loadHoldings);
-
-  // Refresh technical data button
-  document
-    .getElementById("refresh-tech-btn")
-    ?.addEventListener("click", async () => {
-      const statusEl = document.getElementById("tech-status")!;
-      const btn = document.getElementById(
-        "refresh-tech-btn"
-      ) as HTMLButtonElement;
-
-      btn.disabled = true;
-      statusEl.textContent = "Calculating RSI & SMA...";
-
-      try {
-        const response = await fetch("/api/technical", { method: "POST" });
-        const data = await response.json();
-
-        if (data.success) {
-          statusEl.textContent = `✓ Updated ${data.updated} stocks`;
-          setTimeout(() => {
-            statusEl.textContent = "";
-          }, 3000);
-          // Reload holdings to show new badges
-          loadHoldings();
+          loadingEl.classList.add("hidden");
+          tableEl.classList.remove("hidden");
         } else {
-          statusEl.textContent = `Error: ${data.error}`;
+          loadingEl.textContent =
+            "No holdings found. Import your transactions above.";
         }
       } catch (err) {
-        statusEl.textContent = "Failed to refresh";
-      } finally {
-        btn.disabled = false;
+        loadingEl.textContent =
+          err instanceof Error ? err.message : "Failed to load holdings";
       }
-    });
+    }
 
-  // Logout handler
-  document.getElementById("logout-btn")?.addEventListener("click", async () => {
-    await supabase.auth.signOut();
-    document.cookie = "sb-access-token=; Max-Age=0; path=/";
-    document.cookie = "sb-refresh-token=; Max-Age=0; path=/";
-    window.location.href = "/login";
-  });
+    // Initial load
+    loadHoldings();
 
-  // Load pending suggestions
-  async function loadSuggestions() {
-    const loadingEl = document.getElementById("suggestions-loading")!;
-    const listEl = document.getElementById("suggestions-list")!;
+    // Refresh button
+    document
+      .getElementById("refresh-btn")
+      ?.addEventListener("click", loadHoldings);
 
-    try {
-      const response = await fetch("/api/suggestions?status=pending");
-      const data = await response.json();
+    // Refresh technical data button
+    document
+      .getElementById("refresh-tech-btn")
+      ?.addEventListener("click", async () => {
+        const statusEl = document.getElementById("tech-status")!;
+        const btn = document.getElementById(
+          "refresh-tech-btn"
+        ) as HTMLButtonElement;
 
-      if (data.suggestions && data.suggestions.length > 0) {
-        listEl.innerHTML = data.suggestions
-          .map((s: any) => {
-            let actionColor = "text-subtext0";
-            let actionBg = "bg-surface2";
-            let actionIcon = "•";
-            let details = "";
+        btn.disabled = true;
+        statusEl.textContent = "Calculating RSI & SMA...";
 
-            if (s.action === "BUY") {
-              actionColor = "text-green";
-              actionBg = "bg-green/20";
-              actionIcon = "BUY";
-              details = s.quantity
-                ? `<span class="text-xs text-subtext1 ml-2">Qty: ${s.quantity} (₹${s.allocation_amount?.toLocaleString()})</span>`
-                : "";
-            } else if (s.action === "SELL") {
-              actionColor = "text-red";
-              actionBg = "bg-red/20";
-              actionIcon = "SELL";
-              details = s.quantity
-                ? `<span class="text-xs text-subtext1 ml-2">Qty: ${s.quantity}</span>`
-                : "";
-            } else if (s.action === "MOVE") {
-              actionColor = "text-mauve";
-              actionBg = "bg-mauve/20";
-              actionIcon = "MOVE";
-              details = `<span class="text-xs text-subtext1 ml-2">Sell ${s.sell_quantity} ${s.sell_symbol} → Buy ${s.quantity} ${s.symbol}</span>`;
-            }
+        try {
+          const response = await fetch("/api/technical", { method: "POST" });
+          const data = await response.json();
 
-            return `
+          if (data.success) {
+            statusEl.textContent = `✓ Updated ${data.updated} stocks`;
+            setTimeout(() => {
+              statusEl.textContent = "";
+            }, 3000);
+            // Reload holdings to show new badges
+            loadHoldings();
+          } else {
+            statusEl.textContent = `Error: ${data.error}`;
+          }
+        } catch (err) {
+          statusEl.textContent = "Failed to refresh";
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+    // Logout handler
+    document
+      .getElementById("logout-btn")
+      ?.addEventListener("click", async () => {
+        await supabase.auth.signOut();
+        document.cookie = "sb-access-token=; Max-Age=0; path=/";
+        document.cookie = "sb-refresh-token=; Max-Age=0; path=/";
+        window.location.href = "/login";
+      });
+
+    // Load pending suggestions
+    async function loadSuggestions() {
+      const loadingEl = document.getElementById("suggestions-loading")!;
+      const listEl = document.getElementById("suggestions-list")!;
+
+      try {
+        const response = await fetch("/api/suggestions?status=pending");
+        const data = await response.json();
+
+        if (data.suggestions && data.suggestions.length > 0) {
+          listEl.innerHTML = data.suggestions
+            .map((s: any) => {
+              let actionColor = "text-subtext0";
+              let actionBg = "bg-surface2";
+              let actionIcon = "•";
+              let details = "";
+
+              if (s.action === "BUY") {
+                actionColor = "text-green";
+                actionBg = "bg-green/20";
+                actionIcon = "BUY";
+                details = s.quantity
+                  ? `<span class="text-xs text-subtext1 ml-2">Qty: ${s.quantity} (₹${s.allocation_amount?.toLocaleString()})</span>`
+                  : "";
+              } else if (s.action === "SELL") {
+                actionColor = "text-red";
+                actionBg = "bg-red/20";
+                actionIcon = "SELL";
+                details = s.quantity
+                  ? `<span class="text-xs text-subtext1 ml-2">Qty: ${s.quantity}</span>`
+                  : "";
+              } else if (s.action === "MOVE") {
+                actionColor = "text-mauve";
+                actionBg = "bg-mauve/20";
+                actionIcon = "MOVE";
+                details = `<span class="text-xs text-subtext1 ml-2">Sell ${s.sell_quantity} ${s.sell_symbol} → Buy ${s.quantity} ${s.symbol}</span>`;
+              }
+
+              return `
               <div class="p-4 flex items-center justify-between hover:bg-surface1/50 transition-colors" data-id="${s.id}">
                 <div class="flex-1">
                   <div class="flex items-center gap-2">
@@ -501,235 +479,191 @@ if (!user) {
                 </div>
               </div>
             `;
-          })
-          .join("");
+            })
+            .join("");
 
-        loadingEl.classList.add("hidden");
-        listEl.classList.remove("hidden");
+          loadingEl.classList.add("hidden");
+          listEl.classList.remove("hidden");
 
-        // Add click handlers for approve/reject
-        listEl.querySelectorAll("[data-id]").forEach((el) => {
-          const id = el.getAttribute("data-id");
-          el.querySelector(".approve-btn")?.addEventListener(
-            "click",
-            async () => {
-              await updateSuggestion(id!, "approved");
-              el.remove();
-              if (listEl.children.length === 0) {
-                loadingEl.textContent = "No pending suggestions";
-                loadingEl.classList.remove("hidden");
-                listEl.classList.add("hidden");
+          // Add click handlers for approve/reject
+          listEl.querySelectorAll("[data-id]").forEach((el) => {
+            const id = el.getAttribute("data-id");
+            el.querySelector(".approve-btn")?.addEventListener(
+              "click",
+              async () => {
+                await updateSuggestion(id!, "approved");
+                el.remove();
+                if (listEl.children.length === 0) {
+                  loadingEl.textContent = "No pending suggestions";
+                  loadingEl.classList.remove("hidden");
+                  listEl.classList.add("hidden");
+                }
               }
-            }
-          );
-          el.querySelector(".reject-btn")?.addEventListener(
-            "click",
-            async () => {
-              await updateSuggestion(id!, "rejected");
-              el.remove();
-              if (listEl.children.length === 0) {
-                loadingEl.textContent = "No pending suggestions";
-                loadingEl.classList.remove("hidden");
-                listEl.classList.add("hidden");
+            );
+            el.querySelector(".reject-btn")?.addEventListener(
+              "click",
+              async () => {
+                await updateSuggestion(id!, "rejected");
+                el.remove();
+                if (listEl.children.length === 0) {
+                  loadingEl.textContent = "No pending suggestions";
+                  loadingEl.classList.remove("hidden");
+                  listEl.classList.add("hidden");
+                }
               }
-            }
-          );
-        });
-      } else {
-        loadingEl.textContent =
-          "No pending suggestions. Run a discovery cycle!";
-      }
-    } catch (err) {
-      console.error("Failed to load suggestions:", err);
-    }
-  }
-
-  async function updateSuggestion(id: string, status: string) {
-    await fetch("/api/suggestions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, status }),
-    });
-  }
-
-  // Run Discovery Cycle with Job Queue + SSE
-  document
-    .getElementById("run-discovery-btn")
-    ?.addEventListener("click", async () => {
-      const statusEl = document.getElementById("discovery-status")!;
-      const btn = document.getElementById(
-        "run-discovery-btn"
-      ) as HTMLButtonElement;
-      const loadingEl = document.getElementById("suggestions-loading")!;
-      const progressDiv = document.getElementById("discovery-progress")!;
-      const progressBar = document.getElementById("progress-bar")!;
-      const progressMsg = document.getElementById("progress-message")!;
-      const progressPct = document.getElementById("progress-percent")!;
-
-      btn.disabled = true;
-      loadingEl.classList.add("hidden");
-      progressDiv.classList.remove("hidden");
-      document.getElementById("suggestions-list")!.classList.add("hidden");
-
-      try {
-        // Step 1: Create the job
-        const createRes = await fetch("/api/jobs", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "discovery_cycle" }),
-        });
-        const { job } = await createRes.json();
-
-        if (!job?.id) {
-          throw new Error("Failed to create job");
+            );
+          });
+        } else {
+          loadingEl.textContent =
+            "No pending suggestions. Run a discovery cycle!";
         }
-
-        // Step 2: Connect to SSE for progress updates
-        const eventSource = new EventSource(`/api/jobs/${job.id}/status`);
-
-        eventSource.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-
-          if (data.progress !== undefined) {
-            progressBar.style.width = `${data.progress}%`;
-            progressPct.textContent = `${data.progress}%`;
-          }
-          if (data.message) {
-            progressMsg.textContent = data.message;
-          }
-
-          if (data.status === "completed") {
-            eventSource.close();
-            progressDiv.classList.add("hidden");
-            statusEl.textContent = `✓ ${data.result?.actionable || 0} actionable suggestions`;
-            setTimeout(() => {
-              statusEl.textContent = "";
-            }, 5000);
-            loadSuggestions();
-            btn.disabled = false;
-          } else if (data.status === "failed") {
-            eventSource.close();
-            progressDiv.classList.add("hidden");
-            statusEl.textContent = `Error: ${data.error}`;
-            loadingEl.textContent = data.error || "Discovery failed";
-            loadingEl.classList.remove("hidden");
-            btn.disabled = false;
-          }
-        };
-
-        eventSource.onerror = () => {
-          eventSource.close();
-          progressDiv.classList.add("hidden");
-          statusEl.textContent = "Connection lost";
-          btn.disabled = false;
-        };
       } catch (err) {
-        progressDiv.classList.add("hidden");
-        statusEl.textContent = "Discovery failed";
-        loadingEl.textContent = "Error starting discovery cycle";
-        loadingEl.classList.remove("hidden");
-        btn.disabled = false;
+        console.error("Failed to load suggestions:", err);
       }
-    });
-
-  // Load existing suggestions on page load
-  loadSuggestions();
-
-  // Settings Handlers
-  const fundsInput = document.getElementById(
-    "available-funds"
-  ) as HTMLInputElement;
-  const saveFundsBtn = document.getElementById("save-funds-btn");
-  const fundsStatus = document.getElementById("funds-status");
-
-  // Load settings
-  async function loadSettings() {
-    try {
-      const res = await fetch("/api/settings");
-      const { settings } = await res.json();
-      if (settings?.available_funds) {
-        fundsInput.value = settings.available_funds;
-      }
-    } catch (err) {
-      console.error("Failed to load settings:", err);
     }
-  }
-  loadSettings();
 
-  // Save settings
-  saveFundsBtn?.addEventListener("click", async () => {
-    const funds = parseFloat(fundsInput.value) || 0;
-    saveFundsBtn.textContent = "Saving...";
-    (saveFundsBtn as HTMLButtonElement).disabled = true;
-
-    try {
-      await fetch("/api/settings", {
+    async function updateSuggestion(id: string, status: string) {
+      await fetch("/api/suggestions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ available_funds: funds }),
+        body: JSON.stringify({ id, status }),
+      });
+    }
+
+    // Run Discovery Cycle with Job Queue + SSE
+    document
+      .getElementById("run-discovery-btn")
+      ?.addEventListener("click", async () => {
+        const statusEl = document.getElementById("discovery-status")!;
+        const btn = document.getElementById(
+          "run-discovery-btn"
+        ) as HTMLButtonElement;
+        const loadingEl = document.getElementById("suggestions-loading")!;
+        const progressDiv = document.getElementById("discovery-progress")!;
+        const progressBar = document.getElementById("progress-bar")!;
+        const progressMsg = document.getElementById("progress-message")!;
+        const progressPct = document.getElementById("progress-percent")!;
+
+        btn.disabled = true;
+        loadingEl.classList.add("hidden");
+        progressDiv.classList.remove("hidden");
+        document.getElementById("suggestions-list")!.classList.add("hidden");
+
+        try {
+          // Step 1: Create the job
+          const createRes = await fetch("/api/jobs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "discovery_cycle" }),
+          });
+          const { job } = await createRes.json();
+
+          if (!job?.id) {
+            throw new Error("Failed to create job");
+          }
+
+          // Step 2: Connect to SSE for progress updates
+          const eventSource = new EventSource(`/api/jobs/${job.id}/status`);
+
+          eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            if (data.progress !== undefined) {
+              progressBar.style.width = `${data.progress}%`;
+              progressPct.textContent = `${data.progress}%`;
+            }
+            if (data.message) {
+              progressMsg.textContent = data.message;
+            }
+
+            if (data.status === "completed") {
+              eventSource.close();
+              progressDiv.classList.add("hidden");
+              statusEl.textContent = `✓ ${data.result?.actionable || 0} actionable suggestions`;
+              setTimeout(() => {
+                statusEl.textContent = "";
+              }, 5000);
+              loadSuggestions();
+              btn.disabled = false;
+            } else if (data.status === "failed") {
+              eventSource.close();
+              progressDiv.classList.add("hidden");
+              statusEl.textContent = `Error: ${data.error}`;
+              loadingEl.textContent = data.error || "Discovery failed";
+              loadingEl.classList.remove("hidden");
+              btn.disabled = false;
+            }
+          };
+
+          eventSource.onerror = () => {
+            eventSource.close();
+            progressDiv.classList.add("hidden");
+            statusEl.textContent = "Connection lost";
+            btn.disabled = false;
+          };
+        } catch (err) {
+          progressDiv.classList.add("hidden");
+          statusEl.textContent = "Discovery failed";
+          loadingEl.textContent = "Error starting discovery cycle";
+          loadingEl.classList.remove("hidden");
+          btn.disabled = false;
+        }
       });
 
-      saveFundsBtn.textContent = "Save";
-      fundsStatus?.classList.remove("hidden");
-      setTimeout(() => fundsStatus?.classList.add("hidden"), 3000);
-    } catch (err) {
-      console.error("Failed to save settings:", err);
-      saveFundsBtn.textContent = "Error";
-    } finally {
-      (saveFundsBtn as HTMLButtonElement).disabled = false;
-    }
-  });
+    // Load existing suggestions on page load
+    loadSuggestions();
 
-  // Import form handler
-  document
-    .getElementById("import-form")
-    ?.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const form = e.target as HTMLFormElement;
-      const formData = new FormData(form);
-      const statusEl = document.getElementById("import-status")!;
-      const statusDiv = statusEl.querySelector("div")!;
+    // Import form handler
+    document
+      .getElementById("import-form")
+      ?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const form = e.target as HTMLFormElement;
+        const formData = new FormData(form);
+        const statusEl = document.getElementById("import-status")!;
+        const statusDiv = statusEl.querySelector("div")!;
 
-      statusEl.classList.remove("hidden");
-      statusDiv.className =
-        "p-4 rounded-lg bg-blue/10 border border-blue/30 text-blue";
-      statusDiv.textContent = "Importing...";
-
-      try {
-        const response = await fetch("/api/import-transactions", {
-          method: "POST",
-          body: formData,
-        });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-          throw new Error(result.error || "Import failed");
-        }
-
+        statusEl.classList.remove("hidden");
         statusDiv.className =
-          "p-4 rounded-lg bg-green/10 border border-green/30 text-green";
-        statusDiv.innerHTML = `
+          "p-4 rounded-lg bg-blue/10 border border-blue/30 text-blue";
+        statusDiv.textContent = "Importing...";
+
+        try {
+          const response = await fetch("/api/import-transactions", {
+            method: "POST",
+            body: formData,
+          });
+
+          const result = await response.json();
+
+          if (!response.ok) {
+            throw new Error(result.error || "Import failed");
+          }
+
+          statusDiv.className =
+            "p-4 rounded-lg bg-green/10 border border-green/30 text-green";
+          statusDiv.innerHTML = `
         <strong>Success!</strong><br>
         Imported ${result.transactionsImported} transactions<br>
         ${result.adjustmentsCreated > 0 ? `Created ${result.adjustmentsCreated} opening balance adjustments` : ""}
       `;
 
-        // Reload holdings after import
-        loadHoldings();
-      } catch (err) {
-        statusDiv.className =
-          "p-4 rounded-lg bg-red/10 border border-red/30 text-red";
-        statusDiv.textContent =
-          err instanceof Error ? err.message : "Import failed";
+          // Reload holdings after import
+          loadHoldings();
+        } catch (err) {
+          statusDiv.className =
+            "p-4 rounded-lg bg-red/10 border border-red/30 text-red";
+          statusDiv.textContent =
+            err instanceof Error ? err.message : "Import failed";
+        }
+      });
+
+    // Store session in cookies on auth state change
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=3600`;
+        document.cookie = `sb-refresh-token=${session.refresh_token}; path=/; max-age=604800`;
       }
     });
-
-  // Store session in cookies on auth state change
-  supabase.auth.onAuthStateChange((event, session) => {
-    if (session) {
-      document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=3600`;
-      document.cookie = `sb-refresh-token=${session.refresh_token}; path=/; max-age=604800`;
-    }
-  });
-</script>
+  </script>
+</Layout>

@@ -1,0 +1,310 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { createClient } from "@supabase/supabase-js";
+import {
+  PUBLIC_SUPABASE_URL,
+  PUBLIC_SUPABASE_ANON_KEY,
+} from "astro:env/client";
+
+const supabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY);
+
+const accessToken = Astro.cookies.get("sb-access-token");
+const refreshToken = Astro.cookies.get("sb-refresh-token");
+
+if (!accessToken || !refreshToken) {
+  return Astro.redirect("/login");
+}
+
+const {
+  data: { session },
+} = await supabase.auth.setSession({
+  access_token: accessToken.value!,
+  refresh_token: refreshToken.value!,
+});
+
+if (!session) {
+  return Astro.redirect("/login");
+}
+
+const email = session.user.email;
+---
+
+<Layout title="Settings | Investor AI">
+  <main class="min-h-screen bg-base p-6 md:p-12">
+    <div class="max-w-4xl mx-auto space-y-8">
+      <!-- Header -->
+      <header class="flex justify-between items-center">
+        <div>
+          <h1 class="text-3xl font-bold text-text mb-2">Settings</h1>
+          <p class="text-subtext0">
+            Manage your investment profile and integrations
+          </p>
+        </div>
+        <a
+          href="/dashboard"
+          class="px-4 py-2 bg-surface1 hover:bg-surface2 text-text rounded-lg transition-colors"
+        >
+          ← Back to Dashboard
+        </a>
+      </header>
+
+      <!-- Settings Form -->
+      <div class="space-y-6">
+        <!-- Investment Profile -->
+        <section class="bg-surface0 border border-surface1 rounded-2xl p-6">
+          <h2 class="text-xl font-semibold text-lavender mb-4">
+            Investment Profile
+          </h2>
+          <div class="space-y-4 max-w-md">
+            <div>
+              <label class="block text-sm text-subtext0 mb-2"
+                >Available Funds for Investment</label
+              >
+              <div class="relative">
+                <span class="absolute left-3 top-2 text-subtext0">₹</span>
+                <input
+                  type="number"
+                  id="available-funds"
+                  class="w-full bg-surface1 border border-surface1 rounded-lg py-2 pl-7 pr-3 text-text focus:outline-none focus:border-mauve transition-colors"
+                  placeholder="0"
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Integrations -->
+        <section class="bg-surface0 border border-surface1 rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <h2 class="text-xl font-semibold text-peach">Integrations</h2>
+            <span class="px-2 py-0.5 bg-surface1 text-xs rounded text-subtext0"
+              >Secure</span
+            >
+          </div>
+
+          <!-- Screener.in -->
+          <div class="space-y-6">
+            <div
+              class="flex items-start gap-4 p-4 bg-surface1/30 rounded-xl border border-surface1/50"
+            >
+              <div
+                class="w-10 h-10 rounded-lg bg-blue/10 flex items-center justify-center text-blue text-xl"
+              >
+                S
+              </div>
+              <div class="flex-1">
+                <h3 class="font-medium text-text">Screener.in Automation</h3>
+                <p class="text-sm text-subtext0 mt-1">
+                  Connect your account to automatically import screens daily via
+                  secure headless browser. Credentials are encrypted and stored
+                  securely.
+                </p>
+
+                <!-- Credentials -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <label class="block text-xs text-subtext0 mb-1">Email</label
+                    >
+                    <input
+                      type="email"
+                      id="screener-email"
+                      class="w-full bg-surface1 border border-surface1 rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-mauve"
+                      placeholder="your@email.com"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-subtext0 mb-1"
+                      >Password</label
+                    >
+                    <input
+                      type="password"
+                      id="screener-password"
+                      class="w-full bg-surface1 border border-surface1 rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-mauve"
+                      placeholder="••••••••"
+                    />
+                    <p
+                      id="password-status"
+                      class="text-xs text-green mt-1 hidden"
+                    >
+                      Password set ✓
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Screen URLs -->
+                <div class="mt-4">
+                  <label class="block text-xs text-subtext0 mb-1"
+                    >Screen URLs to Monitor</label
+                  >
+                  <div id="urls-container" class="space-y-2">
+                    <!-- URL inputs will be added here -->
+                    <div class="flex gap-2">
+                      <input
+                        type="url"
+                        class="screener-url w-full bg-surface1 border border-surface1 rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-mauve"
+                        placeholder="https://www.screener.in/screens/..."
+                      />
+                      <button
+                        class="remove-url px-2 text-red hover:bg-red/10 rounded hidden"
+                        >×</button
+                      >
+                    </div>
+                  </div>
+                  <button
+                    id="add-url-btn"
+                    class="mt-2 text-xs text-mauve hover:text-mauve/80 font-medium"
+                  >
+                    + Add another URL
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Save Actions -->
+        <div
+          class="flex items-center justify-end gap-3 pt-4 border-t border-surface1"
+        >
+          <span id="save-status" class="text-sm"></span>
+          <button
+            id="save-settings-btn"
+            class="px-6 py-2.5 bg-mauve hover:bg-mauve/90 text-crust font-medium rounded-xl transition-colors shadow-lg shadow-mauve/20"
+          >
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+</Layout>
+
+<script>
+  // Elements
+  const fundsInput = document.getElementById(
+    "available-funds"
+  ) as HTMLInputElement;
+  const screenerEmailInput = document.getElementById(
+    "screener-email"
+  ) as HTMLInputElement;
+  const screenerPasswordInput = document.getElementById(
+    "screener-password"
+  ) as HTMLInputElement;
+  const passwordStatus = document.getElementById("password-status");
+  const urlsContainer = document.getElementById("urls-container");
+  const addUrlBtn = document.getElementById("add-url-btn");
+  const saveBtn = document.getElementById(
+    "save-settings-btn"
+  ) as HTMLButtonElement;
+  const statusEl = document.getElementById("save-status");
+
+  // Load Settings
+  async function loadSettings() {
+    try {
+      const res = await fetch("/api/settings");
+      const { settings } = await res.json();
+
+      if (settings) {
+        if (settings.available_funds)
+          fundsInput.value = settings.available_funds;
+        if (settings.screener_email)
+          screenerEmailInput.value = settings.screener_email;
+        if (settings.has_screener_password) {
+          screenerPasswordInput.placeholder =
+            "Encrypted & Saved (Enter to update)";
+          passwordStatus?.classList.remove("hidden");
+        }
+
+        // Populate URLs
+        if (settings.screener_urls && settings.screener_urls.length > 0) {
+          // Clear default
+          urlsContainer!.innerHTML = "";
+          settings.screener_urls.forEach((url: string) => addUrlRow(url));
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load settings:", err);
+    }
+  }
+
+  function addUrlRow(value = "") {
+    const div = document.createElement("div");
+    div.className = "flex gap-2";
+    div.innerHTML = `
+      <input
+        type="url"
+        class="screener-url w-full bg-surface1 border border-surface1 rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-mauve"
+        placeholder="https://www.screener.in/screens/..."
+        value="${value}"
+      />
+      <button class="remove-url px-2 text-red hover:bg-red/10 rounded">×</button>
+    `;
+    urlsContainer?.appendChild(div);
+
+    // Add remove handler
+    div.querySelector(".remove-url")?.addEventListener("click", () => {
+      div.remove();
+    });
+  }
+
+  // Event Listeners
+  addUrlBtn?.addEventListener("click", () => addUrlRow());
+
+  saveBtn?.addEventListener("click", async () => {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving...";
+    statusEl!.textContent = "";
+
+    // Gather URLS
+    const urlInputs = document.querySelectorAll(
+      ".screener-url"
+    ) as NodeListOf<HTMLInputElement>;
+    const urls = Array.from(urlInputs)
+      .map((input) => input.value.trim())
+      .filter((url) => url.length > 0);
+
+    const payload: any = {
+      available_funds: parseFloat(fundsInput.value) || 0,
+      screener_email: screenerEmailInput.value,
+      screener_urls: urls,
+    };
+
+    if (screenerPasswordInput.value) {
+      payload.screener_password = screenerPasswordInput.value;
+    }
+
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        statusEl!.className = "text-sm text-green mr-2";
+        statusEl!.textContent = "Settings saved successfully ✓";
+
+        if (payload.screener_password) {
+          screenerPasswordInput.value = "";
+          screenerPasswordInput.placeholder =
+            "Encrypted & Saved (Enter to update)";
+          passwordStatus?.classList.remove("hidden");
+        }
+        setTimeout(() => {
+          statusEl!.textContent = "";
+        }, 3000);
+      } else {
+        throw new Error("Failed to save");
+      }
+    } catch (err) {
+      statusEl!.className = "text-sm text-red mr-2";
+      statusEl!.textContent = "Failed to save settings";
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save Changes";
+    }
+  });
+
+  // Initial load
+  loadSettings();
+</script>

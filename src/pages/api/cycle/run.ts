@@ -6,7 +6,7 @@
 
 import type { APIRoute } from "astro";
 import { createClient } from "@supabase/supabase-js";
-import { analyzePortfolio, type HoldingForAnalysis } from "../../../lib/gemini";
+import { GeminiService, type HoldingForAnalysis } from "../../../lib/gemini";
 
 export const POST: APIRoute = async ({ cookies }) => {
   try {
@@ -128,7 +128,7 @@ export const POST: APIRoute = async ({ cookies }) => {
       });
 
       // Run Gemini analysis
-      const suggestions = await analyzePortfolio(holdings);
+      const suggestions = await GeminiService.analyzePortfolio(holdings);
 
       // Store suggestions
       const suggestionRecords = suggestions.map((s) => ({
@@ -141,6 +141,11 @@ export const POST: APIRoute = async ({ cookies }) => {
         technical_score: s.technical_score,
         current_price: holdings.find((h) => h.symbol === s.symbol)
           ?.current_price,
+        // New fields for BUY/SELL/MOVE actions
+        quantity: s.quantity,
+        allocation_amount: s.allocation_amount,
+        sell_symbol: s.sell_symbol,
+        sell_quantity: s.sell_quantity,
       }));
 
       const { error: insertError } = await supabaseAdmin
