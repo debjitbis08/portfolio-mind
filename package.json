@@ -3,12 +3,29 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
-    "dev": "astro dev",
+    "dev": "astro dev --port 4328",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "supabase": "./scripts/sb.sh"
   },
   "dependencies": {
-    "astro": "^5.16.6"
+    "@astrojs/node": "^9.5.1",
+    "@astrojs/solid-js": "^5.1.3",
+    "@catppuccin/tailwindcss": "^1.0.0",
+    "@supabase/supabase-js": "^2.89.0",
+    "@tailwindcss/vite": "^4.1.18",
+    "astro": "^5.16.6",
+    "solid-js": "^1.9.10",
+    "tailwindcss": "^4.1.18",
+    "trading-signals": "^7.4.2",
+    "xlsx": "^0.18.5",
+    "yahoo-finance2": "^3.11.2"
+  },
+  "devDependencies": {
+    "supabase": "^2.70.5"
+  },
+  "volta": {
+    "node": "22.21.1"
   }
 }

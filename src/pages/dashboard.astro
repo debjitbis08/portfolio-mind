@@ -1,0 +1,424 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { createClient } from "@supabase/supabase-js";
+
+// Check auth on server side
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Get session from cookies
+const accessToken = Astro.cookies.get("sb-access-token")?.value;
+const refreshToken = Astro.cookies.get("sb-refresh-token")?.value;
+
+let user = null;
+if (accessToken && refreshToken) {
+  const { data } = await supabase.auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+  user = data.session?.user;
+}
+
+// Redirect if not logged in
+if (!user) {
+  return Astro.redirect("/login");
+}
+---
+
+<Layout title="Dashboard - Investor AI">
+  <div class="min-h-screen p-4 md:p-8">
+    <!-- Header -->
+    <header class="max-w-6xl mx-auto flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-mauve">Investor AI</h1>
+        <p class="text-sm text-subtext0">{user.email}</p>
+      </div>
+      <div class="flex gap-2">
+        <button
+          id="refresh-btn"
+          class="px-4 py-2 bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
+        >
+          Refresh
+        </button>
+        <button
+          id="logout-btn"
+          class="px-4 py-2 bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
+        >
+          Logout
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-6xl mx-auto space-y-6">
+      <!-- Summary Card -->
+      <section
+        id="summary-card"
+        class="bg-surface0 border border-surface1 rounded-2xl p-6"
+      >
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg text-subtext0">
+            Holdings <span id="holdings-count" class="text-text">(0)</span>
+          </h2>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div>
+            <p class="text-sm text-subtext0">Current value</p>
+            <p id="current-value" class="text-3xl font-bold text-text">₹0</p>
+          </div>
+          <div>
+            <p class="text-sm text-subtext0">Invested value</p>
+            <p id="invested-value" class="text-xl text-subtext1">₹0</p>
+          </div>
+          <div>
+            <p class="text-sm text-subtext0">Total returns</p>
+            <p id="total-returns" class="text-xl font-semibold text-green">
+              ₹0 (0%)
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Holdings Table -->
+      <section
+        class="bg-surface0 border border-surface1 rounded-2xl overflow-hidden"
+      >
+        <div class="p-4 border-b border-surface1 flex gap-2">
+          <button
+            id="refresh-tech-btn"
+            class="px-3 py-1 text-sm bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
+          >
+            ⚡ Refresh Technical Data
+          </button>
+          <span id="tech-status" class="text-sm text-subtext0 self-center"
+          ></span>
+        </div>
+        <div id="holdings-loading" class="p-6 text-center text-subtext0">
+          Loading holdings...
+        </div>
+        <table id="holdings-table" class="w-full hidden">
+          <thead class="border-b border-surface1">
+            <tr class="text-left text-sm text-subtext0">
+              <th class="p-4">Company</th>
+              <th class="p-4 text-center">Technical</th>
+              <th class="p-4 text-right">Market price</th>
+              <th class="p-4 text-right">Returns (%)</th>
+              <th class="p-4 text-right">Current (Invested)</th>
+            </tr>
+          </thead>
+          <tbody id="holdings-body" class="divide-y divide-surface1"> </tbody>
+        </table>
+      </section>
+
+      <!-- Import Section (Collapsed) -->
+      <details class="bg-surface0 border border-surface1 rounded-2xl">
+        <summary
+          class="p-6 cursor-pointer text-subtext1 hover:text-text transition-colors"
+        >
+          Import Transactions
+        </summary>
+        <div class="px-6 pb-6">
+          <p class="text-subtext0 text-sm mb-4">
+            Upload your Groww Order History and Holdings Statement to sync your
+            portfolio.
+          </p>
+
+          <form id="import-form" class="space-y-4">
+            <input type="hidden" name="userId" value={user.id} />
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-subtext1 mb-1">
+                  Order History (Required)
+                </label>
+                <input
+                  type="file"
+                  name="orderHistory"
+                  accept=".xlsx"
+                  required
+                  class="w-full px-4 py-2 bg-surface1 border border-surface2 rounded-lg text-text file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-mauve file:text-crust file:font-medium file:cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-subtext1 mb-1">
+                  Holdings Statement (Optional)
+                </label>
+                <input
+                  type="file"
+                  name="holdings"
+                  accept=".xlsx"
+                  class="w-full px-4 py-2 bg-surface1 border border-surface2 rounded-lg text-text file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-surface2 file:text-subtext1 file:font-medium file:cursor-pointer"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              class="px-6 py-2 bg-mauve hover:bg-mauve/90 text-crust font-medium rounded-lg transition-colors"
+            >
+              Import Transactions
+            </button>
+          </form>
+
+          <div id="import-status" class="mt-4 hidden">
+            <div class="p-4 rounded-lg"></div>
+          </div>
+        </div>
+      </details>
+    </main>
+  </div>
+</Layout>
+
+<script>
+  import { supabase } from "../lib/supabase";
+
+  // Format currency
+  function formatCurrency(value: number): string {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(value);
+  }
+
+  // Format decimal currency
+  function formatCurrencyDecimal(value: number): string {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  }
+
+  // Load holdings data
+  async function loadHoldings() {
+    const loadingEl = document.getElementById("holdings-loading")!;
+    const tableEl = document.getElementById("holdings-table")!;
+    const bodyEl = document.getElementById("holdings-body")!;
+
+    loadingEl.classList.remove("hidden");
+    tableEl.classList.add("hidden");
+
+    try {
+      const response = await fetch("/api/holdings");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load holdings");
+      }
+
+      // Update summary
+      if (data.summary) {
+        document.getElementById("holdings-count")!.textContent =
+          `(${data.summary.holdings_count})`;
+        document.getElementById("current-value")!.textContent = formatCurrency(
+          data.summary.current_value
+        );
+        document.getElementById("invested-value")!.textContent = formatCurrency(
+          data.summary.invested_value
+        );
+
+        const returnsEl = document.getElementById("total-returns")!;
+        const isPositive = data.summary.total_returns >= 0;
+        returnsEl.textContent = `${isPositive ? "+" : ""}${formatCurrency(data.summary.total_returns)} (${data.summary.total_returns_percent.toFixed(2)}%)`;
+        returnsEl.className = `text-xl font-semibold ${isPositive ? "text-green" : "text-red"}`;
+      }
+
+      // Update table
+      if (data.holdings && data.holdings.length > 0) {
+        bodyEl.innerHTML = data.holdings
+          .map((h: any) => {
+            const isPositive = h.returns >= 0;
+
+            // Build technical badges
+            let techBadges = "";
+
+            // RSI badge
+            if (h.rsi_14 !== null) {
+              const rsiColor =
+                h.rsi_14 > 70
+                  ? "bg-red/20 text-red"
+                  : h.rsi_14 < 30
+                    ? "bg-green/20 text-green"
+                    : "bg-surface2 text-subtext0";
+              techBadges += `<span class="px-2 py-0.5 text-xs rounded ${rsiColor}">RSI ${h.rsi_14.toFixed(0)}</span>`;
+            }
+
+            // SMA50 badge - show % above/below
+            if (h.price_vs_sma50 !== null) {
+              const isAbove = h.price_vs_sma50 >= 0;
+              const sma50Color =
+                h.price_vs_sma50 > 20
+                  ? "text-red"
+                  : h.price_vs_sma50 < -10
+                    ? "text-yellow"
+                    : isAbove
+                      ? "text-green"
+                      : "text-subtext0";
+              techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-surface2 ${sma50Color}">${isAbove ? "+" : ""}${h.price_vs_sma50.toFixed(0)}% 50D</span>`;
+            }
+
+            // SMA200 badge - show % above/below
+            if (h.price_vs_sma200 !== null) {
+              const isAbove = h.price_vs_sma200 >= 0;
+              const sma200Color =
+                h.price_vs_sma200 > 40
+                  ? "text-red"
+                  : h.price_vs_sma200 < 0
+                    ? "text-yellow"
+                    : "text-green";
+              techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-surface2 ${sma200Color}">${isAbove ? "+" : ""}${h.price_vs_sma200.toFixed(0)}% 200D</span>`;
+            }
+
+            // Wait zone badge
+            if (h.is_wait_zone) {
+              techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-yellow/20 text-yellow">⚠️ Wait</span>`;
+            }
+
+            if (!h.rsi_14 && !h.price_vs_sma50 && !h.is_wait_zone) {
+              techBadges = '<span class="text-xs text-subtext0">—</span>';
+            }
+
+            return `
+            <tr class="hover:bg-surface1/50 transition-colors">
+              <td class="p-4">
+                <div class="font-medium text-text">${h.stock_name}</div>
+                <div class="text-sm text-subtext0">${h.quantity} shares • Avg. ${formatCurrencyDecimal(h.avg_buy_price)}</div>
+              </td>
+              <td class="p-4 text-center">
+                <div class="flex flex-wrap gap-1 justify-center">${techBadges}</div>
+                ${h.wait_reasons?.length > 0 ? `<div class="text-xs text-subtext0 mt-1">${h.wait_reasons.join(", ")}</div>` : ""}
+              </td>
+              <td class="p-4 text-right">
+                <div class="text-text">${formatCurrencyDecimal(h.current_price)}</div>
+              </td>
+              <td class="p-4 text-right">
+                <div class="${isPositive ? "text-green" : "text-red"}">${isPositive ? "+" : ""}${formatCurrency(h.returns)}</div>
+                <div class="text-sm ${isPositive ? "text-green" : "text-red"}">${h.returns_percent.toFixed(2)}%</div>
+              </td>
+              <td class="p-4 text-right">
+                <div class="text-text font-medium">${formatCurrency(h.current_value)}</div>
+                <div class="text-sm text-subtext0">${formatCurrency(h.invested_value)}</div>
+              </td>
+            </tr>
+          `;
+          })
+          .join("");
+
+        loadingEl.classList.add("hidden");
+        tableEl.classList.remove("hidden");
+      } else {
+        loadingEl.textContent =
+          "No holdings found. Import your transactions above.";
+      }
+    } catch (err) {
+      loadingEl.textContent =
+        err instanceof Error ? err.message : "Failed to load holdings";
+    }
+  }
+
+  // Initial load
+  loadHoldings();
+
+  // Refresh button
+  document
+    .getElementById("refresh-btn")
+    ?.addEventListener("click", loadHoldings);
+
+  // Refresh technical data button
+  document
+    .getElementById("refresh-tech-btn")
+    ?.addEventListener("click", async () => {
+      const statusEl = document.getElementById("tech-status")!;
+      const btn = document.getElementById(
+        "refresh-tech-btn"
+      ) as HTMLButtonElement;
+
+      btn.disabled = true;
+      statusEl.textContent = "Calculating RSI & SMA...";
+
+      try {
+        const response = await fetch("/api/technical", { method: "POST" });
+        const data = await response.json();
+
+        if (data.success) {
+          statusEl.textContent = `✓ Updated ${data.updated} stocks`;
+          setTimeout(() => {
+            statusEl.textContent = "";
+          }, 3000);
+          // Reload holdings to show new badges
+          loadHoldings();
+        } else {
+          statusEl.textContent = `Error: ${data.error}`;
+        }
+      } catch (err) {
+        statusEl.textContent = "Failed to refresh";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+  // Logout handler
+  document.getElementById("logout-btn")?.addEventListener("click", async () => {
+    await supabase.auth.signOut();
+    document.cookie = "sb-access-token=; Max-Age=0; path=/";
+    document.cookie = "sb-refresh-token=; Max-Age=0; path=/";
+    window.location.href = "/login";
+  });
+
+  // Import form handler
+  document
+    .getElementById("import-form")
+    ?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const form = e.target as HTMLFormElement;
+      const formData = new FormData(form);
+      const statusEl = document.getElementById("import-status")!;
+      const statusDiv = statusEl.querySelector("div")!;
+
+      statusEl.classList.remove("hidden");
+      statusDiv.className =
+        "p-4 rounded-lg bg-blue/10 border border-blue/30 text-blue";
+      statusDiv.textContent = "Importing...";
+
+      try {
+        const response = await fetch("/api/import-transactions", {
+          method: "POST",
+          body: formData,
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || "Import failed");
+        }
+
+        statusDiv.className =
+          "p-4 rounded-lg bg-green/10 border border-green/30 text-green";
+        statusDiv.innerHTML = `
+        <strong>Success!</strong><br>
+        Imported ${result.transactionsImported} transactions<br>
+        ${result.adjustmentsCreated > 0 ? `Created ${result.adjustmentsCreated} opening balance adjustments` : ""}
+      `;
+
+        // Reload holdings after import
+        loadHoldings();
+      } catch (err) {
+        statusDiv.className =
+          "p-4 rounded-lg bg-red/10 border border-red/30 text-red";
+        statusDiv.textContent =
+          err instanceof Error ? err.message : "Import failed";
+      }
+    });
+
+  // Store session in cookies on auth state change
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (session) {
+      document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=3600`;
+      document.cookie = `sb-refresh-token=${session.refresh_token}; path=/; max-age=604800`;
+    }
+  });
+</script>

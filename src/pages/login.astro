@@ -1,0 +1,19 @@
+---
+import Layout from "../layouts/Layout.astro";
+import AuthForm from "../components/AuthForm";
+---
+
+<Layout title="Login - Investor AI">
+  <div class="min-h-screen flex flex-col items-center justify-center p-8">
+    <div class="mb-8 text-center">
+      <h1
+        class="text-4xl font-bold bg-gradient-to-r from-mauve via-blue to-teal bg-clip-text text-transparent mb-2"
+      >
+        Investor AI
+      </h1>
+      <p class="text-subtext0">Skeptical Portfolio Co-Pilot</p>
+    </div>
+
+    <AuthForm client:load />
+  </div>
+</Layout>
