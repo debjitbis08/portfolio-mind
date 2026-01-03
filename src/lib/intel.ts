@@ -1,13 +1,15 @@
-import yahooFinance from "yahoo-finance2";
-import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_SERVICE_ROLE_KEY } from "astro:env/server";
-import { PUBLIC_SUPABASE_URL } from "astro:env/client";
+/**
+ * Intel Service
+ *
+ * Fetches and stores fundamental data and research intel for stocks.
+ */
 
-// Initialize admin client for background jobs
-const supabaseAdmin = createClient(
-  PUBLIC_SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY
-);
+import YahooFinance from "yahoo-finance2";
+import { db, schema } from "./db";
+import { eq } from "drizzle-orm";
+
+// Initialize Yahoo Finance client
+const yahooFinance = new YahooFinance();
 
 export interface StockFundamentals {
   peRatio?: number;
@@ -29,20 +31,33 @@ export class IntelService {
 
     for (const symbol of symbols) {
       try {
-        // Yahoo Finance for Indian stocks often needs the suffix (which we have)
-        // But the ID might need to be pure for some queries.
-        // We assume symbols passed are like 'RELIANCE.NS'
+        // Try NSE first, then BSE
+        let yahooSymbol = `${symbol}.NS`;
+        let quote: any = null;
 
-        const quote = (await yahooFinance.quoteSummary(symbol, {
-          modules: [
-            "summaryDetail",
-            "defaultKeyStatistics",
-            "defaultKeyStatistics",
-            "financialData",
-            "assetProfile",
-            "price",
-          ],
-        })) as any;
+        try {
+          quote = await yahooFinance.quoteSummary(yahooSymbol, {
+            modules: [
+              "summaryDetail",
+              "defaultKeyStatistics",
+              "financialData",
+              "assetProfile",
+              "price",
+            ],
+          });
+        } catch {
+          // Try BSE
+          yahooSymbol = `${symbol}.BO`;
+          quote = await yahooFinance.quoteSummary(yahooSymbol, {
+            modules: [
+              "summaryDetail",
+              "defaultKeyStatistics",
+              "financialData",
+              "assetProfile",
+              "price",
+            ],
+          });
+        }
 
         const fundamentals: StockFundamentals = {
           peRatio: quote.summaryDetail?.trailingPE,
@@ -57,7 +72,6 @@ export class IntelService {
         // Qualitative Intel (ValuePickr Query by Name)
         let socialSentiment = null;
         try {
-          // Extract and clean name: "Tata Consultancy Services Limited" -> "Tata Consultancy Services"
           const rawName =
             quote.price?.longName || quote.price?.shortName || symbol;
           const cleanName = rawName
@@ -71,25 +85,28 @@ export class IntelService {
         }
 
         // Upsert to DB
-        const payload: any = {
-          symbol,
-          fundamentals,
-          updated_at: new Date().toISOString(),
-        };
+        await db
+          .insert(schema.stockIntel)
+          .values({
+            symbol,
+            fundamentals: JSON.stringify(fundamentals),
+            socialSentiment: socialSentiment
+              ? JSON.stringify(socialSentiment)
+              : null,
+            updatedAt: new Date().toISOString(),
+          })
+          .onConflictDoUpdate({
+            target: schema.stockIntel.symbol,
+            set: {
+              fundamentals: JSON.stringify(fundamentals),
+              socialSentiment: socialSentiment
+                ? JSON.stringify(socialSentiment)
+                : null,
+              updatedAt: new Date().toISOString(),
+            },
+          });
 
-        if (socialSentiment) {
-          payload.social_sentiment = socialSentiment;
-        }
-
-        const { error } = await supabaseAdmin
-          .from("stock_intel")
-          .upsert(payload);
-
-        if (error) {
-          console.error(`Failed to update ${symbol}:`, error);
-        } else {
-          updates.push(symbol);
-        }
+        updates.push(symbol);
 
         // Rate limiting
         await new Promise((r) => setTimeout(r, 1000));

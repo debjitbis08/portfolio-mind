@@ -1,23 +1,12 @@
 ---
 // Redirect to login (or dashboard if already logged in)
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
-const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { validateSession } from "../lib/auth";
 
 // Check if user has a session
-const accessToken = Astro.cookies.get("sb-access-token")?.value;
-const refreshToken = Astro.cookies.get("sb-refresh-token")?.value;
+const session = await validateSession(Astro.request);
 
-if (accessToken && refreshToken) {
-  const { data } = await supabase.auth.setSession({
-    access_token: accessToken,
-    refresh_token: refreshToken,
-  });
-  if (data.session?.user) {
-    return Astro.redirect("/dashboard");
-  }
+if (session) {
+  return Astro.redirect("/dashboard");
 }
 
 return Astro.redirect("/login");

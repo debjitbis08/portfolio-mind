@@ -1,110 +1,272 @@
-import puppeteer from "puppeteer";
-import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_SERVICE_ROLE_KEY } from "astro:env/server";
-import { PUBLIC_SUPABASE_URL } from "astro:env/client";
+/**
+ * Screener.in Scraper Service
+ *
+ * Scrapes stocks from screener.in screens using puppeteer.
+ */
 
-const supabaseAdmin = createClient(
-  PUBLIC_SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY
-);
+import puppeteer, { type Browser, type Page } from "puppeteer";
+import { db, schema } from "../db";
+import { eq } from "drizzle-orm";
+import * as path from "path";
 
 interface ScreenerConfig {
   email: string;
   password?: string;
-  screenUrl: string;
+  screenUrls: string[];
+}
+
+interface ImportResult {
+  url: string;
+  symbols: string[];
+  error?: string;
+}
+
+// Helper to add random delay (bot detection mitigation)
+function randomDelay(min: number, max: number): Promise<void> {
+  const delay = Math.floor(Math.random() * (max - min + 1)) + min;
+  return new Promise((resolve) => setTimeout(resolve, delay));
 }
 
 export class ScreenerService {
   /**
-   * Scrape a private screen from Screener.in using user credentials
-   * Credentials are used only for this session and not stored.
+   * Scrape multiple screens from Screener.in in a single session
    */
-  static async importScreen(
-    userId: string,
+  static async importScreens(
+    _userId: string, // Unused in single-user mode
     config: ScreenerConfig
-  ): Promise<string[]> {
-    console.log(`Starting Screener import for ${config.email}...`);
+  ): Promise<{ results: ImportResult[]; totalSymbols: number }> {
+    console.log(`[Screener] Starting import for ${config.email}...`);
+    console.log(`[Screener] URLs to process: ${config.screenUrls.length}`);
 
     const browser = await puppeteer.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--disable-gpu",
+      ],
     });
+
+    const results: ImportResult[] = [];
+    let allSymbols: string[] = [];
 
     try {
       const page = await browser.newPage();
 
-      // 1. Login
-      await page.goto("https://www.screener.in/login/", {
-        waitUntil: "networkidle0",
-      });
+      await page.setUserAgent(
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      );
+      await page.setViewport({ width: 1280, height: 800 });
+      page.setDefaultTimeout(60000);
 
-      await page.type('input[name="username"]', config.email);
-      if (config.password) {
-        await page.type('input[name="password"]', config.password);
-      }
-
-      await Promise.all([
-        page.click('button[type="submit"]'),
-        page.waitForNavigation({ waitUntil: "networkidle0" }),
-      ]);
-
-      // Check for login failure
-      if (page.url().includes("/login/")) {
+      // Step 1: Login
+      const loginSuccess = await this.login(
+        page,
+        config.email,
+        config.password
+      );
+      if (!loginSuccess) {
         throw new Error("Login failed. Please check your credentials.");
       }
 
-      // 2. Navigate to Screen
-      console.log(`Navigating to screen: ${config.screenUrl}`);
-      await page.goto(config.screenUrl, { waitUntil: "networkidle2" });
+      console.log("[Screener] Login successful!");
+      await randomDelay(1000, 2000);
 
-      // 3. Extract Symbols
-      // Screener tables usually have stock links like /company/RELIANCE/
-      const symbols = await page.evaluate(() => {
-        const links = Array.from(
-          document.querySelectorAll(
-            'table.data-table tbody tr td a[href^="/company/"]'
-          )
+      // Step 2: Visit each screen URL
+      for (const url of config.screenUrls) {
+        console.log(`[Screener] Processing: ${url}`);
+        try {
+          const symbols = await this.extractSymbolsFromScreen(page, url);
+          results.push({ url, symbols });
+          allSymbols = [...allSymbols, ...symbols];
+          console.log(`[Screener] Found ${symbols.length} symbols from ${url}`);
+        } catch (error) {
+          const errorMsg =
+            error instanceof Error ? error.message : "Unknown error";
+          console.error(`[Screener] Error on ${url}:`, errorMsg);
+          results.push({ url, symbols: [], error: errorMsg });
+        }
+        await randomDelay(2000, 4000);
+      }
+
+      // Step 3: Save all symbols to watchlist
+      if (allSymbols.length > 0) {
+        const uniqueSymbols = [...new Set(allSymbols)];
+
+        for (const symbol of uniqueSymbols) {
+          await db
+            .insert(schema.watchlist)
+            .values({
+              symbol: symbol.toUpperCase(),
+              source: "screener",
+              notes: "Imported from Screener.in",
+            })
+            .onConflictDoUpdate({
+              target: schema.watchlist.symbol,
+              set: {
+                source: "screener",
+                notes: "Imported from Screener.in",
+                addedAt: new Date().toISOString(),
+              },
+            });
+        }
+
+        console.log(
+          `[Screener] Saved ${uniqueSymbols.length} unique symbols to watchlist`
         );
-        return links
-          .map((link) => {
-            const href = link.getAttribute("href") || "";
-            // extract symbol from /company/SYMBOL/ or /company/SYMBOL/consolidated/
-            const parts = href.split("/");
-            return parts[2];
-          })
-          .filter((s) => s);
-      });
-
-      console.log(`Found ${symbols.length} symbols:`, symbols);
-
-      if (symbols.length === 0) {
-        throw new Error("No symbols found on this screen.");
       }
 
-      // 4. Store in Watchlist
-      const records = symbols.map((symbol) => ({
-        user_id: userId,
-        symbol: symbol.toUpperCase(),
-        source: "screener",
-        notes: `Imported from ${config.screenUrl}`,
-      }));
-
-      // Use upsert to avoid duplicates
-      const { error } = await supabaseAdmin
-        .from("watchlist")
-        .upsert(records, { onConflict: "symbol" });
-
-      if (error) {
-        console.error("Database error:", error);
-        throw new Error("Failed to save to watchlist");
-      }
-
-      return symbols;
+      return { results, totalSymbols: [...new Set(allSymbols)].length };
     } catch (error) {
-      console.error("Screener Import Error:", error);
+      console.error("[Screener] Import Error:", error);
+      await this.saveDebugScreenshot(browser);
       throw error;
     } finally {
       await browser.close();
     }
+  }
+
+  /**
+   * Login to Screener.in
+   */
+  private static async login(
+    page: Page,
+    email: string,
+    password?: string
+  ): Promise<boolean> {
+    console.log("[Screener] Loading login page...");
+
+    await page.goto("https://www.screener.in/login/", {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
+
+    await page.waitForSelector('input[name="username"]', { timeout: 30000 });
+    await randomDelay(500, 1000);
+
+    console.log("[Screener] Entering credentials...");
+    await page.type('input[name="username"]', email, { delay: 80 });
+    await randomDelay(300, 600);
+
+    if (password) {
+      await page.type('input[name="password"]', password, { delay: 80 });
+    }
+    await randomDelay(500, 1000);
+
+    console.log("[Screener] Submitting login...");
+    await page.click('button[type="submit"]');
+    await randomDelay(3000, 5000);
+
+    const currentUrl = page.url();
+    console.log("[Screener] Current URL after login:", currentUrl);
+
+    const errorMessage = await page.evaluate(() => {
+      const errorEl = document.querySelector(
+        ".errorlist, .error, .alert-danger"
+      );
+      return errorEl?.textContent?.trim() || null;
+    });
+
+    if (errorMessage) {
+      console.error("[Screener] Login error:", errorMessage);
+      return false;
+    }
+
+    if (currentUrl.includes("/login/")) {
+      const isLoggedIn = await page.evaluate(() => {
+        const logoutLink = document.querySelector('a[href*="logout"]');
+        const userMenu = document.querySelector(".user-menu, .account-menu");
+        return !!(logoutLink || userMenu);
+      });
+
+      if (!isLoggedIn) {
+        await page.goto("https://www.screener.in/", {
+          waitUntil: "domcontentloaded",
+        });
+        await randomDelay(1000, 2000);
+      }
+    }
+
+    const finalUrl = page.url();
+    return !finalUrl.includes("/login/");
+  }
+
+  /**
+   * Extract symbols from a screen URL
+   */
+  private static async extractSymbolsFromScreen(
+    page: Page,
+    screenUrl: string
+  ): Promise<string[]> {
+    await page.goto(screenUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
+
+    try {
+      await page.waitForSelector("table.data-table", { timeout: 15000 });
+    } catch {
+      const noResults = await page.evaluate(() => {
+        const body = document.body.textContent || "";
+        return body.includes("No results") || body.includes("No companies");
+      });
+      if (noResults) return [];
+      throw new Error("Could not find data table on screen page");
+    }
+
+    await randomDelay(500, 1000);
+
+    const symbols = await page.evaluate(() => {
+      const links = Array.from(
+        document.querySelectorAll(
+          'table.data-table tbody tr td a[href^="/company/"]'
+        )
+      );
+      return links
+        .map((link) => {
+          const href = link.getAttribute("href") || "";
+          const parts = href.split("/");
+          return parts[2];
+        })
+        .filter((s) => s && s.length > 0);
+    });
+
+    return symbols;
+  }
+
+  /**
+   * Save debug screenshot
+   */
+  private static async saveDebugScreenshot(browser: Browser): Promise<void> {
+    try {
+      const pages = await browser.pages();
+      if (pages.length > 0) {
+        const screenshotPath = path.join(
+          "/tmp",
+          `screener-debug-${Date.now()}.png`
+        );
+        await pages[0].screenshot({ path: screenshotPath, fullPage: true });
+        console.log(`[Screener] Debug screenshot saved: ${screenshotPath}`);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Legacy single-URL method for backward compatibility
+   */
+  static async importScreen(
+    userId: string,
+    config: { email: string; password?: string; screenUrl: string }
+  ): Promise<string[]> {
+    const result = await this.importScreens(userId, {
+      email: config.email,
+      password: config.password,
+      screenUrls: [config.screenUrl],
+    });
+    return result.results[0]?.symbols || [];
   }
 }

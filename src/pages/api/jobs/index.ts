@@ -1,29 +1,20 @@
 /**
  * Jobs API - Create and manage background jobs
  * POST: Create a new job
- * GET: List user's jobs
+ * GET: List jobs
  */
 
 import type { APIRoute } from "astro";
-import { createClient } from "@supabase/supabase-js";
-import {
-  PUBLIC_SUPABASE_URL,
-  PUBLIC_SUPABASE_ANON_KEY,
-} from "astro:env/client";
-import { SUPABASE_SERVICE_ROLE_KEY } from "astro:env/server";
+import { requireAuth } from "../../../lib/middleware/requireAuth";
+import { db, schema } from "../../../lib/db";
+import { desc } from "drizzle-orm";
 
-export const POST: APIRoute = async ({ cookies, request }) => {
+export const POST: APIRoute = async ({ request }) => {
+  // Auth check
+  const authError = await requireAuth(request);
+  if (authError) return authError;
+
   try {
-    const accessToken = cookies.get("sb-access-token")?.value;
-    const refreshToken = cookies.get("sb-refresh-token")?.value;
-
-    if (!accessToken || !refreshToken) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
     const body = await request.json();
     const { type } = body;
 
@@ -34,54 +25,33 @@ export const POST: APIRoute = async ({ cookies, request }) => {
       });
     }
 
-    const supabase = createClient(
-      PUBLIC_SUPABASE_URL,
-      PUBLIC_SUPABASE_ANON_KEY
-    );
-    const supabaseAdmin = createClient(
-      PUBLIC_SUPABASE_URL,
-      SUPABASE_SERVICE_ROLE_KEY
-    );
-
-    const { data: sessionData } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    if (!sessionData.session?.user) {
-      return new Response(JSON.stringify({ error: "Invalid session" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const userId = sessionData.session.user.id;
-
     // Create the job
-    const { data: job, error } = await supabaseAdmin
-      .from("jobs")
-      .insert({
-        user_id: userId,
+    const [job] = await db
+      .insert(schema.jobs)
+      .values({
         type,
         status: "pending",
         progress: 0,
-        progress_message: "Job created, waiting to start...",
+        progressMessage: "Job created, waiting to start...",
       })
-      .select()
-      .single();
+      .returning();
 
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    // Convert to snake_case
+    const formatted = {
+      id: job.id,
+      type: job.type,
+      status: job.status,
+      progress: job.progress,
+      progress_message: job.progressMessage,
+      created_at: job.createdAt,
+    };
 
-    return new Response(JSON.stringify({ job }), {
+    return new Response(JSON.stringify({ job: formatted }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   } catch (error) {
+    console.error("Jobs POST error:", error);
     return new Response(
       JSON.stringify({
         error: error instanceof Error ? error.message : "Server error",
@@ -94,46 +64,38 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   }
 };
 
-export const GET: APIRoute = async ({ cookies }) => {
+export const GET: APIRoute = async ({ request }) => {
+  // Auth check
+  const authError = await requireAuth(request);
+  if (authError) return authError;
+
   try {
-    const accessToken = cookies.get("sb-access-token")?.value;
-    const refreshToken = cookies.get("sb-refresh-token")?.value;
-
-    if (!accessToken || !refreshToken) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const supabase = createClient(
-      PUBLIC_SUPABASE_URL,
-      PUBLIC_SUPABASE_ANON_KEY
-    );
-
-    await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    const { data: jobs, error } = await supabase
-      .from("jobs")
-      .select("*")
-      .order("created_at", { ascending: false })
+    const jobs = await db
+      .select()
+      .from(schema.jobs)
+      .orderBy(desc(schema.jobs.createdAt))
       .limit(20);
 
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    // Convert to snake_case
+    const formatted = jobs.map((j) => ({
+      id: j.id,
+      type: j.type,
+      status: j.status,
+      progress: j.progress,
+      progress_message: j.progressMessage,
+      result: j.result ? JSON.parse(j.result) : null,
+      error_message: j.errorMessage,
+      created_at: j.createdAt,
+      started_at: j.startedAt,
+      completed_at: j.completedAt,
+    }));
 
-    return new Response(JSON.stringify({ jobs }), {
+    return new Response(JSON.stringify({ jobs: formatted }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   } catch (error) {
+    console.error("Jobs GET error:", error);
     return new Response(JSON.stringify({ error: "Server error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },

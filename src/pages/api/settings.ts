@@ -5,68 +5,54 @@
  */
 
 import type { APIRoute } from "astro";
-import { createClient } from "@supabase/supabase-js";
-import {
-  PUBLIC_SUPABASE_URL,
-  PUBLIC_SUPABASE_ANON_KEY,
-} from "astro:env/client";
-import { SUPABASE_SERVICE_ROLE_KEY } from "astro:env/server";
+import { requireAuth } from "../../lib/middleware/requireAuth";
+import { db, schema } from "../../lib/db";
+import { eq } from "drizzle-orm";
 
-// Initialize admin client for sensitive operations (bypass RLS for upsert if needed, though RLS should handle it)
-const supabaseAdmin = createClient(
-  PUBLIC_SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY
-);
+export const GET: APIRoute = async ({ request }) => {
+  // Auth check
+  const authError = await requireAuth(request);
+  if (authError) return authError;
 
-export const GET: APIRoute = async ({ cookies }) => {
   try {
-    const accessToken = cookies.get("sb-access-token")?.value;
-    const refreshToken = cookies.get("sb-refresh-token")?.value;
+    const settings = await db
+      .select()
+      .from(schema.settings)
+      .where(eq(schema.settings.id, 1))
+      .limit(1);
 
-    if (!accessToken || !refreshToken) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
+    const data = settings[0] || {
+      availableFunds: 0,
+      riskProfile: "balanced",
+      screenerUrls: null,
+    };
+
+    // Parse screenerUrls from JSON string if present
+    let screenerUrlsParsed = null;
+    if (data.screenerUrls) {
+      try {
+        screenerUrlsParsed = JSON.parse(data.screenerUrls);
+      } catch {
+        screenerUrlsParsed = null;
+      }
     }
 
-    const supabase = createClient(
-      PUBLIC_SUPABASE_URL,
-      PUBLIC_SUPABASE_ANON_KEY
+    return new Response(
+      JSON.stringify({
+        settings: {
+          available_funds: data.availableFunds,
+          risk_profile: data.riskProfile,
+          notification_email: data.notificationEmail,
+          screener_urls: screenerUrlsParsed,
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }
     );
-
-    await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    const { data: settings, error } = await supabase
-      .from("user_settings")
-      .select("*")
-      .single();
-
-    if (error && error.code !== "PGRST116") {
-      // Ignore multiple rows/not found error
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    // Default if not created yet
-    const data = settings || { available_funds: 0, risk_profile: "balanced" };
-
-    // Don't return encrypted password to client
-    if (data.screener_password_encrypted) {
-      delete data.screener_password_encrypted;
-      data.has_screener_password = true;
-    }
-
-    return new Response(JSON.stringify({ settings: data }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
   } catch (error) {
+    console.error("Settings GET error:", error);
     return new Response(JSON.stringify({ error: "Server error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
@@ -74,85 +60,73 @@ export const GET: APIRoute = async ({ cookies }) => {
   }
 };
 
-export const POST: APIRoute = async ({ cookies, request }) => {
+export const POST: APIRoute = async ({ request }) => {
+  // Auth check
+  const authError = await requireAuth(request);
+  if (authError) return authError;
+
   try {
-    const accessToken = cookies.get("sb-access-token")?.value;
-    const refreshToken = cookies.get("sb-refresh-token")?.value;
-
-    if (!accessToken || !refreshToken) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const supabase = createClient(
-      PUBLIC_SUPABASE_URL,
-      PUBLIC_SUPABASE_ANON_KEY
-    );
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    if (error || !session) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
     const body = await request.json();
-    const updates: any = {
-      updated_at: new Date().toISOString(),
+    const updates: Partial<typeof schema.settings.$inferInsert> = {
+      updatedAt: new Date().toISOString(),
     };
 
-    if (body.available_funds !== undefined)
-      updates.available_funds = body.available_funds;
-    if (body.screener_email !== undefined)
-      updates.screener_email = body.screener_email;
-    if (body.screener_urls !== undefined)
-      updates.screener_urls = body.screener_urls;
-
-    if (body.screener_password) {
-      // Import dynmically
-      const { encrypt } = await import("../../lib/crypto");
-      updates.screener_password_encrypted = encrypt(body.screener_password);
+    if (body.available_funds !== undefined) {
+      updates.availableFunds = body.available_funds;
+    }
+    if (body.screener_urls !== undefined) {
+      updates.screenerUrls = JSON.stringify(body.screener_urls);
+    }
+    if (body.notification_email !== undefined) {
+      updates.notificationEmail = body.notification_email;
+    }
+    if (body.risk_profile !== undefined) {
+      updates.riskProfile = body.risk_profile;
     }
 
-    // Upsert settings
-    const { data, error: upsertError } = await supabaseAdmin
-      .from("user_settings")
-      .upsert({
-        user_id: session.user.id,
-        ...updates,
-      })
-      .select()
-      .single();
-
-    if (upsertError) {
-      console.error("Settings upsert error:", upsertError);
-      return new Response(JSON.stringify({ error: upsertError.message }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
+    // Upsert settings (id=1 is always the single row)
+    await db
+      .insert(schema.settings)
+      .values({ id: 1, ...updates })
+      .onConflictDoUpdate({
+        target: schema.settings.id,
+        set: updates,
       });
+
+    // Fetch updated settings
+    const settings = await db
+      .select()
+      .from(schema.settings)
+      .where(eq(schema.settings.id, 1))
+      .limit(1);
+    const data = settings[0];
+
+    // Parse screenerUrls
+    let screenerUrlsParsed = null;
+    if (data?.screenerUrls) {
+      try {
+        screenerUrlsParsed = JSON.parse(data.screenerUrls);
+      } catch {
+        screenerUrlsParsed = null;
+      }
     }
 
-    // Clean sensitive data from response
-    if (data.screener_password_encrypted) {
-      delete data.screener_password_encrypted;
-      data.has_screener_password = true;
-    }
-
-    return new Response(JSON.stringify({ settings: data }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        settings: {
+          available_funds: data?.availableFunds ?? 0,
+          risk_profile: data?.riskProfile ?? "balanced",
+          notification_email: data?.notificationEmail,
+          screener_urls: screenerUrlsParsed,
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   } catch (error) {
-    console.error("API Error:", error);
+    console.error("Settings POST error:", error);
     return new Response(JSON.stringify({ error: "Server error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },

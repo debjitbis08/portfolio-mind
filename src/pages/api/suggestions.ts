@@ -5,49 +5,52 @@
  */
 
 import type { APIRoute } from "astro";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "../../lib/middleware/requireAuth";
+import { db, schema } from "../../lib/db";
+import { eq, desc } from "drizzle-orm";
 
-export const GET: APIRoute = async ({ cookies, url }) => {
+export const GET: APIRoute = async ({ request, url }) => {
+  // Auth check
+  const authError = await requireAuth(request);
+  if (authError) return authError;
+
   try {
-    const accessToken = cookies.get("sb-access-token")?.value;
-    const refreshToken = cookies.get("sb-refresh-token")?.value;
+    const statusFilter = url.searchParams.get("status") || "pending";
 
-    if (!accessToken || !refreshToken) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    const suggestions = await db
+      .select()
+      .from(schema.suggestions)
+      .where(
+        eq(
+          schema.suggestions.status,
+          statusFilter as "pending" | "approved" | "rejected" | "expired"
+        )
+      )
+      .orderBy(desc(schema.suggestions.createdAt));
 
-    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
-    const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // Convert to snake_case for API response consistency
+    const formatted = suggestions.map((s) => ({
+      id: s.id,
+      cycle_id: s.cycleId,
+      symbol: s.symbol,
+      stock_name: s.stockName,
+      action: s.action,
+      rationale: s.rationale,
+      technical_score: s.technicalScore,
+      current_price: s.currentPrice,
+      target_price: s.targetPrice,
+      status: s.status,
+      created_at: s.createdAt,
+      expires_at: s.expiresAt,
+      reviewed_at: s.reviewedAt,
+    }));
 
-    await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    const status = url.searchParams.get("status") || "pending";
-
-    const { data: suggestions, error } = await supabase
-      .from("suggestions")
-      .select("*")
-      .eq("status", status)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    return new Response(JSON.stringify({ suggestions }), {
+    return new Response(JSON.stringify({ suggestions: formatted }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   } catch (error) {
+    console.error("Suggestions GET error:", error);
     return new Response(JSON.stringify({ error: "Server error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
@@ -55,18 +58,12 @@ export const GET: APIRoute = async ({ cookies, url }) => {
   }
 };
 
-export const POST: APIRoute = async ({ cookies, request }) => {
+export const POST: APIRoute = async ({ request }) => {
+  // Auth check
+  const authError = await requireAuth(request);
+  if (authError) return authError;
+
   try {
-    const accessToken = cookies.get("sb-access-token")?.value;
-    const refreshToken = cookies.get("sb-refresh-token")?.value;
-
-    if (!accessToken || !refreshToken) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
     const body = await request.json();
     const { id, status } = body;
 
@@ -82,35 +79,20 @@ export const POST: APIRoute = async ({ cookies, request }) => {
       );
     }
 
-    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
-    const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    const { error } = await supabase
-      .from("suggestions")
-      .update({
-        status,
-        reviewed_at: new Date().toISOString(),
+    await db
+      .update(schema.suggestions)
+      .set({
+        status: status as "approved" | "rejected",
+        reviewedAt: new Date().toISOString(),
       })
-      .eq("id", id);
-
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+      .where(eq(schema.suggestions.id, id));
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   } catch (error) {
+    console.error("Suggestions POST error:", error);
     return new Response(JSON.stringify({ error: "Server error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },

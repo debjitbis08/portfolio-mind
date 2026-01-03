@@ -5,7 +5,8 @@
  */
 
 import type { APIRoute } from "astro";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "../../lib/middleware/requireAuth";
+import { db, getHoldings, schema } from "../../lib/db";
 import {
   getTechnicalData,
   type TechnicalData,
@@ -20,44 +21,32 @@ function mapToYahooSymbol(growwSymbol: string): string {
   return SYMBOL_MAP[growwSymbol] || growwSymbol;
 }
 
-export const GET: APIRoute = async ({ cookies }) => {
+export const GET: APIRoute = async ({ request }) => {
+  // Auth check
+  const authError = await requireAuth(request);
+  if (authError) return authError;
+
   try {
-    const accessToken = cookies.get("sb-access-token")?.value;
-    const refreshToken = cookies.get("sb-refresh-token")?.value;
+    const technicalData = await db.select().from(schema.technicalData);
 
-    if (!accessToken || !refreshToken) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    // Convert to snake_case for API consistency
+    const formatted = technicalData.map((t) => ({
+      symbol: t.symbol,
+      current_price: t.currentPrice,
+      rsi_14: t.rsi14,
+      sma_50: t.sma50,
+      sma_200: t.sma200,
+      price_vs_sma50: t.priceVsSma50,
+      price_vs_sma200: t.priceVsSma200,
+      updated_at: t.updatedAt,
+    }));
 
-    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
-    const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    // Get cached technical data
-    const { data: technicalData, error } = await supabase
-      .from("technical_data")
-      .select("*");
-
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    return new Response(JSON.stringify({ data: technicalData || [] }), {
+    return new Response(JSON.stringify({ data: formatted }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   } catch (err) {
+    console.error("Technical GET error:", err);
     return new Response(JSON.stringify({ error: "Server error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
@@ -65,50 +54,20 @@ export const GET: APIRoute = async ({ cookies }) => {
   }
 };
 
-export const POST: APIRoute = async ({ cookies }) => {
+export const POST: APIRoute = async ({ request }) => {
+  // Auth check
+  const authError = await requireAuth(request);
+  if (authError) return authError;
+
   try {
-    const accessToken = cookies.get("sb-access-token")?.value;
-    const refreshToken = cookies.get("sb-refresh-token")?.value;
+    // Get holdings
+    const holdings = await getHoldings();
 
-    if (!accessToken || !refreshToken) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
+    if (holdings.length === 0) {
+      return new Response(JSON.stringify({ success: true, updated: 0 }), {
+        status: 200,
         headers: { "Content-Type": "application/json" },
       });
-    }
-
-    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
-    const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
-    const serviceRoleKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-
-    const { data: sessionData } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    if (!sessionData.session?.user) {
-      return new Response(JSON.stringify({ error: "Invalid session" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    // Get user's holdings
-    const { data: holdings, error: holdingsError } = await supabase
-      .from("holdings")
-      .select("symbol");
-
-    if (holdingsError || !holdings) {
-      return new Response(
-        JSON.stringify({ error: "Failed to fetch holdings" }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
     }
 
     // Get unique symbols with Yahoo mapping
@@ -127,19 +86,30 @@ export const POST: APIRoute = async ({ cookies }) => {
           results.push(data);
 
           // Store in database
-          await supabaseAdmin.from("technical_data").upsert(
-            {
+          await db
+            .insert(schema.technicalData)
+            .values({
               symbol,
-              current_price: data.currentPrice,
-              rsi_14: data.rsi14,
-              sma_50: data.sma50,
-              sma_200: data.sma200,
-              price_vs_sma50: data.priceVsSma50,
-              price_vs_sma200: data.priceVsSma200,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "symbol" }
-          );
+              currentPrice: data.currentPrice,
+              rsi14: data.rsi14,
+              sma50: data.sma50,
+              sma200: data.sma200,
+              priceVsSma50: data.priceVsSma50,
+              priceVsSma200: data.priceVsSma200,
+              updatedAt: new Date().toISOString(),
+            })
+            .onConflictDoUpdate({
+              target: schema.technicalData.symbol,
+              set: {
+                currentPrice: data.currentPrice,
+                rsi14: data.rsi14,
+                sma50: data.sma50,
+                sma200: data.sma200,
+                priceVsSma50: data.priceVsSma50,
+                priceVsSma200: data.priceVsSma200,
+                updatedAt: new Date().toISOString(),
+              },
+            });
         }
       } catch (err) {
         errors.push(`${symbol}: ${err}`);
@@ -159,6 +129,7 @@ export const POST: APIRoute = async ({ cookies }) => {
       }
     );
   } catch (err) {
+    console.error("Technical POST error:", err);
     return new Response(JSON.stringify({ error: "Server error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },

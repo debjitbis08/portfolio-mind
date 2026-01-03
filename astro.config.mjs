@@ -14,17 +14,13 @@ export default defineConfig({
   },
   env: {
     schema: {
-      // Supabase - public (needed on client for auth)
-      PUBLIC_SUPABASE_URL: envField.string({
-        context: "client",
-        access: "public",
+      // App Password - for login authentication
+      APP_PASSWORD: envField.string({
+        context: "server",
+        access: "secret",
       }),
-      PUBLIC_SUPABASE_ANON_KEY: envField.string({
-        context: "client",
-        access: "public",
-      }),
-      // Supabase service role - server secret
-      SUPABASE_SERVICE_ROLE_KEY: envField.string({
+      // App Secret - for encryption key derivation
+      APP_SECRET: envField.string({
         context: "server",
         access: "secret",
       }),
@@ -32,6 +28,13 @@ export default defineConfig({
       GEMINI_API_KEY: envField.string({
         context: "server",
         access: "secret",
+      }),
+      // Database path - optional, defaults to ./data/investor.db
+      DATABASE_PATH: envField.string({
+        context: "server",
+        access: "secret",
+        optional: true,
+        default: "./data/investor.db",
       }),
     },
   },

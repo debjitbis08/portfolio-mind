@@ -1,32 +1,12 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { createClient } from "@supabase/supabase-js";
-import {
-  PUBLIC_SUPABASE_URL,
-  PUBLIC_SUPABASE_ANON_KEY,
-} from "astro:env/client";
+import { validateSession } from "../lib/auth";
 
-const supabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY);
-
-const accessToken = Astro.cookies.get("sb-access-token");
-const refreshToken = Astro.cookies.get("sb-refresh-token");
-
-if (!accessToken || !refreshToken) {
-  return Astro.redirect("/login");
-}
-
-const {
-  data: { session },
-} = await supabase.auth.setSession({
-  access_token: accessToken.value!,
-  refresh_token: refreshToken.value!,
-});
+const session = await validateSession(Astro.request);
 
 if (!session) {
   return Astro.redirect("/login");
 }
-
-const email = session.user.email;
 ---
 
 <Layout title="Settings | Investor AI">
@@ -156,6 +136,24 @@ const email = session.user.email;
                   >
                     + Add another URL
                   </button>
+                </div>
+
+                <!-- Sync Now Button -->
+                <div class="mt-6 pt-4 border-t border-surface1/50">
+                  <div class="flex items-center gap-4">
+                    <button
+                      id="sync-screener-btn"
+                      class="px-4 py-2 bg-blue/20 hover:bg-blue/30 text-blue font-medium rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      <span id="sync-icon">↻</span>
+                      <span id="sync-text">Sync Now</span>
+                    </button>
+                    <span id="sync-status" class="text-sm text-subtext0"></span>
+                  </div>
+                  <p class="text-xs text-subtext0 mt-2">
+                    Imports current screen results into your watchlist. Safe to
+                    run once per day.
+                  </p>
                 </div>
               </div>
             </div>
@@ -303,6 +301,96 @@ const email = session.user.email;
       saveBtn.disabled = false;
       saveBtn.textContent = "Save Changes";
     }
+  });
+
+  // Sync Screener Button
+  const syncBtn = document.getElementById(
+    "sync-screener-btn"
+  ) as HTMLButtonElement;
+  const syncIcon = document.getElementById("sync-icon");
+  const syncText = document.getElementById("sync-text");
+  const syncStatus = document.getElementById("sync-status");
+
+  syncBtn?.addEventListener("click", async () => {
+    // Get current values
+    const email = screenerEmailInput.value.trim();
+    const password = screenerPasswordInput.value.trim();
+    const urlInputs = document.querySelectorAll(
+      ".screener-url"
+    ) as NodeListOf<HTMLInputElement>;
+    const urls = Array.from(urlInputs)
+      .map((input) => input.value.trim())
+      .filter((url) => url.length > 0);
+
+    if (!email) {
+      syncStatus!.className = "text-sm text-red";
+      syncStatus!.textContent = "Please enter screener email first";
+      return;
+    }
+
+    if (urls.length === 0) {
+      syncStatus!.className = "text-sm text-red";
+      syncStatus!.textContent = "Please add at least one screen URL";
+      return;
+    }
+
+    // Check if we need a password (either entered or already saved)
+    const hasPassword =
+      password || passwordStatus?.classList.contains("hidden") === false;
+    if (!hasPassword && !password) {
+      syncStatus!.className = "text-sm text-yellow";
+      syncStatus!.textContent = "Password required for first sync";
+      return;
+    }
+
+    // Start sync
+    syncBtn.disabled = true;
+    syncIcon!.textContent = "⏳";
+    syncIcon!.classList.add("animate-spin");
+    syncText!.textContent = "Syncing...";
+    syncStatus!.className = "text-sm text-subtext0";
+    syncStatus!.textContent = `Logging in and processing ${urls.length} screen(s)...`;
+
+    try {
+      // Send all URLs in a single request - login happens once
+      const res = await fetch("/api/integrations/screener/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          password: password || undefined,
+          screenUrls: urls, // Send all URLs at once
+        }),
+      });
+
+      const data = await res.json();
+
+      // Done
+      syncBtn.disabled = false;
+      syncIcon!.classList.remove("animate-spin");
+      syncIcon!.textContent = "↻";
+      syncText!.textContent = "Sync Now";
+
+      if (res.ok && data.success) {
+        syncStatus!.className = "text-sm text-green";
+        syncStatus!.textContent = `✓ Imported ${data.imported} stocks to watchlist`;
+      } else {
+        syncStatus!.className = "text-sm text-red";
+        syncStatus!.textContent = data.error || "Sync failed";
+      }
+    } catch (err) {
+      syncBtn.disabled = false;
+      syncIcon!.classList.remove("animate-spin");
+      syncIcon!.textContent = "↻";
+      syncText!.textContent = "Sync Now";
+      syncStatus!.className = "text-sm text-red";
+      syncStatus!.textContent = "Network error - please try again";
+    }
+
+    // Clear status after delay
+    setTimeout(() => {
+      syncStatus!.textContent = "";
+    }, 5000);
   });
 
   // Initial load

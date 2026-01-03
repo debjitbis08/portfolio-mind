@@ -1,70 +1,56 @@
+/**
+ * Screener Import API
+ * POST: Import symbols from screener.in screens
+ */
+
 import type { APIRoute } from "astro";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "../../../../lib/middleware/requireAuth";
 import { ScreenerService } from "../../../../lib/scrapers/screener";
-import {
-  PUBLIC_SUPABASE_URL,
-  PUBLIC_SUPABASE_ANON_KEY,
-} from "astro:env/client";
 
-export const POST: APIRoute = async ({ request, cookies }) => {
-  // 1. Auth check
-  const supabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY);
+export const POST: APIRoute = async ({ request }) => {
+  // Auth check
+  const authError = await requireAuth(request);
+  if (authError) return authError;
 
-  const accessToken = cookies.get("sb-access-token")?.value;
-  const refreshToken = cookies.get("sb-refresh-token")?.value;
-
-  if (!accessToken || !refreshToken) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-    });
-  }
-
-  const {
-    data: { session },
-    error,
-  } = await supabase.auth.setSession({
-    access_token: accessToken,
-    refresh_token: refreshToken,
-  });
-
-  if (error || !session) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-    });
-  }
-
-  // 2. Parse Input
   try {
     const body = await request.json();
-    const { email, password, screenUrl } = body;
+    const { email, password, screenUrl, screenUrls } = body;
 
-    if (!email || !screenUrl) {
+    // Support both single URL (backward compat) and multiple URLs
+    const urls: string[] = screenUrls || (screenUrl ? [screenUrl] : []);
+
+    if (!email || urls.length === 0) {
       return new Response(
-        JSON.stringify({ error: "Email and Screen URL are required" }),
-        { status: 400 }
+        JSON.stringify({ error: "Email and at least one Screen URL required" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // 3. Run Import
-    const symbols = await ScreenerService.importScreen(session.user.id, {
+    // Run Import - pass empty string for userId (not used in single-user mode)
+    console.log(`[Import API] Starting import for ${urls.length} URLs...`);
+
+    const result = await ScreenerService.importScreens("", {
       email,
       password,
-      screenUrl,
+      screenUrls: urls,
     });
 
-    // 4. Trigger Intel Update (Async)
-    // We import dynamically to avoid circular or load issues
-    const { IntelService } = await import("../../../../lib/intel");
-    IntelService.updateFundamentals(symbols).catch((err) =>
-      console.error("Background intel update failed:", err)
-    );
+    // Trigger Intel Update (Async) for all symbols
+    if (result.totalSymbols > 0) {
+      const allSymbols = result.results.flatMap((r) => r.symbols);
+      const { IntelService } = await import("../../../../lib/intel");
+      IntelService.updateFundamentals(allSymbols).catch((err) =>
+        console.error("Background intel update failed:", err)
+      );
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
-        imported: symbols.length,
-        symbols,
-      })
+        imported: result.totalSymbols,
+        results: result.results,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (err) {
     console.error("Import API Error:", err);
@@ -72,7 +58,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       JSON.stringify({
         error: err instanceof Error ? err.message : "Import failed",
       }),
-      { status: 500 }
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 };

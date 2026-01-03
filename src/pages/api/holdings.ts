@@ -1,5 +1,13 @@
+/**
+ * Holdings API Endpoint
+ *
+ * Returns current holdings with live prices and technical data.
+ */
+
 import type { APIRoute } from "astro";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "../../lib/middleware/requireAuth";
+import { db, getHoldings, isPriceStale, schema } from "../../lib/db";
+import { eq, inArray } from "drizzle-orm";
 import YahooFinance from "yahoo-finance2";
 
 const yahooFinance = new YahooFinance();
@@ -7,64 +15,22 @@ const yahooFinance = new YahooFinance();
 // Map Groww symbols to Yahoo Finance symbols where they differ
 const SYMBOL_MAP: Record<string, string> = {
   GODAWARIP: "GPIL", // Godawari Power & Ispat
-  // KPL is the same on Yahoo (KPL.BO), no mapping needed
-  // Add more mappings as needed
 };
 
 function mapToYahooSymbol(growwSymbol: string): string {
   return SYMBOL_MAP[growwSymbol] || growwSymbol;
 }
 
-export const GET: APIRoute = async ({ request, cookies }) => {
+export const GET: APIRoute = async ({ request }) => {
+  // Auth check
+  const authError = await requireAuth(request);
+  if (authError) return authError;
+
   try {
-    // Get user from cookies
-    const accessToken = cookies.get("sb-access-token")?.value;
-    const refreshToken = cookies.get("sb-refresh-token")?.value;
+    // Fetch holdings from computed view
+    const holdings = await getHoldings();
 
-    if (!accessToken || !refreshToken) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
-    const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
-    const serviceRoleKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    // User client for reading holdings (respects RLS)
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    // Service role client for writing to cache (bypasses RLS)
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-
-    const { data: sessionData } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    if (!sessionData.session?.user) {
-      return new Response(JSON.stringify({ error: "Invalid session" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const userId = sessionData.session.user.id;
-
-    // Fetch holdings from view
-    const { data: holdings, error } = await supabase
-      .from("holdings")
-      .select("*")
-      .eq("user_id", userId);
-
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    if (!holdings || holdings.length === 0) {
+    if (holdings.length === 0) {
       return new Response(JSON.stringify({ holdings: [], summary: null }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -88,31 +54,19 @@ export const GET: APIRoute = async ({ request, cookies }) => {
     ];
 
     // Step 1: Check cache for fresh prices
-    const { data: cachedPrices } = await supabase
-      .from("price_cache")
-      .select("symbol, price, updated_at")
-      .in("symbol", uniqueYahooSymbols);
+    const cachedPrices = await db
+      .select()
+      .from(schema.priceCache)
+      .where(inArray(schema.priceCache.symbol, uniqueYahooSymbols));
 
-    const now = new Date();
     const freshPrices: Record<string, number> = {};
     const staleSymbols: string[] = [];
 
     // Check which symbols have fresh cache vs need refresh
     for (const yahoo of uniqueYahooSymbols) {
-      const cached = cachedPrices?.find((c) => c.symbol === yahoo);
-      if (cached) {
-        const cacheAge =
-          (now.getTime() - new Date(cached.updated_at).getTime()) / 1000 / 60;
-        // Simple staleness: 5 min during market hours (roughly 9-16 IST), 30 min otherwise
-        const hour = now.getUTCHours() + 5.5; // Rough IST conversion
-        const isMarketHours = hour >= 9 && hour <= 16;
-        const maxAge = isMarketHours ? 5 : 30;
-
-        if (cacheAge <= maxAge) {
-          freshPrices[yahoo] = Number(cached.price);
-        } else {
-          staleSymbols.push(yahoo);
-        }
+      const cached = cachedPrices.find((c) => c.symbol === yahoo);
+      if (cached && !isPriceStale(cached.updatedAt)) {
+        freshPrices[yahoo] = cached.price;
       } else {
         staleSymbols.push(yahoo);
       }
@@ -165,14 +119,21 @@ export const GET: APIRoute = async ({ request, cookies }) => {
         }
 
         // Step 3: Update cache
-        if (pricesToCache.length > 0) {
-          await supabaseAdmin.from("price_cache").upsert(
-            pricesToCache.map((p) => ({
-              ...p,
-              updated_at: new Date().toISOString(),
-            })),
-            { onConflict: "symbol" }
-          );
+        for (const p of pricesToCache) {
+          await db
+            .insert(schema.priceCache)
+            .values({
+              symbol: p.symbol,
+              price: p.price,
+              updatedAt: new Date().toISOString(),
+            })
+            .onConflictDoUpdate({
+              target: schema.priceCache.symbol,
+              set: {
+                price: p.price,
+                updatedAt: new Date().toISOString(),
+              },
+            });
         }
       } catch (err) {
         console.error("Yahoo Finance error:", err);
@@ -191,13 +152,18 @@ export const GET: APIRoute = async ({ request, cookies }) => {
     const enrichedHoldings = holdings.map((h) => {
       const currentPrice = quotes[h.symbol] || 0;
       const currentValue = currentPrice * h.quantity;
-      const investedValue = h.invested_value;
+      const investedValue = h.investedValue;
       const returns = currentValue - investedValue;
       const returnsPercent =
         investedValue > 0 ? (returns / investedValue) * 100 : 0;
 
       return {
-        ...h,
+        isin: h.isin,
+        symbol: h.symbol,
+        stock_name: h.stockName,
+        quantity: h.quantity,
+        avg_buy_price: h.avgBuyPrice,
+        invested_value: investedValue,
         current_price: currentPrice,
         current_value: currentValue,
         returns,
@@ -206,16 +172,12 @@ export const GET: APIRoute = async ({ request, cookies }) => {
     });
 
     // Fetch technical data for all holdings
-    const { data: technicalData } = await supabase
-      .from("technical_data")
-      .select("*");
+    const technicalData = await db.select().from(schema.technicalData);
 
     // Create lookup map for technical data
-    const techMap = new Map<string, any>();
-    if (technicalData) {
-      for (const t of technicalData) {
-        techMap.set(t.symbol, t);
-      }
+    const techMap = new Map<string, (typeof technicalData)[0]>();
+    for (const t of technicalData) {
+      techMap.set(t.symbol, t);
     }
 
     // Merge technical data into holdings
@@ -226,21 +188,19 @@ export const GET: APIRoute = async ({ request, cookies }) => {
       // Determine wait zone reasons
       const waitReasons: string[] = [];
       if (tech) {
-        if (tech.rsi_14 && Number(tech.rsi_14) > 40) {
-          waitReasons.push(`RSI ${Number(tech.rsi_14).toFixed(0)}`);
+        if (tech.rsi14 && tech.rsi14 > 40) {
+          waitReasons.push(`RSI ${tech.rsi14.toFixed(0)}`);
         }
-        if (tech.price_vs_sma50 && Number(tech.price_vs_sma50) > 15) {
-          waitReasons.push(`+${Number(tech.price_vs_sma50).toFixed(0)}% SMA50`);
+        if (tech.priceVsSma50 && tech.priceVsSma50 > 15) {
+          waitReasons.push(`+${tech.priceVsSma50.toFixed(0)}% SMA50`);
         }
-        if (tech.price_vs_sma200 && Number(tech.price_vs_sma200) > 15) {
-          waitReasons.push(
-            `+${Number(tech.price_vs_sma200).toFixed(0)}% SMA200`
-          );
+        if (tech.priceVsSma200 && tech.priceVsSma200 > 15) {
+          waitReasons.push(`+${tech.priceVsSma200.toFixed(0)}% SMA200`);
         }
         if (
-          tech.sma_200 &&
-          tech.current_price &&
-          Number(tech.current_price) < Number(tech.sma_200)
+          tech.sma200 &&
+          tech.currentPrice &&
+          tech.currentPrice < tech.sma200
         ) {
           waitReasons.push("Below SMA200");
         }
@@ -248,15 +208,11 @@ export const GET: APIRoute = async ({ request, cookies }) => {
 
       return {
         ...h,
-        rsi_14: tech?.rsi_14 ? Number(tech.rsi_14) : null,
-        sma_50: tech?.sma_50 ? Number(tech.sma_50) : null,
-        sma_200: tech?.sma_200 ? Number(tech.sma_200) : null,
-        price_vs_sma50: tech?.price_vs_sma50
-          ? Number(tech.price_vs_sma50)
-          : null,
-        price_vs_sma200: tech?.price_vs_sma200
-          ? Number(tech.price_vs_sma200)
-          : null,
+        rsi_14: tech?.rsi14 ?? null,
+        sma_50: tech?.sma50 ?? null,
+        sma_200: tech?.sma200 ?? null,
+        price_vs_sma50: tech?.priceVsSma50 ?? null,
+        price_vs_sma200: tech?.priceVsSma200 ?? null,
         is_wait_zone: waitReasons.length > 0,
         wait_reasons: waitReasons,
       };

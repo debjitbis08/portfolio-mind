@@ -1,14 +1,20 @@
+/**
+ * Encryption utilities
+ *
+ * Uses APP_SECRET for key derivation.
+ */
+
 import {
   createCipheriv,
   createDecipheriv,
   randomBytes,
   createHash,
 } from "crypto";
-import { SUPABASE_SERVICE_ROLE_KEY } from "astro:env/server";
+import { APP_SECRET } from "astro:env/server";
 
-// Derive a 32-byte key from the service role key
+// Derive a 32-byte key from the app secret
 const ALGORITHM = "aes-256-gcm";
-const KEY = createHash("sha256").update(SUPABASE_SERVICE_ROLE_KEY).digest();
+const KEY = createHash("sha256").update(APP_SECRET).digest();
 
 export function encrypt(text: string): string {
   const iv = randomBytes(16);
