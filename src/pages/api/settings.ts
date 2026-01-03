@@ -21,15 +21,16 @@ export const GET: APIRoute = async ({ request }) => {
       .where(eq(schema.settings.id, 1))
       .limit(1);
 
-    const data = settings[0] || {
-      availableFunds: 0,
-      riskProfile: "balanced",
-      screenerUrls: null,
-    };
+    const data = settings[0];
 
-    // Parse screenerUrls from JSON string if present
+    // Defaults if no settings row exists
+    const availableFunds = data?.availableFunds ?? 0;
+    const riskProfile = data?.riskProfile ?? "balanced";
+    const notificationEmail = data?.notificationEmail ?? null;
+
+    // Parse screenerUrls
     let screenerUrlsParsed = null;
-    if (data.screenerUrls) {
+    if (data?.screenerUrls) {
       try {
         screenerUrlsParsed = JSON.parse(data.screenerUrls);
       } catch {
@@ -37,13 +38,28 @@ export const GET: APIRoute = async ({ request }) => {
       }
     }
 
+    // Parse user symbol mappings
+    let userMappings = {};
+    if (data?.symbolMappings) {
+      try {
+        userMappings = JSON.parse(data.symbolMappings);
+      } catch {
+        userMappings = {};
+      }
+    }
+
+    // For the UI, we return the user mappings + indicating built-in ones
+    const { BUILT_IN_MAPPINGS } = await import("../../lib/mappings");
+
     return new Response(
       JSON.stringify({
         settings: {
-          available_funds: data.availableFunds,
-          risk_profile: data.riskProfile,
-          notification_email: data.notificationEmail,
+          available_funds: availableFunds,
+          risk_profile: riskProfile,
+          notification_email: notificationEmail,
           screener_urls: screenerUrlsParsed,
+          user_mappings: userMappings,
+          built_in_mappings: BUILT_IN_MAPPINGS,
         },
       }),
       {
@@ -83,6 +99,12 @@ export const POST: APIRoute = async ({ request }) => {
     if (body.risk_profile !== undefined) {
       updates.riskProfile = body.risk_profile;
     }
+    if (body.user_mappings !== undefined) {
+      updates.symbolMappings = JSON.stringify(body.user_mappings);
+      // Clear mappings cache
+      const { clearMappingsCache } = await import("../../lib/mappings");
+      clearMappingsCache();
+    }
 
     // Upsert settings (id=1 is always the single row)
     await db
@@ -93,32 +115,9 @@ export const POST: APIRoute = async ({ request }) => {
         set: updates,
       });
 
-    // Fetch updated settings
-    const settings = await db
-      .select()
-      .from(schema.settings)
-      .where(eq(schema.settings.id, 1))
-      .limit(1);
-    const data = settings[0];
-
-    // Parse screenerUrls
-    let screenerUrlsParsed = null;
-    if (data?.screenerUrls) {
-      try {
-        screenerUrlsParsed = JSON.parse(data.screenerUrls);
-      } catch {
-        screenerUrlsParsed = null;
-      }
-    }
-
     return new Response(
       JSON.stringify({
-        settings: {
-          available_funds: data?.availableFunds ?? 0,
-          risk_profile: data?.riskProfile ?? "balanced",
-          notification_email: data?.notificationEmail,
-          screener_urls: screenerUrlsParsed,
-        },
+        success: true,
       }),
       {
         status: 200,

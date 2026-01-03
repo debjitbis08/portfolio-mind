@@ -58,7 +58,7 @@ export const POST: APIRoute = async ({ request }) => {
       isICICIImport = true;
       const csvText = await iciciTransactionsFile.text();
       const iciciTxs = parseICICIDirectTransactions(csvText);
-      transactions = convertICICIToGrowwFormat(iciciTxs);
+      transactions = await convertICICIToGrowwFormat(iciciTxs);
 
       if (iciciHoldingsFile) {
         const holdingsCsv = await iciciHoldingsFile.text();
@@ -84,7 +84,7 @@ export const POST: APIRoute = async ({ request }) => {
         isICICIImport = true;
         const csvText = await orderHistoryFile.text();
         const iciciTxs = parseICICIDirectTransactions(csvText);
-        transactions = convertICICIToGrowwFormat(iciciTxs);
+        transactions = await convertICICIToGrowwFormat(iciciTxs);
 
         if (holdingsFile && isICICIDirectFile(holdingsFile.name)) {
           const holdingsCsv = await holdingsFile.text();

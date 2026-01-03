@@ -12,14 +12,8 @@ import YahooFinance from "yahoo-finance2";
 
 const yahooFinance = new YahooFinance();
 
-// Map Groww symbols to Yahoo Finance symbols where they differ
-const SYMBOL_MAP: Record<string, string> = {
-  GODAWARIP: "GPIL", // Godawari Power & Ispat
-};
-
-function mapToYahooSymbol(growwSymbol: string): string {
-  return SYMBOL_MAP[growwSymbol] || growwSymbol;
-}
+// Symbol mapping utility
+import { getSymbolMappings } from "../../lib/mappings";
 
 export const GET: APIRoute = async ({ request }) => {
   // Auth check
@@ -41,17 +35,19 @@ export const GET: APIRoute = async ({ request }) => {
     const symbols = holdings.map((h) => h.symbol);
     let quotes: Record<string, number> = {};
 
+    // Fetch mappings once
+    const mappings = await getSymbolMappings();
+    const mapSymbol = (s: string) => mappings[s] || s;
+
     // Build map of yahoo symbol -> all holdings symbols that map to it
     const yahooToHoldings: Record<string, string[]> = {};
     for (const s of symbols) {
-      const yahoo = mapToYahooSymbol(s);
+      const yahoo = mapSymbol(s);
       if (!yahooToHoldings[yahoo]) yahooToHoldings[yahoo] = [];
       yahooToHoldings[yahoo].push(s);
     }
 
-    const uniqueYahooSymbols = [
-      ...new Set(symbols.map((s) => mapToYahooSymbol(s))),
-    ];
+    const uniqueYahooSymbols = [...new Set(symbols.map(mapSymbol))];
 
     // Step 1: Check cache for fresh prices
     const cachedPrices = await db
@@ -182,7 +178,7 @@ export const GET: APIRoute = async ({ request }) => {
 
     // Merge technical data into holdings
     const holdingsWithTech = enrichedHoldings.map((h) => {
-      const yahooSymbol = mapToYahooSymbol(h.symbol);
+      const yahooSymbol = mapSymbol(h.symbol);
       const tech = techMap.get(yahooSymbol) || techMap.get(h.symbol);
 
       // Determine wait zone reasons

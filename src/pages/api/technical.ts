@@ -12,14 +12,8 @@ import {
   type TechnicalData,
 } from "../../lib/technical-indicators";
 
-// Symbol mapping (same as holdings.ts)
-const SYMBOL_MAP: Record<string, string> = {
-  GODAWARIP: "GPIL",
-};
-
-function mapToYahooSymbol(growwSymbol: string): string {
-  return SYMBOL_MAP[growwSymbol] || growwSymbol;
-}
+// Symbol mapping utility
+import { getSymbolMappings } from "../../lib/mappings";
 
 export const GET: APIRoute = async ({ request }) => {
   // Auth check
@@ -70,10 +64,12 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
+    // Fetch mappings once
+    const mappings = await getSymbolMappings();
+    const mapSymbol = (s: string) => mappings[s] || s;
+
     // Get unique symbols with Yahoo mapping
-    const symbols = [
-      ...new Set(holdings.map((h) => mapToYahooSymbol(h.symbol))),
-    ];
+    const symbols = [...new Set(holdings.map((h) => mapSymbol(h.symbol)))];
 
     const results: TechnicalData[] = [];
     const errors: string[] = [];

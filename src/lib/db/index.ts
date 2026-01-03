@@ -222,6 +222,7 @@ export function initializeDatabase(): void {
       risk_profile TEXT DEFAULT 'balanced' CHECK (risk_profile IN ('conservative', 'balanced', 'aggressive')),
       notification_email TEXT,
       screener_urls TEXT,
+      symbol_mappings TEXT,
       updated_at TEXT
     );
 

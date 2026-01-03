@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { getSymbolMappings } from "./mappings";
 
 // Types for Groww exports
 export interface GrowwTransaction {
@@ -317,34 +318,6 @@ export interface ICICIDirectHolding {
 }
 
 /**
- * Known ICICI Direct symbol → NSE symbol mappings
- * ICICI uses internal symbols that differ from NSE trading symbols
- */
-const ICICI_TO_NSE: Record<string, string> = {
-  RELIND: "RELIANCE",
-  BHADYN: "BDL",
-  FAGBEA: "SCHAEFFLER",
-  HINAER: "HAL",
-  HONAUT: "HONAUT",
-  COSFIL: "COSMOFIRST",
-  POLI: "POLYCAB",
-  RATMET: "RATNAMANI",
-  PENIND: "PENIND",
-  SBILIF: "SBILIFE",
-  SRIPIP: "SRIKALAHASTHI",
-  UNIPLY: "UNIPLY",
-  CDSL: "CDSL",
-  HUDCO: "HUDCO",
-};
-
-/**
- * Map ICICI Direct symbol to standard NSE symbol
- */
-export function mapICICISymbolToNSE(iciciSymbol: string): string {
-  return ICICI_TO_NSE[iciciSymbol] || iciciSymbol;
-}
-
-/**
  * Parse ICICI Direct date format: "DD-Mon-YYYY" (e.g., "21-Mar-2018")
  */
 function parseICICIDate(dateStr: string): Date {
@@ -481,20 +454,21 @@ export function parseICICIDirectHoldings(
  * Convert ICICI Direct transactions to the common GrowwTransaction format
  * This allows reusing the existing reconciliation logic
  */
-export function convertICICIToGrowwFormat(
+export async function convertICICIToGrowwFormat(
   iciciTransactions: ICICIDirectTransaction[]
-): GrowwTransaction[] {
+): Promise<GrowwTransaction[]> {
+  const mappings = await getSymbolMappings();
+  const mapSymbol = (s: string) => mappings[s] || s;
+
   return iciciTransactions.map((tx) => ({
     stockName: tx.companyName,
-    symbol: mapICICISymbolToNSE(tx.stockSymbol),
+    symbol: mapSymbol(tx.stockSymbol),
     isin: tx.isinCode,
     type: tx.action,
     quantity: tx.quantity,
     value: tx.quantity * tx.transactionPrice,
     exchange: tx.exchange,
-    exchangeOrderId: `ICICI_${
-      tx.isinCode
-    }_${tx.transactionDate.toISOString()}_${tx.quantity}`,
+    exchangeOrderId: "",
     executedAt: tx.transactionDate,
     status: "Executed",
   }));

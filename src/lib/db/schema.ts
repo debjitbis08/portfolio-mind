@@ -134,6 +134,7 @@ export const settings = sqliteTable("settings", {
   }).default("balanced"),
   notificationEmail: text("notification_email"),
   screenerUrls: text("screener_urls"), // JSON array stored as text
+  symbolMappings: text("symbol_mappings"), // JSON object stored as text
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
 
