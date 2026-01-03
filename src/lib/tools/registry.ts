@@ -183,6 +183,28 @@ const getRedditSentimentDeclaration: ToolDeclaration = {
   },
 };
 
+const getPreviousSuggestionsDeclaration: ToolDeclaration = {
+  name: "get_previous_suggestions",
+  description:
+    "Get your previous pending suggestions to review them before making new recommendations. Use this at the START of analysis to see what you previously recommended. You MUST review past suggestions and decide: keep as-is, update with new recommendation, or invalidate if no longer valid.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      symbols: {
+        type: Type.STRING,
+        description:
+          "Comma-separated list of symbols to check (e.g., 'RELIANCE,TCS,ITC'). Leave empty to get all pending suggestions.",
+      },
+      status: {
+        type: Type.STRING,
+        description: "Filter by status. Default is 'pending'.",
+        enum: ["pending", "approved", "rejected", "expired", "superseded"],
+      },
+    },
+    required: [],
+  },
+};
+
 // ============================================================================
 // Registry
 // ============================================================================
@@ -252,6 +274,17 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       defaultConfig: {
         enabled: true,
         subreddits: ["IndiaInvestments", "IndianStreetBets"],
+      },
+    },
+  ],
+  [
+    "get_previous_suggestions",
+    {
+      declaration: getPreviousSuggestionsDeclaration,
+      execute: notImplemented,
+      source: "internal",
+      defaultConfig: {
+        enabled: true,
       },
     },
   ],

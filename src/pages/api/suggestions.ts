@@ -23,7 +23,12 @@ export const GET: APIRoute = async ({ request, url }) => {
       .where(
         eq(
           schema.suggestions.status,
-          statusFilter as "pending" | "approved" | "rejected" | "expired"
+          statusFilter as
+            | "pending"
+            | "approved"
+            | "rejected"
+            | "expired"
+            | "superseded"
         )
       )
       .orderBy(desc(schema.suggestions.createdAt));
@@ -37,9 +42,12 @@ export const GET: APIRoute = async ({ request, url }) => {
       action: s.action,
       rationale: s.rationale,
       technical_score: s.technicalScore,
+      confidence: s.confidence,
       current_price: s.currentPrice,
       target_price: s.targetPrice,
       status: s.status,
+      superseded_by: s.supersededBy,
+      superseded_reason: s.supersededReason,
       created_at: s.createdAt,
       expires_at: s.expiresAt,
       reviewed_at: s.reviewedAt,

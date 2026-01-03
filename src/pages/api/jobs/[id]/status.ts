@@ -6,7 +6,7 @@
 import type { APIRoute } from "astro";
 import { requireAuth } from "../../../../lib/middleware/requireAuth";
 import { db, getHoldings, schema } from "../../../../lib/db";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and } from "drizzle-orm";
 import { GeminiService, type HoldingForAnalysis } from "../../../../lib/gemini";
 
 export const GET: APIRoute = async ({ params, request }) => {
@@ -207,18 +207,49 @@ export const GET: APIRoute = async ({ params, request }) => {
           ["BUY", "SELL", "MOVE"].includes(s.action)
         );
 
-        // Step 7: Store suggestions
+        // Step 7: Store suggestions (with supersession logic)
         if (actionableSuggestions.length > 0) {
           for (const s of actionableSuggestions) {
-            await db.insert(schema.suggestions).values({
-              symbol: s.symbol,
-              stockName: s.stock_name,
-              action: s.action as "BUY" | "SELL" | "HOLD" | "WATCH",
-              rationale: s.rationale || s.reason,
-              technicalScore: s.technical_score,
-              currentPrice: holdings.find((h) => h.symbol === s.symbol)
-                ?.current_price,
-            });
+            // Check for existing pending suggestions for this symbol
+            const existingPending = await db
+              .select({ id: schema.suggestions.id })
+              .from(schema.suggestions)
+              .where(
+                and(
+                  eq(schema.suggestions.symbol, s.symbol),
+                  eq(schema.suggestions.status, "pending")
+                )
+              );
+
+            // Insert the new suggestion
+            const [newSuggestion] = await db
+              .insert(schema.suggestions)
+              .values({
+                symbol: s.symbol,
+                stockName: s.stock_name,
+                action: s.action as "BUY" | "SELL" | "HOLD" | "WATCH",
+                rationale: s.rationale || s.reason,
+                technicalScore: s.technical_score,
+                confidence: s.confidence,
+                currentPrice: holdings.find((h) => h.symbol === s.symbol)
+                  ?.current_price,
+              })
+              .returning({ id: schema.suggestions.id });
+
+            // Supersede existing pending suggestions for this symbol
+            if (existingPending.length > 0 && newSuggestion) {
+              for (const old of existingPending) {
+                await db
+                  .update(schema.suggestions)
+                  .set({
+                    status: "superseded",
+                    supersededBy: newSuggestion.id,
+                    supersededReason: "Replaced by newer analysis",
+                    reviewedAt: new Date().toISOString(),
+                  })
+                  .where(eq(schema.suggestions.id, old.id));
+              }
+            }
           }
         } else {
           await updateProgress(

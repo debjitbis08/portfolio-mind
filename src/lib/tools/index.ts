@@ -38,6 +38,7 @@ import "./valuepickr";
 import "./technicals";
 import "./news";
 import "./reddit";
+import "./suggestions";
 
 // Log registered tools on import
 import { listTools } from "./registry";

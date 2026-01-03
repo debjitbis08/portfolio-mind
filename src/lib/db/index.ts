@@ -8,6 +8,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sql, eq, and, gt, lt, sum, max, desc } from "drizzle-orm";
 import * as schema from "./schema";
+import { autoMigrate } from "./migrations";
 
 // ============================================================================
 // Database Connection
@@ -210,7 +211,10 @@ export function initializeDatabase(): void {
       technical_score REAL,
       current_price REAL,
       target_price REAL,
-      status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'superseded')),
+      confidence INTEGER CHECK (confidence IS NULL OR (confidence >= 1 AND confidence <= 10)),
+      superseded_by TEXT,
+      superseded_reason TEXT,
       created_at TEXT,
       expires_at TEXT,
       reviewed_at TEXT
@@ -284,9 +288,31 @@ export function initializeDatabase(): void {
     -- Ensure settings has at least one row
     INSERT OR IGNORE INTO settings (id) VALUES (1);
   `);
+
+  // Migration: Add new columns to suggestions table (for existing databases)
+  try {
+    sqlite.exec(
+      `ALTER TABLE suggestions ADD COLUMN confidence INTEGER CHECK (confidence IS NULL OR (confidence >= 1 AND confidence <= 10))`
+    );
+  } catch {
+    // Column already exists
+  }
+  try {
+    sqlite.exec(`ALTER TABLE suggestions ADD COLUMN superseded_by TEXT`);
+  } catch {
+    // Column already exists
+  }
+  try {
+    sqlite.exec(`ALTER TABLE suggestions ADD COLUMN superseded_reason TEXT`);
+  } catch {
+    // Column already exists
+  }
 }
 
 // Initialize on module load
 initializeDatabase();
+
+// Auto-migrate for backwards compatibility (fresh databases only)
+autoMigrate();
 
 export { schema };

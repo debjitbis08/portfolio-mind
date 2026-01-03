@@ -109,8 +109,11 @@ export const suggestions = sqliteTable(
     currentPrice: real("current_price"),
     targetPrice: real("target_price"),
     status: text("status", {
-      enum: ["pending", "approved", "rejected", "expired"],
+      enum: ["pending", "approved", "rejected", "expired", "superseded"],
     }).default("pending"),
+    confidence: integer("confidence"), // 1-10 scale
+    supersededBy: text("superseded_by"), // ID of newer suggestion
+    supersededReason: text("superseded_reason"),
     createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
     expiresAt: text("expires_at").$defaultFn(() => {
       const d = new Date();

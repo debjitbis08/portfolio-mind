@@ -14,6 +14,7 @@ import {
   type ToolResponse,
   type ToolConfig,
 } from "./tools";
+import { getPendingSuggestionsForSymbols } from "./tools/suggestions";
 
 // ============================================================================
 // Types
@@ -122,25 +123,62 @@ export class GeminiService {
     const systemPrompt = this.buildSystemPrompt(availableFunds);
 
     // User message with holdings
-    const holdingSymbols = holdings.map((h) => h.symbol).join(", ");
-    const userMessage = `## Current Portfolio
+    const holdingSymbols = holdings.map((h) => h.symbol);
+
+    // Fetch previous suggestions for context injection
+    progress(8, "Checking for previous suggestions...");
+    const previousSuggestions = await getPendingSuggestionsForSymbols(
+      holdingSymbols
+    );
+
+    // Build previous suggestions context
+    let previousSuggestionsContext = "";
+    if (previousSuggestions.length > 0) {
+      previousSuggestionsContext = `## Your Previous Pending Suggestions
+
+You made the following recommendations previously that are still pending review:
+
+${previousSuggestions
+  .map(
+    (s) =>
+      `- **${s.symbol}**: ${s.action} (${
+        s.createdAt
+          ? new Date(s.createdAt).toLocaleDateString()
+          : "unknown date"
+      })${s.confidence ? ` [Confidence: ${s.confidence}/10]` : ""}
+  Rationale: ${s.rationale}`
+  )
+  .join("\n\n")}
+
+**IMPORTANT**: For each previous suggestion, you MUST decide:
+1. **STILL VALID** - If your analysis confirms it's still a good recommendation, include it again in your output
+2. **UPDATE** - If conditions changed, provide a new recommendation with updated rationale
+3. **INVALIDATE** - If the thesis is broken or you no longer recommend it, explicitly state this
+
+Do NOT ignore your previous suggestions - the user relies on consistency.
+
+`;
+    }
+
+    const userMessage = `${previousSuggestionsContext}## Current Portfolio
 
 Holdings: ${JSON.stringify(holdingsContext, null, 2)}
 
 ## Your Task (IMPORTANT: Focus on DISCOVERY!)
 
-1. **DISCOVERY PHASE**: Use \`browse_screener\` to get stocks from my watchlist screens
+1. **REVIEW PREVIOUS SUGGESTIONS**: If you have pending suggestions above, evaluate them first
+2. **DISCOVERY PHASE**: Use \`browse_screener\` to get stocks from my watchlist screens
    - Look for stocks that are NOT already in my portfolio
-   - My current holdings are: ${holdingSymbols}
+   - My current holdings are: ${holdingSymbols.join(", ")}
    - Find NEW opportunities from the screener list!
 
-2. **RESEARCH PHASE**: For promising NEW stocks (not in holdings):
+3. **RESEARCH PHASE**: For promising NEW stocks (not in holdings):
    - Use \`get_stock_thesis\` to understand the investment story
    - Use \`get_stock_news\` to check recent sentiment
 
-3. **TIMING CHECK**: Use \`get_technicals\` to verify if NOW is a good entry point
+4. **TIMING CHECK**: Use \`get_technicals\` to verify if NOW is a good entry point
 
-4. **OUTPUT**: Recommend NEW stocks to ADD to portfolio (not just existing holdings)
+5. **OUTPUT**: Recommend stocks with updated analysis. Include previous suggestions if still valid.
 
 Focus on finding 1-3 NEW stock opportunities from the screener that would diversify my portfolio.
 Only recommend existing holdings if there's a clear action (add more in value zone, or strategic rotation).`;
