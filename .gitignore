@@ -24,4 +24,5 @@ pnpm-debug.log*
 .idea/
 
 data/
+demo/
 transactions/

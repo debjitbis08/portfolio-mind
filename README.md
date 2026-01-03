@@ -92,6 +92,39 @@ pnpm preview
 
 Open [http://localhost:4328](http://localhost:4328) and log in with your `APP_PASSWORD`.
 
+## Demo Mode
+
+Want to try the app without importing your own portfolio? Generate sample data with fictional transactions:
+
+### Generate Demo Data
+
+```bash
+# Generate sample transaction files with real NSE stocks
+pnpm dlx tsx scripts/generate-demo-data.ts
+```
+
+This creates:
+
+- `demo/transactions/Demo_Order_History_*.xlsx` - Sample order history
+- `demo/transactions/Demo_Holdings_Statement_*.xlsx` - Matching holdings
+- A sample portfolio with ~15 stocks (Reliance, TCS, HDFC Bank, Infosys, etc.)
+
+### Run with Demo Database
+
+```bash
+# Start the app with a separate demo database
+DATABASE_PATH=./demo/db/investor.db pnpm dev
+```
+
+### Import Demo Transactions
+
+1. Open [http://localhost:4328](http://localhost:4328) and log in
+2. Go to **Settings** → **Import Transactions**
+3. Upload **both** files from `demo/transactions/`
+4. Click **Import** to load the sample portfolio
+
+Your real data in `data/investor.db` remains untouched. To switch back, just run `pnpm dev` without the `DATABASE_PATH` variable.
+
 ## Usage
 
 ### 1. Import Your Portfolio
