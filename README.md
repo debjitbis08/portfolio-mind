@@ -132,12 +132,18 @@ Your real data in `data/investor.db` remains untouched. To switch back, just run
 
 ## Usage
 
+For detailed workflows, see the **[User Guide](docs/USER_GUIDE.md)**.
+
 ### 1. Import Your Portfolio
 
-1. Download your **Order History** from Groww (XLSX format)
-2. Optionally download your **Holdings Statement** for reconciliation
-3. Go to Dashboard → Import Transactions
-4. Upload the files
+Supports both **Groww** and **ICICI Direct**:
+
+1. Download your **Order History** (transactions) from your broker
+2. Download your **Holdings Statement** for reconciliation (handles splits/bonuses)
+3. Go to **Settings** → **Import Transactions**
+4. Upload both files and click **Import**
+
+> **Note:** The Holdings Statement is important for correctly handling stock splits, bonus issues, and other corporate actions. See the [User Guide](docs/USER_GUIDE.md#understanding-reconciliation) for details.
 
 ### 2. Refresh Technical Data
 
@@ -145,10 +151,12 @@ Click **⚡ Refresh Technical Data** to calculate RSI and SMA indicators for you
 
 ### 3. Run AI Discovery
 
+> **Best time:** 7-8 AM before market opens (9:15 AM)
+
 Click **Run Discovery Cycle** to analyze your portfolio with Gemini AI. The AI will:
 
 - Research each holding using ValuePickr, news, and fundamentals
-- Generate actionable suggestions (BUY/SELL/HOLD)
+- Generate actionable suggestions (BUY/SELL/HOLD/RAISE_CASH)
 - Provide rationale for each recommendation
 
 ### 4. Review Suggestions
