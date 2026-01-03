@@ -17,14 +17,14 @@ A self-hosted AI-powered investment assistant for analyzing Indian stock portfol
 - 📊 **Portfolio Dashboard** - View holdings with live prices, returns, and technical indicators
 - 🤖 **AI Analysis** - Gemini-powered discovery cycles with actionable BUY/SELL/HOLD suggestions
 - 📈 **Technical Indicators** - RSI, SMA-50, SMA-200, wait zone detection
-- 📰 **Research Integration** - ValuePickr thesis, Google News sentiment, Reddit discussions
+- 📰 **Research Integration** - Looks through news, social media, and technical indicators to provide insights
 - 📥 **Easy Import** - Upload Groww order history and holdings statements
-- 🔒 **Self-Hosted** - Your data stays on your machine with SQLite
+- 🔒 **Self-Hosted** - Your data stays on your machine with local database (SQLite)
 
 ## Tech Stack
 
 - **Frontend:** Astro + SolidJS + Tailwind CSS (Catppuccin theme)
-- **Backend:** Node.js (TypeScript) with Astro SSR
+- **Backend:** Node.js (TypeScript) with Astro
 - **Database:** SQLite with Drizzle ORM
 - **AI:** Google Gemini API
 
@@ -32,14 +32,14 @@ A self-hosted AI-powered investment assistant for analyzing Indian stock portfol
 
 ### Prerequisites
 
-- Node.js 20+ (uses Volta for version management)
+- Node.js 20+
 - A [Gemini API key](https://aistudio.google.com/apikey)
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/portfolio-mind.git
+git clone https://github.com/debjitbis08/portfolio-mind.git
 cd portfolio-mind
 
 # Install dependencies
@@ -72,12 +72,12 @@ GEMINI_API_KEY=your_gemini_api_key
 
 Choose one of these methods to generate a strong password:
 
-| Method                     | Command / Link                                                  |
-| -------------------------- | --------------------------------------------------------------- |
-| **Diceware** (recommended) | [diceware.debjitbiswas.com](https://diceware.debjitbiswas.com/) |
-| **OpenSSL**                | `openssl rand -base64 24`                                       |
-| **pwgen**                  | `pwgen -s 32 1`                                                 |
-| **1Password/Bitwarden**    | Use your password manager's generator                           |
+| Method                  | Command / Link                                                  |
+| ----------------------- | --------------------------------------------------------------- |
+| **Diceware**            | [diceware.debjitbiswas.com](https://diceware.debjitbiswas.com/) |
+| **OpenSSL**             | `openssl rand -base64 24`                                       |
+| **pwgen**               | `pwgen -s 32 1`                                                 |
+| **1Password/Bitwarden** | Use your password manager's generator                           |
 
 ### Running
 
@@ -138,22 +138,6 @@ Set secrets:
 fly secrets set APP_PASSWORD="your_password"
 fly secrets set APP_SECRET="your_secret"
 fly secrets set GEMINI_API_KEY="your_key"
-```
-
-## Project Structure
-
-```
-src/
-├── components/     # SolidJS components
-├── layouts/        # Astro layouts
-├── lib/
-│   ├── db/         # Drizzle schema & database client
-│   ├── middleware/ # Auth middleware
-│   ├── scrapers/   # Web scrapers (Screener, ValuePickr)
-│   └── tools/      # AI tool implementations
-├── pages/
-│   ├── api/        # API routes
-│   └── *.astro     # Page components
 ```
 
 ## License
