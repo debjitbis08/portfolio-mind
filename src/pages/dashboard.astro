@@ -44,10 +44,7 @@ if (!session) {
     <!-- Main Content -->
     <main class="max-w-6xl mx-auto space-y-6">
       <!-- Summary Card -->
-      <section
-        id="summary-card"
-        class="bg-surface0 border border-surface1 rounded-2xl p-6"
-      >
+      <section id="summary-card" class="border border-surface1 rounded-2xl p-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg text-subtext0">
             Holdings <span id="holdings-count" class="text-text">(0)</span>
@@ -69,37 +66,37 @@ if (!session) {
             </p>
           </div>
         </div>
+      </section>
 
-        <!-- Holdings Table -->
-        <section
-          class="bg-surface0 border border-surface1 rounded-2xl overflow-hidden"
-        >
-          <div class="p-4 border-b border-surface1 flex gap-2">
-            <button
-              id="refresh-tech-btn"
-              class="px-3 py-1 text-sm bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
-            >
-              ⚡ Refresh Technical Data
-            </button>
-            <span id="tech-status" class="text-sm text-subtext0 self-center"
-            ></span>
-          </div>
-          <div id="holdings-loading" class="p-6 text-center text-subtext0">
-            Loading holdings...
-          </div>
-          <table id="holdings-table" class="w-full hidden">
-            <thead class="border-b border-surface1">
-              <tr class="text-left text-sm text-subtext0">
-                <th class="p-4">Company</th>
-                <th class="p-4 text-center">Technical</th>
-                <th class="p-4 text-right">Market price</th>
-                <th class="p-4 text-right">Returns (%)</th>
-                <th class="p-4 text-right">Current (Invested)</th>
-              </tr>
-            </thead>
-            <tbody id="holdings-body" class="divide-y divide-surface1"> </tbody>
-          </table>
-        </section>
+      <!-- Holdings Table -->
+      <section
+        class="bg-surface0 border border-surface1 rounded-2xl overflow-hidden"
+      >
+        <div class="p-4 border-b border-surface1 flex gap-2">
+          <button
+            id="refresh-tech-btn"
+            class="px-3 py-1 text-sm bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
+          >
+            ⚡ Refresh Technical Data
+          </button>
+          <span id="tech-status" class="text-sm text-subtext0 self-center"
+          ></span>
+        </div>
+        <div id="holdings-loading" class="p-6 text-center text-subtext0">
+          Loading holdings...
+        </div>
+        <table id="holdings-table" class="w-full hidden">
+          <thead class="border-b border-surface1">
+            <tr class="text-left text-sm text-subtext0">
+              <th class="p-4">Company</th>
+              <th class="p-4 text-center">Technical</th>
+              <th class="p-4 text-right">Market price</th>
+              <th class="p-4 text-right">Returns (%)</th>
+              <th class="p-4 text-right">Current (Invested)</th>
+            </tr>
+          </thead>
+          <tbody id="holdings-body" class="divide-y divide-surface1"> </tbody>
+        </table>
       </section>
 
       <!-- AI Discovery Section -->

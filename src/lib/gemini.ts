@@ -172,7 +172,7 @@ Only recommend existing holdings if there's a clear action (add more in value zo
         iterations++;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: "gemini-3-pro-preview",
           contents,
           config,
         });
