@@ -204,7 +204,7 @@ export const GET: APIRoute = async ({ params, request }) => {
         await updateProgress(90, "Processing actionable suggestions...");
 
         const actionableSuggestions = suggestions.filter((s) =>
-          ["BUY", "SELL", "MOVE"].includes(s.action)
+          ["BUY", "SELL", "MOVE", "RAISE_CASH"].includes(s.action)
         );
 
         // Step 7: Store suggestions (with supersession logic)
@@ -227,7 +227,12 @@ export const GET: APIRoute = async ({ params, request }) => {
               .values({
                 symbol: s.symbol,
                 stockName: s.stock_name,
-                action: s.action as "BUY" | "SELL" | "HOLD" | "WATCH",
+                action: s.action as
+                  | "BUY"
+                  | "SELL"
+                  | "HOLD"
+                  | "WATCH"
+                  | "RAISE_CASH",
                 rationale: s.rationale || s.reason,
                 technicalScore: s.technical_score,
                 confidence: s.confidence,

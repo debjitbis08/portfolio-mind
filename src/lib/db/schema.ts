@@ -102,7 +102,7 @@ export const suggestions = sqliteTable(
     symbol: text("symbol").notNull(),
     stockName: text("stock_name"),
     action: text("action", {
-      enum: ["BUY", "SELL", "HOLD", "WATCH"],
+      enum: ["BUY", "SELL", "HOLD", "WATCH", "RAISE_CASH"],
     }).notNull(),
     rationale: text("rationale").notNull(),
     technicalScore: real("technical_score"),

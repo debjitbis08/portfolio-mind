@@ -92,7 +92,7 @@ export const POST: APIRoute = async ({ request }) => {
           cycleId: cycleRun.id,
           symbol: s.symbol,
           stockName: s.stock_name,
-          action: s.action as "BUY" | "SELL" | "HOLD" | "WATCH",
+          action: s.action as "BUY" | "SELL" | "HOLD" | "WATCH" | "RAISE_CASH",
           rationale: s.rationale || s.reason,
           technicalScore: s.technical_score,
           currentPrice: holdings.find((h) => h.symbol === s.symbol)

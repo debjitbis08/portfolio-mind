@@ -465,6 +465,16 @@ if (!session) {
                 actionBg = "bg-mauve/20";
                 actionIcon = "MOVE";
                 details = `<span class="text-xs text-subtext1 ml-2">Sell ${s.sell_quantity} ${s.sell_symbol} → Buy ${s.quantity} ${s.symbol}</span>`;
+              } else if (s.action === "RAISE_CASH") {
+                actionColor = "text-peach";
+                actionBg = "bg-peach/20";
+                actionIcon = "💵 CASH";
+                details = s.quantity
+                  ? `<span class="text-xs text-subtext1 ml-2">Sell ${s.quantity} shares to cash</span>`
+                  : `<span class="text-xs text-subtext1 ml-2">Raise cash from position</span>`;
+                if (s.cash_deployment_notes) {
+                  details += `<span class="text-xs text-peach ml-2">📝 ${s.cash_deployment_notes}</span>`;
+                }
               }
 
               // Confidence badge

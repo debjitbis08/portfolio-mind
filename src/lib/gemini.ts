@@ -43,7 +43,7 @@ export interface HoldingForAnalysis {
 export interface Suggestion {
   symbol: string;
   stock_name?: string;
-  action: "BUY" | "SELL" | "MOVE";
+  action: "BUY" | "SELL" | "MOVE" | "RAISE_CASH";
   confidence: number;
   reason: string;
   rationale?: string;
@@ -52,6 +52,7 @@ export interface Suggestion {
   sell_symbol?: string;
   sell_quantity?: number;
   technical_score?: number;
+  cash_deployment_notes?: string; // For RAISE_CASH: when/why to deploy this cash
 }
 
 export interface ToolCallProgress {
@@ -364,6 +365,19 @@ Only sell when:
 2. **STRATEGIC ROTATION**: >100% gains AND better opportunity exists
 NEVER sell just because RSI is high or stock is above SMA200.
 
+### When to RAISE_CASH (Sell Without Reinvestment)
+Use RAISE_CASH when you want to sell but have NO immediate replacement:
+1. **THESIS BROKEN** but no clear alternative identified yet
+2. **POSITION TOO LARGE** relative to current conviction - trim to right-size
+3. **MARKET CAUTION** - build cash for anticipated pullback or uncertainty
+4. **STRATEGIC TRIMMING** - take profits to have dry powder for future opportunities
+
+RAISE_CASH is different from SELL:
+- SELL implies reinvestment or rotation to another stock
+- RAISE_CASH explicitly means "hold the proceeds as cash for now"
+
+You can partially raise cash (e.g., sell 50% of position) by specifying quantity.
+
 ### Protected Categories
 - **Gold ETFs**: Not value plays, wealth preservation
 - **Momentum sectors (Defense, Infra)**: Ride the wave if story is good
@@ -379,12 +393,13 @@ NEVER sell just because RSI is high or stock is above SMA200.
 \`\`\`json
 [
   {
-    "action": "BUY" | "SELL",
+    "action": "BUY" | "SELL" | "RAISE_CASH",
     "symbol": "STOCKNAME",
     "quantity": 10,
     "rationale": "Strong thesis because [story reason]. Timing favorable with RSI at X.",
     "technical_score": 85,
-    "allocation_amount": 50000
+    "allocation_amount": 50000,
+    "cash_deployment_notes": "Optional: when/why to deploy this cash later"
   }
 ]
 \`\`\`
@@ -431,14 +446,16 @@ Better to do nothing than to make a low-conviction trade.`;
             (h) => h.symbol === s.symbol || h.symbol === s.sell_symbol
           );
 
-          const action = ["BUY", "SELL", "MOVE"].includes(s.action)
+          const action = ["BUY", "SELL", "MOVE", "RAISE_CASH"].includes(
+            s.action
+          )
             ? s.action
             : "BUY";
 
           return {
             symbol: s.symbol,
             stock_name: holding?.stock_name || s.symbol,
-            action: action as "BUY" | "SELL" | "MOVE",
+            action: action as "BUY" | "SELL" | "MOVE" | "RAISE_CASH",
             reason: s.rationale || s.reason || "No reason provided",
             rationale: s.rationale || s.reason,
             confidence: s.technical_score || 80,
