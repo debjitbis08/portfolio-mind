@@ -4,10 +4,22 @@
  * Fetches recent discussions about stocks from Indian investment subreddits.
  * Uses Reddit's public JSON API (no auth required for read-only).
  *
+ * Fetches full post content and top comments, then uses a cheap model
+ * (Gemini 2.5 Flash) to create a summary - just like a human would read
+ * through the discussions and form an opinion.
+ *
  * Subreddits:
  * - r/IndiaInvestments (more serious, long-term)
  * - r/IndianStreetBets (more speculative, meme-ish)
  */
+
+import { GEMINI_API_KEY } from "astro:env/server";
+
+interface RedditComment {
+  body: string;
+  score: number;
+  author: string;
+}
 
 interface RedditPost {
   title: string;
@@ -19,74 +31,110 @@ interface RedditPost {
   subreddit: string;
 }
 
-export interface RedditSentiment {
+export interface RedditPostWithComments {
+  title: string;
+  content: string;
+  score: number;
+  comment_count: number;
+  subreddit: string;
+  age_hours: number;
+  url: string;
+  top_comments: {
+    text: string;
+    score: number;
+    author: string;
+  }[];
+}
+
+export interface RedditDiscussions {
   query: string;
   subreddits_searched: string[];
   posts_found: number;
-  posts: {
+  posts: RedditPostWithComments[];
+  fetched_at: string;
+}
+
+export interface RedditSentimentIntel {
+  query: string;
+  posts_found: number;
+  sentiment_summary: string;
+  key_points: string[];
+  discussion_quality: "high" | "medium" | "low" | "none";
+  subreddits_searched: string[];
+  sample_posts: {
     title: string;
-    score: number;
-    comments: number;
     subreddit: string;
-    age_hours: number;
+    score: number;
     url: string;
   }[];
-  sentiment_signal: "BULLISH" | "BEARISH" | "NEUTRAL" | "NO_DATA";
   fetched_at: string;
 }
 
 const SUBREDDITS = ["IndiaInvestments", "IndianStreetBets"];
 
-// Simple sentiment keywords (can be expanded)
-const BULLISH_KEYWORDS = [
-  "buy",
-  "bullish",
-  "undervalued",
-  "accumulate",
-  "long",
-  "gem",
-  "multibagger",
-  "oversold",
-  "strong",
-  "opportunity",
-];
-const BEARISH_KEYWORDS = [
-  "sell",
-  "bearish",
-  "overvalued",
-  "avoid",
-  "short",
-  "dump",
-  "bubble",
-  "overbought",
-  "exit",
-  "scam",
-];
+const HEADERS = {
+  "User-Agent": "portfolio-mind/1.0 (portfolio analysis tool)",
+};
 
 /**
- * Search Reddit for stock discussions
+ * Fetch top comments for a post
  */
-export async function searchReddit(
+async function fetchTopComments(
+  permalink: string,
+  maxComments: number = 5
+): Promise<RedditComment[]> {
+  try {
+    const url = `https://old.reddit.com${permalink}.json?limit=${maxComments}&depth=1`;
+
+    const response = await fetch(url, { headers: HEADERS });
+
+    if (!response.ok) {
+      console.warn(`[Reddit] Failed to fetch comments: ${response.status}`);
+      return [];
+    }
+
+    const data = await response.json();
+
+    // Reddit returns [post, comments] array
+    const commentsData = data[1]?.data?.children || [];
+
+    const comments: RedditComment[] = [];
+    for (const comment of commentsData) {
+      if (comment.kind === "t1" && comment.data?.body) {
+        comments.push({
+          body: comment.data.body,
+          score: comment.data.score || 0,
+          author: comment.data.author || "[deleted]",
+        });
+      }
+    }
+
+    // Sort by score and return top N
+    return comments.sort((a, b) => b.score - a.score).slice(0, maxComments);
+  } catch (error) {
+    console.error(`[Reddit] Error fetching comments:`, error);
+    return [];
+  }
+}
+
+/**
+ * Search Reddit for stock discussions and fetch top comments
+ */
+async function fetchDiscussions(
   query: string,
-  maxResults: number = 10
-): Promise<RedditSentiment> {
+  maxPosts: number = 5
+): Promise<RedditDiscussions> {
   console.log(`[Reddit] Searching for: ${query}`);
 
   const allPosts: RedditPost[] = [];
 
   for (const subreddit of SUBREDDITS) {
     try {
-      // Use old.reddit.com with a proper User-Agent to avoid blocks
       const url = `https://old.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(
         query
-      )}&restrict_sr=1&sort=new&limit=10`;
+      )}&restrict_sr=1&sort=relevance&t=year&limit=10`;
 
-      const response = await fetch(url, {
-        headers: {
-          // Reddit requires a descriptive User-Agent
-          "User-Agent": "portfolio-mind/1.0 (portfolio analysis tool)",
-        },
-      });
+      const response = await fetch(url, { headers: HEADERS });
 
       if (!response.ok) {
         console.warn(`[Reddit] ${subreddit} returned ${response.status}`);
@@ -110,84 +158,211 @@ export async function searchReddit(
       }
 
       // Small delay between subreddit requests
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 300));
     } catch (error) {
       console.error(`[Reddit] Error searching ${subreddit}:`, error);
     }
   }
 
-  // Sort by recency
-  allPosts.sort((a, b) => b.created_utc - a.created_utc);
+  // Sort by score (engagement)
+  allPosts.sort((a, b) => b.score - a.score);
 
-  // Take top N
-  const topPosts = allPosts.slice(0, maxResults);
-
-  // Calculate sentiment
-  const sentimentSignal = analyzeSentiment(topPosts);
+  // Take top N posts
+  const topPosts = allPosts.slice(0, maxPosts);
 
   const now = Date.now() / 1000;
+  const postsWithComments: RedditPostWithComments[] = [];
 
-  const result: RedditSentiment = {
+  // Fetch comments for each post
+  for (const post of topPosts) {
+    await new Promise((r) => setTimeout(r, 300));
+
+    const comments = await fetchTopComments(post.permalink, 5);
+
+    postsWithComments.push({
+      title: post.title,
+      content: post.selftext, // Full content, no truncation
+      score: post.score,
+      comment_count: post.num_comments,
+      subreddit: post.subreddit,
+      age_hours: Math.round((now - post.created_utc) / 3600),
+      url: `https://www.reddit.com${post.permalink}`,
+      top_comments: comments.map((c) => ({
+        text: c.body, // Full comment, no truncation
+        score: c.score,
+        author: c.author,
+      })),
+    });
+  }
+
+  console.log(
+    `[Reddit] Found ${allPosts.length} posts, returning top ${postsWithComments.length} with comments`
+  );
+
+  return {
     query,
     subreddits_searched: SUBREDDITS,
     posts_found: allPosts.length,
-    posts: topPosts.map((p) => ({
-      title: p.title,
-      score: p.score,
-      comments: p.num_comments,
-      subreddit: p.subreddit,
-      age_hours: Math.round((now - p.created_utc) / 3600),
-      url: `https://www.reddit.com${p.permalink}`,
-    })),
-    sentiment_signal: sentimentSignal,
+    posts: postsWithComments,
     fetched_at: new Date().toISOString(),
   };
-
-  console.log(
-    `[Reddit] Found ${allPosts.length} posts, sentiment: ${sentimentSignal}`
-  );
-
-  return result;
 }
 
 /**
- * Analyze sentiment from post titles/content
+ * Use a cheap model to summarize Reddit discussions
  */
-function analyzeSentiment(
-  posts: RedditPost[]
-): "BULLISH" | "BEARISH" | "NEUTRAL" | "NO_DATA" {
-  if (posts.length === 0) {
-    return "NO_DATA";
+async function summarizeWithLLM(discussions: RedditDiscussions): Promise<{
+  sentiment_summary: string;
+  key_points: string[];
+  discussion_quality: "high" | "medium" | "low" | "none";
+}> {
+  if (discussions.posts.length === 0) {
+    return {
+      sentiment_summary: "No discussions found for this stock on Reddit.",
+      key_points: [],
+      discussion_quality: "none",
+    };
   }
 
-  let bullishScore = 0;
-  let bearishScore = 0;
+  try {
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-  for (const post of posts) {
-    const text = (post.title + " " + post.selftext).toLowerCase();
-    const weight = Math.log2(post.score + 2); // Weight by upvotes
+    // Build the prompt with full content
+    const postsText = discussions.posts
+      .map((p) => {
+        const commentsText = p.top_comments
+          .map((c) => `  - [${c.author}, ${c.score} upvotes]: ${c.text}`)
+          .join("\n");
 
-    for (const kw of BULLISH_KEYWORDS) {
-      if (text.includes(kw)) {
-        bullishScore += weight;
-      }
-    }
+        const ageStr =
+          p.age_hours < 24
+            ? `${p.age_hours}h ago`
+            : `${Math.round(p.age_hours / 24)}d ago`;
 
-    for (const kw of BEARISH_KEYWORDS) {
-      if (text.includes(kw)) {
-        bearishScore += weight;
-      }
-    }
+        return `### r/${p.subreddit} | ${p.score} upvotes | ${
+          p.comment_count
+        } comments | ${ageStr}
+**${p.title}**
+
+${p.content || "(no body text)"}
+
+**Top Comments:**
+${commentsText || "(no comments)"}`;
+      })
+      .join("\n\n---\n\n");
+
+    const prompt = `You are analyzing Reddit discussions about "${discussions.query}" from Indian investing subreddits (r/IndiaInvestments and r/IndianStreetBets).
+
+## Discussions Found (${discussions.posts_found} total, showing top ${discussions.posts.length})
+
+${postsText}
+
+---
+
+Please analyze these discussions and provide:
+
+1. **SENTIMENT SUMMARY** (2-3 sentences): What is the overall retail investor sentiment? Are people bullish, bearish, or mixed? What's driving their opinion?
+
+2. **KEY POINTS** (bullet list): What are the main concerns, catalysts, or talking points being discussed? List 3-5 key points.
+
+3. **DISCUSSION QUALITY**: Rate as HIGH (informed analysis, data-driven), MEDIUM (opinions with some reasoning), or LOW (hype/FUD/memes without substance).
+
+Format your response exactly as:
+SENTIMENT:
+[Your sentiment summary]
+
+KEY_POINTS:
+- [Point 1]
+- [Point 2]
+- [Point 3]
+
+QUALITY: [HIGH/MEDIUM/LOW]`;
+
+    console.log("[Reddit] Summarizing with Gemini 2.5 Flash...");
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    });
+
+    const text = response.text || "";
+
+    // Parse the response
+    const sentimentMatch = text.match(
+      /SENTIMENT:\s*([\s\S]*?)(?=KEY_POINTS:|$)/i
+    );
+    const keyPointsMatch = text.match(
+      /KEY_POINTS:\s*([\s\S]*?)(?=QUALITY:|$)/i
+    );
+    const qualityMatch = text.match(/QUALITY:\s*(HIGH|MEDIUM|LOW)/i);
+
+    // Extract key points as array
+    const keyPointsText = keyPointsMatch?.[1]?.trim() || "";
+    const keyPoints = keyPointsText
+      .split("\n")
+      .map((line) => line.replace(/^[-•*]\s*/, "").trim())
+      .filter((line) => line.length > 0);
+
+    const qualityRaw = qualityMatch?.[1]?.toUpperCase() || "MEDIUM";
+    const quality = ["HIGH", "MEDIUM", "LOW"].includes(qualityRaw)
+      ? (qualityRaw.toLowerCase() as "high" | "medium" | "low")
+      : "medium";
+
+    return {
+      sentiment_summary:
+        sentimentMatch?.[1]?.trim() || "Unable to determine sentiment",
+      key_points: keyPoints,
+      discussion_quality: quality,
+    };
+  } catch (error) {
+    console.error("[Reddit] LLM summarization failed:", error);
+    return {
+      sentiment_summary: `Found ${discussions.posts_found} posts but summarization failed.`,
+      key_points: [],
+      discussion_quality: "medium",
+    };
+  }
+}
+
+/**
+ * Main entry point: Search Reddit and get summarized intel
+ */
+export async function searchReddit(
+  query: string,
+  maxPosts: number = 5
+): Promise<RedditSentimentIntel> {
+  const discussions = await fetchDiscussions(query, maxPosts);
+
+  if (discussions.posts_found === 0) {
+    return {
+      query,
+      posts_found: 0,
+      sentiment_summary: `No Reddit discussions found for "${query}".`,
+      key_points: [],
+      discussion_quality: "none",
+      subreddits_searched: SUBREDDITS,
+      sample_posts: [],
+      fetched_at: new Date().toISOString(),
+    };
   }
 
-  // Determine signal
-  const total = bullishScore + bearishScore;
-  if (total < 2) {
-    return "NEUTRAL"; // Not enough signal
-  }
+  // Summarize with LLM
+  const summary = await summarizeWithLLM(discussions);
 
-  const ratio = bullishScore / (bearishScore + 0.1);
-  if (ratio > 1.5) return "BULLISH";
-  if (ratio < 0.67) return "BEARISH";
-  return "NEUTRAL";
+  return {
+    query,
+    posts_found: discussions.posts_found,
+    sentiment_summary: summary.sentiment_summary,
+    key_points: summary.key_points,
+    discussion_quality: summary.discussion_quality,
+    subreddits_searched: discussions.subreddits_searched,
+    sample_posts: discussions.posts.slice(0, 3).map((p) => ({
+      title: p.title,
+      subreddit: p.subreddit,
+      score: p.score,
+      url: p.url,
+    })),
+    fetched_at: discussions.fetched_at,
+  };
 }

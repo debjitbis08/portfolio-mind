@@ -57,10 +57,19 @@ export interface ToolResponse {
   };
 }
 
+// Tool configuration types
+export interface ToolConfigItem {
+  enabled: boolean;
+  [key: string]: unknown;
+}
+
+export type ToolConfig = Record<string, ToolConfigItem>;
+
 export interface ToolRegistration {
   declaration: ToolDeclaration;
   execute: ToolExecutor;
   source: string; // For rate limiting: 'screener', 'valuepickr', 'yahoo', etc.
+  defaultConfig: ToolConfigItem;
 }
 
 // ============================================================================
@@ -93,7 +102,7 @@ const browseScreenerDeclaration: ToolDeclaration = {
 const getStockThesisDeclaration: ToolDeclaration = {
   name: "get_stock_thesis",
   description:
-    "Get the investment thesis and recent discussion activity for a specific stock from ValuePickr. Returns the original thesis post (why to invest) and sentiment from recent posts.",
+    "Get comprehensive investment research from ValuePickr (Indian value investing forum). Returns a full summary of the original investment thesis (why to invest, growth drivers, competitive advantages) PLUS current community sentiment from recent discussion. This is your PRIMARY source for buy/sell decisions - use it to understand if the investment story is still intact.",
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -160,7 +169,7 @@ const getStockNewsDeclaration: ToolDeclaration = {
 const getRedditSentimentDeclaration: ToolDeclaration = {
   name: "get_reddit_sentiment",
   description:
-    "Get retail investor sentiment from Reddit (r/IndiaInvestments, r/IndianStreetBets). Returns a sentiment signal (BULLISH/BEARISH/NEUTRAL) based on recent discussions. Use this as a CONTRARIAN indicator - high retail bullishness might mean crowded trade, high bearishness might mean opportunity.",
+    "Get Reddit discussions about a stock from r/IndiaInvestments and r/IndianStreetBets. Returns actual post content and top comments for you to read and interpret, just like a human would. Analyze the discussions to understand retail sentiment, key concerns, catalysts being discussed, and quality of analysis. Remember: retail sentiment can be a CONTRARIAN indicator.",
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -195,6 +204,7 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       declaration: browseScreenerDeclaration,
       execute: notImplemented,
       source: "internal", // Just reads from cache, no rate limit needed
+      defaultConfig: { enabled: true, autoRefreshHours: 24 },
     },
   ],
   [
@@ -203,6 +213,7 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       declaration: getStockThesisDeclaration,
       execute: notImplemented,
       source: "valuepickr",
+      defaultConfig: { enabled: true, summaryStyle: "detailed" },
     },
   ],
   [
@@ -211,6 +222,7 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       declaration: getTechnicalsDeclaration,
       execute: notImplemented,
       source: "yahoo",
+      defaultConfig: { enabled: true, rsiOversold: 35, rsiOverbought: 70 },
     },
   ],
   [
@@ -219,6 +231,7 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       declaration: checkWaitZoneDeclaration,
       execute: notImplemented,
       source: "internal",
+      defaultConfig: { enabled: true, sensitivity: "moderate" },
     },
   ],
   [
@@ -227,6 +240,7 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       declaration: getStockNewsDeclaration,
       execute: notImplemented,
       source: "google_news",
+      defaultConfig: { enabled: true, maxHeadlines: 5, ageLimitDays: 7 },
     },
   ],
   [
@@ -235,6 +249,10 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       declaration: getRedditSentimentDeclaration,
       execute: notImplemented,
       source: "reddit",
+      defaultConfig: {
+        enabled: true,
+        subreddits: ["IndiaInvestments", "IndianStreetBets"],
+      },
     },
   ],
 ]);
@@ -281,4 +299,52 @@ export function getToolSource(name: string): string | undefined {
  */
 export function listTools(): string[] {
   return Array.from(TOOL_REGISTRY.keys());
+}
+
+/**
+ * Get default configuration for all tools
+ */
+export function getDefaultToolConfig(): ToolConfig {
+  const config: ToolConfig = {};
+  for (const [name, tool] of TOOL_REGISTRY) {
+    config[name] = { ...tool.defaultConfig };
+  }
+  return config;
+}
+
+/**
+ * Get merged tool config (user config with defaults)
+ */
+export function getMergedToolConfig(userConfig: ToolConfig | null): ToolConfig {
+  const defaults = getDefaultToolConfig();
+  if (!userConfig) return defaults;
+
+  // Merge: user config overrides defaults
+  for (const name of Object.keys(defaults)) {
+    if (userConfig[name]) {
+      defaults[name] = { ...defaults[name], ...userConfig[name] };
+    }
+  }
+  return defaults;
+}
+
+/**
+ * Get tool declarations filtered by enabled status
+ */
+export function getEnabledToolDeclarations(
+  config: ToolConfig
+): ToolDeclaration[] {
+  return Array.from(TOOL_REGISTRY.entries())
+    .filter(([name]) => config[name]?.enabled !== false)
+    .map(([, tool]) => tool.declaration);
+}
+
+/**
+ * Get config for a specific tool
+ */
+export function getToolConfig(
+  name: string,
+  config: ToolConfig
+): ToolConfigItem | undefined {
+  return config[name];
 }

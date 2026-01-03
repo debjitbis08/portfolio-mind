@@ -207,6 +207,25 @@ if (!session) {
           </div>
         </section>
 
+        <!-- AI Tools -->
+        <section class="bg-surface0 border border-surface1 rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <h2 class="text-xl font-semibold text-green">AI Tools</h2>
+            <span class="px-2 py-0.5 bg-surface1 text-xs rounded text-subtext0"
+              >Per-Tool Config</span
+            >
+          </div>
+
+          <p class="text-sm text-subtext0 mb-6">
+            Enable or disable specific tools the AI agent can use during
+            analysis. Disabled tools will not be available to Gemini.
+          </p>
+
+          <div id="tools-container" class="space-y-4">
+            <!-- Tool cards will be populated by JavaScript -->
+          </div>
+        </section>
+
         <!-- Save Actions -->
         <div
           class="flex items-center justify-end gap-3 pt-4 border-t border-surface1"
@@ -245,6 +264,47 @@ if (!session) {
     "save-settings-btn"
   ) as HTMLButtonElement;
   const statusEl = document.getElementById("save-status");
+  const toolsContainer = document.getElementById("tools-container");
+
+  // Tool metadata for display
+  const TOOL_METADATA: Record<
+    string,
+    { label: string; description: string; icon: string }
+  > = {
+    browse_screener: {
+      label: "Browse Screener",
+      description: "Fetch stocks from screener.in screens",
+      icon: "📊",
+    },
+    get_stock_thesis: {
+      label: "Stock Thesis",
+      description: "Get investment thesis from ValuePickr",
+      icon: "📝",
+    },
+    get_technicals: {
+      label: "Technicals",
+      description: "Get RSI, SMA50, SMA200 indicators",
+      icon: "📈",
+    },
+    check_wait_zone: {
+      label: "Wait Zone Check",
+      description: "Check if stock is overextended",
+      icon: "⏸️",
+    },
+    get_stock_news: {
+      label: "Stock News",
+      description: "Get recent news from Google News",
+      icon: "📰",
+    },
+    get_reddit_sentiment: {
+      label: "Reddit Sentiment",
+      description: "Get retail sentiment as contrarian indicator",
+      icon: "🔴",
+    },
+  };
+
+  // Current tool config state
+  let currentToolConfig: Record<string, any> = {};
 
   // Load Settings
   async function loadSettings() {
@@ -287,6 +347,12 @@ if (!session) {
           Object.entries(settings.user_mappings).forEach(([from, to]) =>
             addMappingRow(from, to as string)
           );
+        }
+
+        // Populate Tool Config
+        if (settings.tool_config) {
+          currentToolConfig = settings.tool_config;
+          renderToolCards();
         }
       }
     } catch (err) {
@@ -340,6 +406,51 @@ if (!session) {
     });
   }
 
+  // Render tool configuration cards
+  function renderToolCards() {
+    if (!toolsContainer) return;
+    toolsContainer.innerHTML = "";
+
+    for (const [toolName, config] of Object.entries(currentToolConfig)) {
+      const meta = TOOL_METADATA[toolName] || {
+        label: toolName,
+        description: "",
+        icon: "🔧",
+      };
+      const enabled = config.enabled !== false;
+
+      const card = document.createElement("div");
+      card.className = `p-4 rounded-xl border transition-all ${
+        enabled
+          ? "bg-surface1/30 border-surface1/50"
+          : "bg-surface1/10 border-surface1/20 opacity-60"
+      }`;
+      card.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="text-xl">${meta.icon}</span>
+            <div>
+              <h3 class="font-medium text-text">${meta.label}</h3>
+              <p class="text-xs text-subtext0">${meta.description}</p>
+            </div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" class="sr-only peer tool-toggle" data-tool="${toolName}" ${enabled ? "checked" : ""}>
+            <div class="w-11 h-6 bg-surface1 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-subtext0 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green peer-checked:after:bg-crust"></div>
+          </label>
+        </div>
+      `;
+      toolsContainer.appendChild(card);
+
+      // Add toggle handler
+      const toggle = card.querySelector(".tool-toggle") as HTMLInputElement;
+      toggle?.addEventListener("change", () => {
+        currentToolConfig[toolName].enabled = toggle.checked;
+        renderToolCards();
+      });
+    }
+  }
+
   // Event Listeners
   addUrlBtn?.addEventListener("click", () => addUrlRow());
   addMappingBtn?.addEventListener("click", () => addMappingRow());
@@ -382,6 +493,9 @@ if (!session) {
       }
     });
     payload.user_mappings = userMappings;
+
+    // Add tool config
+    payload.tool_config = currentToolConfig;
 
     try {
       const res = await fetch("/api/settings", {

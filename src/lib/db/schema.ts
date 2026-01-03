@@ -135,6 +135,7 @@ export const settings = sqliteTable("settings", {
   notificationEmail: text("notification_email"),
   screenerUrls: text("screener_urls"), // JSON array stored as text
   symbolMappings: text("symbol_mappings"), // JSON object stored as text
+  toolConfig: text("tool_config"), // JSON: { toolName: { enabled: boolean, ...options } }
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
 

@@ -7,9 +7,12 @@
 import { GEMINI_API_KEY } from "astro:env/server";
 import {
   getToolDeclarations,
+  getEnabledToolDeclarations,
+  getMergedToolConfig,
   executeTool,
   clearRequestCache,
   type ToolResponse,
+  type ToolConfig,
 } from "./tools";
 
 // ============================================================================
@@ -75,7 +78,8 @@ export class GeminiService {
   static async analyzePortfolio(
     holdings: HoldingForAnalysis[],
     availableFunds: number = 0,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    toolConfig?: ToolConfig | null
   ): Promise<Suggestion[]> {
     if (holdings.length === 0) return [];
 
@@ -141,8 +145,9 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
 Focus on finding 1-3 NEW stock opportunities from the screener that would diversify my portfolio.
 Only recommend existing holdings if there's a clear action (add more in value zone, or strategic rotation).`;
 
-    // Build config with tools
-    const toolDeclarations = getToolDeclarations();
+    // Build config with tools (filtered by enabled status)
+    const mergedConfig = getMergedToolConfig(toolConfig ?? null);
+    const toolDeclarations = getEnabledToolDeclarations(mergedConfig);
     const config: any = {
       tools: toolDeclarations.length
         ? [{ functionDeclarations: toolDeclarations }]
@@ -268,16 +273,17 @@ Your primary goal is WEALTH BUILDING through patient accumulation of quality bus
 - \`browse_screener\`: Get stocks from pre-built screener.in screens (discovery)
 - \`get_stock_thesis\`: Get ValuePickr investment thesis (FUNDAMENTAL ANALYSIS - highest trust)
 - \`get_stock_news\`: Get Google News headlines (CURRENT EVENTS - medium trust)
-- \`get_reddit_sentiment\`: Get Reddit sentiment (CONTRARIAN SIGNAL - use carefully!)
+- \`get_reddit_sentiment\`: Get Reddit discussions with posts and top comments (read like a human!)
 - \`get_technicals\`: Get RSI, SMA50, SMA200 for timing signals
 - \`check_wait_zone\`: Check if a stock is overextended (timing only)
 
 ## Tool Priority & Trust Hierarchy
 1. **ValuePickr thesis** = PRIMARY source for buy/sell decisions (highest trust)
 2. **Google News** = Recent events, context (medium trust)
-3. **Reddit sentiment** = CONTRARIAN indicator only:
-   - High retail bullishness → Might be crowded trade, be cautious
-   - High retail bearishness → Might be opportunity if thesis is strong
+3. **Reddit discussions** = Read the actual posts and comments like a human would:
+   - What specific concerns are retail investors raising?
+   - Is the discussion quality high (informed analysis) or low (hype/FUD)?
+   - Use as CONTRARIAN signal: extreme bullishness = crowded trade, extreme fear = opportunity
 4. **Technicals** = Timing signals, not reasons to buy
 
 ## Investment Philosophy

@@ -48,6 +48,23 @@ export const GET: APIRoute = async ({ request }) => {
       }
     }
 
+    // Parse tool configuration
+    let toolConfig = null;
+    if (data?.toolConfig) {
+      try {
+        toolConfig = JSON.parse(data.toolConfig);
+      } catch {
+        toolConfig = null;
+      }
+    }
+
+    // Merge with defaults
+    const { getMergedToolConfig, getDefaultToolConfig } = await import(
+      "../../lib/tools"
+    );
+    const mergedToolConfig = getMergedToolConfig(toolConfig);
+    const defaultToolConfig = getDefaultToolConfig();
+
     // For the UI, we return the user mappings + indicating built-in ones
     const { BUILT_IN_MAPPINGS } = await import("../../lib/mappings");
 
@@ -60,6 +77,8 @@ export const GET: APIRoute = async ({ request }) => {
           screener_urls: screenerUrlsParsed,
           user_mappings: userMappings,
           built_in_mappings: BUILT_IN_MAPPINGS,
+          tool_config: mergedToolConfig,
+          default_tool_config: defaultToolConfig,
         },
       }),
       {
@@ -104,6 +123,9 @@ export const POST: APIRoute = async ({ request }) => {
       // Clear mappings cache
       const { clearMappingsCache } = await import("../../lib/mappings");
       clearMappingsCache();
+    }
+    if (body.tool_config !== undefined) {
+      updates.toolConfig = JSON.stringify(body.tool_config);
     }
 
     // Upsert settings (id=1 is always the single row)

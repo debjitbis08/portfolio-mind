@@ -79,6 +79,16 @@ export const GET: APIRoute = async ({ params, request }) => {
 
         const availableFunds = settings?.availableFunds || 0;
 
+        // Parse tool config
+        let toolConfig = null;
+        if (settings?.toolConfig) {
+          try {
+            toolConfig = JSON.parse(settings.toolConfig);
+          } catch {
+            toolConfig = null;
+          }
+        }
+
         // Step 2: Fetch Fundamentals
         await updateProgress(20, "Gathering fundamental intel...");
 
@@ -186,7 +196,8 @@ export const GET: APIRoute = async ({ params, request }) => {
                   }
                 : undefined,
             });
-          }
+          },
+          toolConfig
         );
 
         // Step 6: Filter actionable suggestions

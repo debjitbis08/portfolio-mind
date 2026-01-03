@@ -2,7 +2,13 @@
  * Reddit Sentiment Tool
  *
  * Provides retail investor sentiment from Indian investment subreddits.
- * This is a SIGNAL source, not a thesis source - use for contrarian indicators.
+ * Fetches full post content and comments, then uses Gemini 2.5 Flash
+ * to create a comprehensive summary - just like a human would read
+ * through the discussions and form an opinion.
+ *
+ * Use this as a CONTRARIAN indicator:
+ * - High retail bullishness → Might be crowded trade
+ * - High retail bearishness → Might be opportunity if thesis is strong
  */
 
 import { registerToolExecutor, type ToolResponse } from "./registry";
@@ -34,16 +40,15 @@ async function getRedditSentiment(
   try {
     console.log(`[Reddit Tool] Fetching sentiment for: ${query}`);
 
-    const sentiment = await searchReddit(query.trim(), 10);
+    const intel = await searchReddit(query.trim(), 5);
 
-    if (sentiment.posts_found === 0) {
+    if (intel.posts_found === 0) {
       return {
         success: true,
         data: {
           found: false,
           query: query,
-          message: `No Reddit discussions found for "${query}"`,
-          sentiment_signal: "NO_DATA",
+          message: `No Reddit discussions found for "${query}". This stock may not be actively discussed by retail investors.`,
         },
         meta: {
           source: "reddit",
@@ -56,26 +61,18 @@ async function getRedditSentiment(
       data: {
         found: true,
         query: query,
-        posts_found: sentiment.posts_found,
-        sentiment_signal: sentiment.sentiment_signal,
-        subreddits: sentiment.subreddits_searched,
-        recent_posts: sentiment.posts.slice(0, 5).map((p) => ({
-          title: p.title.substring(0, 100),
-          score: p.score,
-          comments: p.comments,
-          subreddit: p.subreddit,
-          age_hours: p.age_hours,
-        })),
-        interpretation:
-          sentiment.sentiment_signal === "BULLISH"
-            ? "Retail sentiment is positive - could indicate crowded trade (use as contrarian signal)"
-            : sentiment.sentiment_signal === "BEARISH"
-            ? "Retail sentiment is negative - could be opportunity if thesis is strong"
-            : "Retail sentiment is neutral or mixed",
+        posts_found: intel.posts_found,
+        sentiment_summary: intel.sentiment_summary,
+        key_points: intel.key_points,
+        discussion_quality: intel.discussion_quality,
+        subreddits: intel.subreddits_searched.map((s) => `r/${s}`),
+        sample_discussions: intel.sample_posts,
+        instructions:
+          "Use this as a CONTRARIAN indicator. High retail bullishness may indicate a crowded trade. High retail bearishness, combined with a strong thesis, may indicate opportunity. Also consider the discussion quality - high quality discussions with informed analysis are more reliable signals.",
       },
       meta: {
         source: "reddit",
-        fetched_at: sentiment.fetched_at,
+        fetched_at: intel.fetched_at,
       },
     };
   } catch (error) {

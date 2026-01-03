@@ -2,10 +2,12 @@
  * News Tool
  *
  * Fetches recent news for stocks from Google News.
+ * Attempts to fetch article content (filtering paywalls),
+ * then uses Gemini 2.5 Flash to summarize sentiment and key events.
  */
 
 import { registerToolExecutor, type ToolResponse } from "./registry";
-import { fetchGoogleNews, summarizeNewsSentiment } from "../scrapers/news";
+import { getNewsIntel } from "../scrapers/news";
 
 interface GetStockNewsArgs {
   query: string;
@@ -33,15 +35,15 @@ async function getStockNews(
   try {
     console.log(`[News Tool] Fetching news for: ${query}`);
 
-    const news = await fetchGoogleNews(query.trim(), 5);
+    const intel = await getNewsIntel(query.trim(), 5);
 
-    if (news.items.length === 0) {
+    if (intel.articles_found === 0) {
       return {
         success: true,
         data: {
           found: false,
           query: query,
-          message: `No recent news found for "${query}"`,
+          message: `No recent news found for "${query}".`,
         },
         meta: {
           source: "google_news",
@@ -54,17 +56,21 @@ async function getStockNews(
       data: {
         found: true,
         query: query,
-        news_count: news.items.length,
-        headlines: news.items.map((item) => ({
-          title: item.title,
-          source: item.source,
-          date: item.pubDate,
+        articles_found: intel.articles_found,
+        articles_analyzed: intel.articles_readable,
+        sentiment_summary: intel.sentiment_summary,
+        key_events: intel.key_events,
+        headlines: intel.headlines.slice(0, 5).map((h) => ({
+          title: h.title,
+          source: h.source,
+          date: h.date,
         })),
-        summary: summarizeNewsSentiment(news),
+        instructions:
+          "Use this to understand recent events affecting the stock. Key events may indicate catalysts or risks. Sentiment shows the current market narrative - but remember, market sentiment can be wrong.",
       },
       meta: {
         source: "google_news",
-        fetched_at: news.fetched_at,
+        fetched_at: intel.fetched_at,
       },
     };
   } catch (error) {

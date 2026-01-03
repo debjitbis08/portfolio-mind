@@ -1,9 +1,22 @@
+/**
+ * ValuePickr Scraper
+ *
+ * Fetches investment theses and recent discussions from ValuePickr forum.
+ * Returns full content for LLM summarization - we're dealing with real money,
+ * so the agent needs complete context.
+ *
+ * Uses Discourse API endpoints (ValuePickr is Discourse-based).
+ */
+
+import { GEMINI_API_KEY } from "astro:env/server";
+
 interface ValuePickrPost {
   id: number;
+  post_number: number;
   username: string;
   created_at: string;
   cooked: string; // HTML content
-  blurb?: string; // Short summary
+  blurb?: string;
 }
 
 interface ValuePickrTopic {
@@ -13,13 +26,35 @@ interface ValuePickrTopic {
   posts_count: number;
 }
 
+export interface ValuePickrDiscussion {
+  topic_url: string;
+  topic_title: string;
+  total_posts: number;
+  thesis_post: {
+    author: string;
+    date: string;
+    content: string; // Full content, stripped of HTML
+  };
+  recent_posts: {
+    author: string;
+    date: string;
+    content: string;
+    post_number: number;
+  }[];
+  last_activity: string;
+}
+
 export interface QualitativeIntel {
   source: "valuepickr";
   topic_url: string;
-  thesis_summary?: string;
-  recent_sentiment_summary?: string;
+  topic_title: string;
+  thesis_summary: string;
+  recent_sentiment_summary: string;
   last_activity: string;
+  raw_thesis?: string; // Optional: include raw for debugging
 }
+
+const MIN_SIGNIFICANT_POST_LENGTH = 200; // Characters - filter out short "thanks" posts
 
 export class ValuePickrService {
   private static BASE_URL = "https://forum.valuepickr.com";
@@ -41,14 +76,12 @@ export class ValuePickrService {
 
       if (!topics || topics.length === 0) return null;
 
-      // Simple heuristic: Find topic with 'query' in title and max posts
-      // Or just return the first relevant looking one.
-
+      // Find topic with query in title (more relevant) or fallback to first
       const match = topics.find((t) =>
         t.title.toLowerCase().includes(query.toLowerCase())
       );
 
-      return match || topics[0]; // Fallback to first result
+      return match || topics[0];
     } catch (err) {
       console.error(`ValuePickr search error for ${query}:`, err);
       return null;
@@ -56,56 +89,218 @@ export class ValuePickrService {
   }
 
   /**
-   * Get intelligence from the thread (Thesis + Recent activity)
+   * Fetch full discussion: thesis + recent significant posts
    */
-  static async getResearch(symbol: string): Promise<QualitativeIntel | null> {
-    const topic = await this.searchThread(symbol);
-    if (!topic) return null;
-
+  static async fetchDiscussion(
+    topic: ValuePickrTopic
+  ): Promise<ValuePickrDiscussion | null> {
     try {
-      // Fetch topic details (first few posts + last posts)
-      // Discourse API: /t/{id}.json returns posts stream
+      // Fetch topic details (gets first ~20 posts by default)
       const topicUrl = `${this.BASE_URL}/t/${topic.slug}/${topic.id}.json`;
       const res = await fetch(topicUrl);
       if (!res.ok) return null;
 
       const data = await res.json();
-      const postStream = data.post_stream?.posts as ValuePickrPost[];
+      const postStream = data.post_stream;
+      const posts = postStream?.posts as ValuePickrPost[];
+      const allPostIds = postStream?.stream as number[]; // All post IDs in thread
 
-      if (!postStream || postStream.length === 0) return null;
+      if (!posts || posts.length === 0) return null;
 
-      // 1. Thesis (First Post)
-      // Usually post_number 1.
-      const firstPost = postStream.find((p: any) => p.post_number === 1);
+      // 1. Get the thesis (first post)
+      const thesisPost = posts.find((p) => p.post_number === 1);
+      if (!thesisPost) return null;
 
-      // 2. Recent Activity (Last 5 posts)
-      // The initial .json might not return ALL posts if thread is huge, but usually returns the start.
-      // We might need to fetch the end if stream is large.
-      // Discourse often sends the first 20 posts.
-      // To get the last posts, we might need to fetch specific IDs from `stream` list if provided,
-      // but for simple "recent sentiment", if the thread is active, maybe we just want the latest available?
-      // Actually, fetching `/t/{id}/last.json` might work or `/t/{id}.json` often contains `stream` array of ALL IDs.
+      // 2. Fetch recent posts (last 10 post IDs if thread is long)
+      let recentPosts: ValuePickrPost[] = [];
 
-      // Optimization: For now, let's just use what we have or try to fetch the end.
-      // If we just want a "gist", the first post is high value.
+      if (allPostIds && allPostIds.length > 20) {
+        // Thread is long, fetch the last 10 posts by ID
+        const lastPostIds = allPostIds.slice(-10);
+        const idsParam = lastPostIds.join(",");
+        const recentUrl = `${this.BASE_URL}/t/${topic.id}/posts.json?post_ids[]=${idsParam}`;
 
-      const intel: QualitativeIntel = {
-        source: "valuepickr",
+        try {
+          const recentRes = await fetch(recentUrl);
+          if (recentRes.ok) {
+            const recentData = await recentRes.json();
+            recentPosts = recentData.post_stream?.posts || [];
+          }
+        } catch (e) {
+          console.warn("[ValuePickr] Failed to fetch recent posts:", e);
+          // Fall back to posts from initial fetch
+          recentPosts = posts.slice(-5);
+        }
+      } else {
+        // Thread is short, use last posts from initial fetch
+        recentPosts = posts.filter((p) => p.post_number !== 1).slice(-10);
+      }
+
+      // 3. Filter to significant posts (longer content)
+      const significantRecent = recentPosts
+        .filter((p) => {
+          const content = this.stripHtml(p.cooked);
+          return content.length >= MIN_SIGNIFICANT_POST_LENGTH;
+        })
+        .slice(-5); // Take last 5 significant posts
+
+      return {
         topic_url: `${this.BASE_URL}/t/${topic.slug}/${topic.id}`,
-        thesis_summary: firstPost
-          ? this.stripHtml(firstPost.cooked).substring(0, 500) + "..."
-          : undefined,
+        topic_title: topic.title,
+        total_posts: topic.posts_count,
+        thesis_post: {
+          author: thesisPost.username,
+          date: thesisPost.created_at,
+          content: this.stripHtml(thesisPost.cooked),
+        },
+        recent_posts: significantRecent.map((p) => ({
+          author: p.username,
+          date: p.created_at,
+          content: this.stripHtml(p.cooked),
+          post_number: p.post_number,
+        })),
         last_activity: data.last_posted_at || new Date().toISOString(),
       };
-
-      return intel;
     } catch (err) {
-      console.error(`ValuePickr fetch error for ${symbol}:`, err);
+      console.error(`ValuePickr fetch error:`, err);
       return null;
     }
   }
 
+  /**
+   * Use a cheap model to summarize the thesis and recent sentiment
+   */
+  static async summarizeWithLLM(
+    discussion: ValuePickrDiscussion
+  ): Promise<{ thesis_summary: string; sentiment_summary: string }> {
+    try {
+      // Dynamic import to avoid build issues
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+
+      // Build the prompt with full content
+      const recentPostsText = discussion.recent_posts
+        .map(
+          (p) =>
+            `[Post #${p.post_number} by ${p.author} on ${new Date(
+              p.date
+            ).toLocaleDateString()}]\n${p.content}`
+        )
+        .join("\n\n---\n\n");
+
+      const prompt = `You are analyzing an investment discussion from ValuePickr (Indian value investing forum).
+
+## Original Investment Thesis
+Posted by ${discussion.thesis_post.author} on ${new Date(
+        discussion.thesis_post.date
+      ).toLocaleDateString()}:
+
+${discussion.thesis_post.content}
+
+## Recent Discussion (Last ${
+        discussion.recent_posts.length
+      } significant posts out of ${discussion.total_posts} total)
+
+${recentPostsText || "(No recent significant posts)"}
+
+---
+
+Please provide TWO separate summaries:
+
+1. **THESIS SUMMARY** (2-3 paragraphs): What is the core investment thesis? What makes this company attractive? What are the key growth drivers, competitive advantages, or catalysts mentioned?
+
+2. **RECENT SENTIMENT** (1-2 paragraphs): Based on recent posts, what is the current community sentiment? Are there concerns being raised? Is sentiment positive, negative, or mixed? Any recent developments discussed?
+
+Format your response as:
+THESIS:
+[Your thesis summary here]
+
+SENTIMENT:
+[Your sentiment summary here]`;
+
+      console.log("[ValuePickr] Summarizing with Gemini 2.5 Flash...");
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash", // Cheap and fast
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+      });
+
+      const text = response.text || "";
+
+      // Parse the response
+      const thesisMatch = text.match(/THESIS:\s*([\s\S]*?)(?=SENTIMENT:|$)/i);
+      const sentimentMatch = text.match(/SENTIMENT:\s*([\s\S]*?)$/i);
+
+      return {
+        thesis_summary:
+          thesisMatch?.[1]?.trim() || "Unable to summarize thesis",
+        sentiment_summary:
+          sentimentMatch?.[1]?.trim() || "Unable to determine sentiment",
+      };
+    } catch (error) {
+      console.error("[ValuePickr] LLM summarization failed:", error);
+      // Fallback: return truncated raw content
+      return {
+        thesis_summary:
+          discussion.thesis_post.content.substring(0, 1000) +
+          "... (summarization failed)",
+        sentiment_summary: discussion.recent_posts.length
+          ? `${discussion.recent_posts.length} recent posts found, but summarization failed.`
+          : "No recent activity",
+      };
+    }
+  }
+
+  /**
+   * Main entry point: Get full intel for a stock
+   */
+  static async getResearch(symbol: string): Promise<QualitativeIntel | null> {
+    const topic = await this.searchThread(symbol);
+    if (!topic) {
+      console.log(`[ValuePickr] No thread found for: ${symbol}`);
+      return null;
+    }
+
+    console.log(
+      `[ValuePickr] Found thread: "${topic.title}" (${topic.posts_count} posts)`
+    );
+
+    const discussion = await this.fetchDiscussion(topic);
+    if (!discussion) {
+      console.log(`[ValuePickr] Failed to fetch discussion for: ${symbol}`);
+      return null;
+    }
+
+    console.log(
+      `[ValuePickr] Fetched thesis (${discussion.thesis_post.content.length} chars) + ${discussion.recent_posts.length} recent posts`
+    );
+
+    // Summarize with LLM
+    const summaries = await this.summarizeWithLLM(discussion);
+
+    return {
+      source: "valuepickr",
+      topic_url: discussion.topic_url,
+      topic_title: discussion.topic_title,
+      thesis_summary: summaries.thesis_summary,
+      recent_sentiment_summary: summaries.sentiment_summary,
+      last_activity: discussion.last_activity,
+    };
+  }
+
   private static stripHtml(html: string): string {
-    return html.replace(/<[^>]*>?/gm, "");
+    // Remove HTML tags
+    let text = html.replace(/<[^>]*>?/gm, "");
+    // Decode common HTML entities
+    text = text
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, " ");
+    // Normalize whitespace
+    text = text.replace(/\s+/g, " ").trim();
+    return text;
   }
 }

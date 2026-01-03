@@ -1,23 +1,165 @@
 /**
  * Google News Scraper
  *
- * Fetches recent news for a stock using Google News RSS feeds.
- * No authentication required.
+ * Fetches recent news for a stock using Google News RSS feeds,
+ * then attempts to fetch article content (filtering paywalled ones).
+ * Uses Gemini 2.5 Flash to summarize news sentiment and key events.
+ *
+ * No authentication required for RSS feeds.
  */
 
 import { XMLParser } from "fast-xml-parser";
+import { GEMINI_API_KEY } from "astro:env/server";
 
 export interface NewsItem {
   title: string;
   link: string;
   pubDate: string;
   source: string;
+  content?: string; // Article content if fetched
+  isPaywalled?: boolean;
 }
 
 export interface StockNews {
   query: string;
   items: NewsItem[];
   fetched_at: string;
+}
+
+export interface NewsIntel {
+  query: string;
+  articles_found: number;
+  articles_readable: number;
+  sentiment_summary: string;
+  key_events: string[];
+  headlines: {
+    title: string;
+    source: string;
+    date: string;
+    url: string;
+  }[];
+  fetched_at: string;
+}
+
+// Known paywall indicators
+const PAYWALL_INDICATORS = [
+  "subscribe",
+  "subscription",
+  "sign in to read",
+  "login to continue",
+  "premium content",
+  "exclusive to subscribers",
+  "register to read",
+  "unlock this article",
+  "member-only",
+  "already a member",
+];
+
+// Known free sources (usually accessible)
+const FREE_SOURCES = [
+  "moneycontrol",
+  "economic times",
+  "business standard",
+  "livemint",
+  "ndtv profit",
+  "zeebiz",
+  "outlook india",
+  "business today",
+  "reuters",
+  "yahoo finance",
+];
+
+/**
+ * Fetch article content from a URL
+ * Returns null if paywalled or inaccessible
+ */
+async function fetchArticleContent(
+  url: string,
+  source: string
+): Promise<string | null> {
+  try {
+    // Skip known problematic domains
+    if (url.includes("news.google.com/articles")) {
+      // Google News redirect - skip for now
+      return null;
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      signal: AbortSignal.timeout(5000), // 5 second timeout
+    });
+
+    if (!response.ok) {
+      console.warn(`[News] Failed to fetch ${url}: ${response.status}`);
+      return null;
+    }
+
+    const html = await response.text();
+
+    // Check for paywall indicators
+    const htmlLower = html.toLowerCase();
+    for (const indicator of PAYWALL_INDICATORS) {
+      if (htmlLower.includes(indicator)) {
+        console.log(`[News] Skipping paywalled article: ${source}`);
+        return null;
+      }
+    }
+
+    // Extract main content (simple extraction)
+    const content = extractMainContent(html);
+
+    if (content && content.length > 200) {
+      return content;
+    }
+
+    return null;
+  } catch (error) {
+    console.warn(`[News] Error fetching article from ${source}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Simple content extraction from HTML
+ */
+function extractMainContent(html: string): string {
+  // Remove scripts, styles, and other non-content elements
+  let text = html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
+    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+    .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "");
+
+  // Try to find article body
+  const articleMatch = text.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+  if (articleMatch) {
+    text = articleMatch[1];
+  }
+
+  // Remove remaining HTML tags
+  text = text.replace(/<[^>]+>/g, " ");
+
+  // Decode HTML entities
+  text = text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+
+  // Normalize whitespace
+  text = text.replace(/\s+/g, " ").trim();
+
+  // Return first 3000 chars (enough for summarization)
+  return text.substring(0, 3000);
 }
 
 /**
@@ -27,11 +169,10 @@ export async function fetchGoogleNews(
   query: string,
   maxResults: number = 5
 ): Promise<StockNews> {
-  // Google News RSS URL for search
   const encodedQuery = encodeURIComponent(`${query} stock India`);
   const rssUrl = `https://news.google.com/rss/search?q=${encodedQuery}&hl=en-IN&gl=IN&ceid=IN:en`;
 
-  console.log(`[GoogleNews] Fetching news for: ${query}`);
+  console.log(`[News] Fetching news for: ${query}`);
 
   try {
     const response = await fetch(rssUrl, {
@@ -47,21 +188,15 @@ export async function fetchGoogleNews(
 
     const xmlText = await response.text();
 
-    // Parse XML
     const parser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: "@_",
     });
     const result = parser.parse(xmlText);
 
-    // Extract news items
     const channel = result?.rss?.channel;
     if (!channel) {
-      return {
-        query,
-        items: [],
-        fetched_at: new Date().toISOString(),
-      };
+      return { query, items: [], fetched_at: new Date().toISOString() };
     }
 
     let items = channel.item || [];
@@ -72,7 +207,6 @@ export async function fetchGoogleNews(
     const newsItems: NewsItem[] = items
       .slice(0, maxResults)
       .map((item: any) => {
-        // Extract source from title (Google News format: "Title - Source")
         const titleParts = (item.title || "").split(" - ");
         const source = titleParts.length > 1 ? titleParts.pop() : "Unknown";
         const title = titleParts.join(" - ");
@@ -85,9 +219,7 @@ export async function fetchGoogleNews(
         };
       });
 
-    console.log(
-      `[GoogleNews] Found ${newsItems.length} news items for ${query}`
-    );
+    console.log(`[News] Found ${newsItems.length} news items for ${query}`);
 
     return {
       query,
@@ -95,18 +227,187 @@ export async function fetchGoogleNews(
       fetched_at: new Date().toISOString(),
     };
   } catch (error) {
-    console.error(`[GoogleNews] Error fetching news for ${query}:`, error);
+    console.error(`[News] Error fetching news for ${query}:`, error);
+    return { query, items: [], fetched_at: new Date().toISOString() };
+  }
+}
+
+/**
+ * Use Gemini 2.5 Flash to summarize news articles
+ */
+async function summarizeWithLLM(
+  query: string,
+  articles: { title: string; source: string; content: string }[]
+): Promise<{ sentiment_summary: string; key_events: string[] }> {
+  if (articles.length === 0) {
     return {
-      query,
-      items: [],
-      fetched_at: new Date().toISOString(),
+      sentiment_summary: "No readable articles found to analyze.",
+      key_events: [],
+    };
+  }
+
+  try {
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+
+    const articlesText = articles
+      .map(
+        (a, i) =>
+          `### Article ${i + 1}: ${a.title} (${a.source})\n\n${a.content}`
+      )
+      .join("\n\n---\n\n");
+
+    const prompt = `You are analyzing recent news articles about "${query}" (Indian stock).
+
+## Articles
+
+${articlesText}
+
+---
+
+Please provide a COMPREHENSIVE summary. Do NOT skip important details. This is for investment decisions with real money.
+
+1. **SENTIMENT SUMMARY** (2-3 sentences): What is the overall news sentiment? Is news positive, negative, or neutral for the stock? What's the main narrative?
+
+2. **KEY EVENTS** (bullet list, be thorough): List ALL significant events mentioned. Include:
+   - Regulatory/government actions (policy changes, approvals, investigations, fines)
+   - Corporate actions (acquisitions, demergers, stock splits, buybacks)
+   - Financial results and guidance changes
+   - Management changes or statements
+   - Industry/sector developments
+   - Any risks or concerns raised
+
+   List 5-10 key points. Do NOT summarize away important details.
+
+Format your response exactly as:
+SENTIMENT:
+[Your sentiment summary]
+
+KEY_EVENTS:
+- [Event 1]
+- [Event 2]
+- [Event 3]`;
+
+    console.log("[News] Summarizing with Gemini 2.5 Flash...");
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    });
+
+    const text = response.text || "";
+
+    const sentimentMatch = text.match(
+      /SENTIMENT:\s*([\s\S]*?)(?=KEY_EVENTS:|$)/i
+    );
+    const keyEventsMatch = text.match(/KEY_EVENTS:\s*([\s\S]*?)$/i);
+
+    const keyEventsText = keyEventsMatch?.[1]?.trim() || "";
+    const keyEvents = keyEventsText
+      .split("\n")
+      .map((line) => line.replace(/^[-•*]\s*/, "").trim())
+      .filter((line) => line.length > 0);
+
+    return {
+      sentiment_summary:
+        sentimentMatch?.[1]?.trim() || "Unable to determine sentiment",
+      key_events: keyEvents,
+    };
+  } catch (error) {
+    console.error("[News] LLM summarization failed:", error);
+    return {
+      sentiment_summary: "Summarization failed.",
+      key_events: [],
     };
   }
 }
 
 /**
- * Get a summary of recent news sentiment
+ * Main entry point: Fetch news, get content, and summarize
  */
+export async function getNewsIntel(
+  query: string,
+  maxArticles: number = 5
+): Promise<NewsIntel> {
+  const news = await fetchGoogleNews(query, maxArticles);
+
+  if (news.items.length === 0) {
+    return {
+      query,
+      articles_found: 0,
+      articles_readable: 0,
+      sentiment_summary: `No recent news found for "${query}".`,
+      key_events: [],
+      headlines: [],
+      fetched_at: new Date().toISOString(),
+    };
+  }
+
+  // Try to fetch content for each article
+  const articlesWithContent: {
+    title: string;
+    source: string;
+    content: string;
+  }[] = [];
+
+  for (const item of news.items) {
+    // Check if source is likely free
+    const sourceLower = item.source.toLowerCase();
+    const isLikelyFree = FREE_SOURCES.some((s) => sourceLower.includes(s));
+
+    if (isLikelyFree) {
+      const content = await fetchArticleContent(item.link, item.source);
+      if (content) {
+        articlesWithContent.push({
+          title: item.title,
+          source: item.source,
+          content,
+        });
+      }
+    }
+
+    // Small delay between fetches
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  console.log(
+    `[News] Fetched content for ${articlesWithContent.length}/${news.items.length} articles`
+  );
+
+  // Summarize with LLM (even if we only have headlines)
+  let summary: { sentiment_summary: string; key_events: string[] };
+
+  if (articlesWithContent.length > 0) {
+    summary = await summarizeWithLLM(query, articlesWithContent);
+  } else {
+    // Fallback: summarize just headlines
+    summary = await summarizeWithLLM(
+      query,
+      news.items.map((item) => ({
+        title: item.title,
+        source: item.source,
+        content: `Headline: ${item.title}`,
+      }))
+    );
+  }
+
+  return {
+    query,
+    articles_found: news.items.length,
+    articles_readable: articlesWithContent.length,
+    sentiment_summary: summary.sentiment_summary,
+    key_events: summary.key_events,
+    headlines: news.items.map((item) => ({
+      title: item.title,
+      source: item.source,
+      date: item.pubDate,
+      url: item.link,
+    })),
+    fetched_at: news.fetched_at,
+  };
+}
+
+// Keep old function for backwards compatibility
 export function summarizeNewsSentiment(news: StockNews): string {
   if (news.items.length === 0) {
     return "No recent news found.";

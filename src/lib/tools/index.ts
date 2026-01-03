@@ -8,6 +8,10 @@
 // Core exports
 export {
   getToolDeclarations,
+  getEnabledToolDeclarations,
+  getDefaultToolConfig,
+  getMergedToolConfig,
+  getToolConfig,
   getTool,
   registerToolExecutor,
   getToolSource,
@@ -15,6 +19,8 @@ export {
   type ToolDeclaration,
   type ToolResponse,
   type ToolExecutor,
+  type ToolConfig,
+  type ToolConfigItem,
 } from "./registry";
 
 export { rateLimiter } from "./rate-limiter";
