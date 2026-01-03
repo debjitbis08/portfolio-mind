@@ -8,10 +8,10 @@
     "preview": "astro preview",
     "astro": "astro",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx scripts/migrate-db.ts migrate",
-    "db:status": "tsx scripts/migrate-db.ts status",
-    "drizzle:generate": "drizzle-kit generate",
-    "drizzle:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:introspect": "drizzle-kit introspect",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@astrojs/node": "^9.5.1",
@@ -32,8 +32,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "drizzle-kit": "^0.31.8",
-    "tsx": "^4.19.2"
+    "drizzle-kit": "^0.31.8"
   },
   "volta": {
     "node": "22.21.1"

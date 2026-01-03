@@ -1,217 +1,242 @@
 # Database Migrations
 
-Portfolio Mind uses a robust migration system to keep your database schema up-to-date when pulling the latest code changes.
+Portfolio Mind uses **Drizzle Kit** for database migrations - a type-safe, automatic migration system that generates SQL from your TypeScript schema changes.
 
 ## Quick Start
 
-After pulling latest code changes, run:
+After pulling latest code changes:
 
 ```bash
-pnpm db:migrate
-```
+# Generate any new migrations from schema changes
+pnpm db:generate
 
-This will automatically apply any pending database schema updates.
+# Apply migrations to your database  
+pnpm db:migrate
+
+# Start the app
+pnpm dev
+```
 
 ## Migration Commands
 
 | Command | Description |
 |---------|-------------|
-| `pnpm db:migrate` | Apply all pending migrations |
-| `pnpm db:status` | Show current migration status |
+| `pnpm db:generate` | Generate SQL migrations from schema changes |
+| `pnpm db:migrate` | Apply pending migrations to database |
+| `pnpm db:push` | **Dev only**: Push schema directly (skip migration files) |
+| `pnpm db:introspect` | Generate schema from existing database |
+| `pnpm db:studio` | Open Drizzle Studio (database GUI) |
 
 ## How It Works
 
-### For Fresh Installs
-- New databases are automatically initialized with the latest schema
-- No manual migration needed for first-time setup
+### Schema-First Development
+1. **Edit Schema**: Make changes to `src/lib/db/schema.ts`
+2. **Generate Migration**: Run `pnpm db:generate` 
+3. **Review SQL**: Check generated `.sql` file in `drizzle/` folder
+4. **Apply Migration**: Run `pnpm db:migrate`
 
-### For Existing Databases
-- Each schema change is tracked with a version number
-- When you pull code updates, run `pnpm db:migrate` to apply changes
-- Migrations are applied incrementally and safely
-
-### Migration Safety
-- ✅ **Idempotent**: Safe to run multiple times
-- ✅ **Transactional**: Each migration runs in a database transaction
-- ✅ **Versioned**: Tracks which migrations have been applied
-- ✅ **Backwards Compatible**: Won't break existing data
-
-## Examples
-
-### Check Migration Status
+### Fresh Install (New Users)
 ```bash
-$ pnpm db:status
-
-📊 Database Migration Status
-   Current Version: 2
-   Latest Version:  3
-   Pending:         1 migration(s)
-
-✅ Applied Migrations:
-   1. initial_schema (2024-01-03T10:30:00.000Z)
-   2. add_suggestion_enhancements (2024-01-03T11:15:00.000Z)
-
-⏳ Pending Migrations:
-   3. add_settings_tool_config
-
-💡 Run 'pnpm db:migrate' to apply pending migrations
-```
-
-### Apply Pending Migrations
-```bash
-$ pnpm db:migrate
-
-🗄️  Portfolio Mind Database Migration Tool
-
-🔄 Running database migrations on: ./data/investor.db
-📦 Applying 1 pending migration(s)...
-Applying migration 3: add_settings_tool_config
-  ✅ Migration 3 applied successfully
-🚀 Database migrated to version 3
-
-✅ Successfully applied 1 migration(s)
-📊 Database is now at version 3
-```
-
-## Custom Database Paths
-
-You can specify a custom database path using the `DATABASE_PATH` environment variable:
-
-```bash
-# Migrate demo database
-DATABASE_PATH=./demo/db/investor.db pnpm db:migrate
-
-# Check status of custom database
-DATABASE_PATH=./my-custom.db pnpm db:status
-```
-
-## Development Workflow
-
-### When Contributing Code
-1. Make your code changes
-2. If you modify the database schema, add a new migration to `src/lib/db/migrations.ts`
-3. Test your migration with `pnpm db:migrate`
-4. Commit both your code changes and the migration
-
-### When Pulling Updates
-1. `git pull` to get latest code
-2. `pnpm install` if dependencies changed
-3. `pnpm db:migrate` to apply schema updates
-4. `pnpm dev` to start the application
-
-## Migration Files
-
-### Location
-- **Migration System**: `src/lib/db/migrations.ts`
-- **CLI Tool**: `scripts/migrate-db.ts`
-
-### Adding New Migrations
-
-When you need to modify the database schema:
-
-1. **Add a new migration** to the `MIGRATIONS` array in `src/lib/db/migrations.ts`:
-
-```typescript
-{
-  version: 4, // Next version number
-  name: "add_new_feature",
-  up: [
-    `CREATE TABLE new_table (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL
-    )`,
-    `ALTER TABLE existing_table ADD COLUMN new_column TEXT`,
-  ],
-  down: [
-    // Optional rollback statements (for future use)
-    `DROP TABLE new_table`,
-  ],
-},
-```
-
-2. **Test your migration**:
-```bash
-pnpm db:status  # Check current state
-pnpm db:migrate # Apply your migration
-```
-
-3. **Update the schema** in `src/lib/db/schema.ts` to match your migration
-
-## Troubleshooting
-
-### Migration Fails
-```bash
-❌ Migration failed: SQLITE_ERROR: table "some_table" already exists
-```
-
-**Solution**: The migration system handles most common issues automatically. If you encounter errors:
-
-1. Check the error message carefully
-2. Verify your migration SQL syntax
-3. Ensure you're not trying to create something that already exists
-4. For complex schema changes, consider using `IF NOT EXISTS` clauses
-
-### Database Locked
-```bash
-❌ Migration failed: SQLITE_BUSY: database is locked
-```
-
-**Solution**: Make sure the application is not running:
-```bash
-# Stop the dev server
-pkill -f "astro dev"
-
-# Then try again
-pnpm db:migrate
-```
-
-### Reset Database (Nuclear Option)
-If your database gets into a bad state:
-
-```bash
-# ⚠️  WARNING: This will delete all your data!
-rm ./data/investor.db*
-
-# Then restart the application to recreate with latest schema
+git clone <repo>
+pnpm install
+pnpm db:migrate  # Creates database with latest schema
 pnpm dev
 ```
 
-## Technical Details
+### Existing Install (After git pull)
+```bash
+git pull
+pnpm db:generate  # Generate any new migrations
+pnpm db:migrate   # Apply them to your database
+pnpm dev
+```
 
-### Migration Table
-Migrations are tracked in the `schema_migrations` table:
+## Development Workflows
 
+### 🚀 Rapid Development (Recommended for Local)
+```bash
+# Skip migration files, push directly to database
+pnpm db:push
+```
+**Benefits**: Faster iteration, no migration files cluttering repo  
+**Use when**: Local development, experimentation, prototyping
+
+### 📋 Production Workflow (Recommended for Deployment)
+```bash
+# Generate migration files for version control
+pnpm db:generate
+git add drizzle/
+git commit -m "feat: add new table"
+
+# Deploy and apply migrations
+pnpm db:migrate
+```
+**Benefits**: Version controlled changes, audit trail, team collaboration  
+**Use when**: Production deployments, schema changes for others
+
+## Examples
+
+### Adding a New Table
+
+1. **Edit schema** (`src/lib/db/schema.ts`):
+```typescript
+export const portfolioAlerts = sqliteTable("portfolio_alerts", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  message: text("message").notNull(),
+  severity: text("severity", { enum: ["low", "high", "critical"] }).notNull(),
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+});
+```
+
+2. **Generate migration**:
+```bash
+$ pnpm db:generate
+
+[✓] Your SQL migration file ➜ drizzle/0001_add_portfolio_alerts.sql 🚀
+```
+
+3. **Review generated SQL**:
 ```sql
-CREATE TABLE schema_migrations (
-  version INTEGER PRIMARY KEY,
-  name TEXT NOT NULL,
-  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+CREATE TABLE `portfolio_alerts` (
+  `id` text PRIMARY KEY NOT NULL,
+  `message` text NOT NULL,
+  `severity` text NOT NULL,
+  `created_at` text
 );
 ```
 
-### Migration Process
-1. Check current database version
-2. Find pending migrations (version > current)
-3. Apply each migration in order within a transaction
-4. Record successful application in `schema_migrations` table
-5. Report results
+4. **Apply migration**:
+```bash
+$ pnpm db:migrate
 
-### Backwards Compatibility
-- The old `initializeDatabase()` function still exists for compatibility
-- Auto-migration runs only on fresh databases (version 0)
-- Existing databases require explicit `pnpm db:migrate`
+[✓] Migration 0001_add_portfolio_alerts.sql applied successfully
+```
 
-## Security Considerations
+### Custom Database Path
 
-- Migrations run with full database privileges
-- Always review migration SQL before applying
-- Test migrations on a copy of production data first
-- Migrations are not reversible by default (no automatic rollback)
+Use environment variables for different database locations:
+
+```bash
+# Use demo database
+DATABASE_PATH=./demo/db/investor.db pnpm db:migrate
+
+# Use custom location
+DATABASE_PATH=/path/to/my/database.db pnpm db:migrate
+```
+
+## Configuration
+
+**Drizzle Config** (`drizzle.config.ts`):
+```typescript
+import { defineConfig } from "drizzle-kit";
+
+export default defineConfig({
+  schema: "./src/lib/db/schema.ts",     // Your TypeScript schema
+  out: "./drizzle",                     // Migration files output
+  dialect: "sqlite",                    // Database type
+  dbCredentials: {
+    url: process.env.DATABASE_PATH || "./data/investor.db",
+  },
+});
+```
+
+## Migration Files
+
+**Location**: `drizzle/` folder  
+**Format**: `NNNN_descriptive_name.sql`  
+**Contents**: Pure SQL DDL statements
+
+**Example** (`drizzle/0001_add_alerts.sql`):
+```sql
+CREATE TABLE `portfolio_alerts` (
+  `id` text PRIMARY KEY NOT NULL,
+  `message` text NOT NULL,
+  `severity` text NOT NULL,
+  `created_at` text
+);
+--> statement-breakpoint
+CREATE INDEX `idx_alerts_severity` ON `portfolio_alerts` (`severity`);
+```
+
+## Troubleshooting
+
+### No Changes Detected
+```bash
+$ pnpm db:generate
+No schema changes found
+```
+**Solution**: Make sure you've edited `src/lib/db/schema.ts` and saved the file.
+
+### Database Locked
+```bash
+Error: SQLITE_BUSY: database is locked
+```
+**Solution**: Stop the development server and try again:
+```bash
+pkill -f "astro dev"
+pnpm db:migrate
+pnpm dev
+```
+
+### Migration Already Applied
+```bash
+Error: Migration 0001_xxx.sql has already been applied
+```
+**Solution**: This is normal - migrations are tracked automatically. No action needed.
+
+### Reset Database (Last Resort)
+```bash
+# ⚠️  WARNING: Destroys all data!
+rm ./data/investor.db*
+pnpm db:migrate  # Recreate with latest schema
+```
 
 ## Best Practices
 
-1. **Version Control**: Always commit migrations with your code changes
-2. **Testing**: Test migrations on a database copy first
-3. **Documentation**: Add clear names and comments to migrations
-4. **Incremental**: Keep migrations small and focused
-5. **Backup**: Consider backing up important databases before major updates
+### ✅ DO
+- Use `pnpm db:push` for local development
+- Use `pnpm db:generate` + `pnpm db:migrate` for production
+- Review generated SQL before applying
+- Commit migration files to version control
+- Test migrations on a copy of production data
+
+### ❌ DON'T
+- Edit migration files manually (regenerate instead)
+- Delete migration files (they're needed for new environments)
+- Use `db:push` in production (loses migration history)
+- Skip reviewing generated SQL
+
+## Advanced Usage
+
+### Database Studio (GUI)
+```bash
+pnpm db:studio
+```
+Opens a web-based database explorer at `https://local.drizzle.studio`
+
+### Introspect Existing Database
+```bash
+pnpm db:introspect
+```
+Generates TypeScript schema from existing database structure.
+
+### Schema Validation
+```bash
+pnpm db:generate --custom
+```
+Creates an empty migration file for custom SQL or data migrations.
+
+## Why Drizzle Kit?
+
+- ✅ **Type-Safe**: Generates SQL from TypeScript schema
+- ✅ **Automatic**: No manual SQL writing required  
+- ✅ **Reliable**: Industry-standard migration patterns
+- ✅ **Flexible**: Multiple workflows for different needs
+- ✅ **Integrated**: Built by the Drizzle ORM team
+- ✅ **Modern**: Supports latest SQLite features
+
+## Support
+
+- **Drizzle Docs**: https://orm.drizzle.team/docs/migrations
+- **Issues**: Report problems in the Portfolio Mind repository
+- **Community**: Join the Drizzle Discord for help

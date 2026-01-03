@@ -8,7 +8,6 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sql, eq, and, gt, lt, sum, max, desc } from "drizzle-orm";
 import * as schema from "./schema";
-import { autoMigrate } from "./migrations";
 
 // ============================================================================
 // Database Connection
@@ -311,8 +310,5 @@ export function initializeDatabase(): void {
 
 // Initialize on module load
 initializeDatabase();
-
-// Auto-migrate for backwards compatibility (fresh databases only)
-autoMigrate();
 
 export { schema };
