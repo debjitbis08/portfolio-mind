@@ -1,5 +1,5 @@
 /**
- * Authentication Module for Investor AI
+ * Authentication Module for Portfolio Mind
  *
  * Simple session-based auth with password from environment variable.
  */

@@ -1,5 +1,5 @@
 /**
- * Drizzle ORM Schema for Investor AI
+ * Drizzle ORM Schema for Portfolio Mind
  *
  * SQLite-based schema for self-hosted deployment.
  * Single-user mode - no user_id columns needed.

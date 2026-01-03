@@ -1,5 +1,5 @@
 /**
- * Database Client for Investor AI
+ * Database Client for Portfolio Mind
  *
  * SQLite connection and helpers.
  */

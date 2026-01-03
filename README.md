@@ -1,4 +1,4 @@
-# Investor AI
+# Portfolio Mind
 
 A self-hosted AI-powered investment assistant for analyzing Indian stock portfolios. Uses Gemini AI to provide actionable insights based on your holdings, technical indicators, and fundamental research.
 
@@ -39,8 +39,8 @@ A self-hosted AI-powered investment assistant for analyzing Indian stock portfol
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/investor-ai.git
-cd investor-ai
+git clone https://github.com/your-username/portfolio-mind.git
+cd portfolio-mind
 
 # Install dependencies
 pnpm install
@@ -161,7 +161,7 @@ src/
 This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.
 
 ```
-Investor AI - Self-hosted AI investment assistant
+Portfolio Mind - Self-hosted AI investment assistant
 Copyright (C) 2026 Debjit Biswas (https://github.com/debjitbis08)
 
 This program is free software: you can redistribute it and/or modify

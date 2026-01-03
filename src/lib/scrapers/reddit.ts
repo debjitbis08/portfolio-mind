@@ -84,7 +84,7 @@ export async function searchReddit(
       const response = await fetch(url, {
         headers: {
           // Reddit requires a descriptive User-Agent
-          "User-Agent": "investor-ai/1.0 (portfolio analysis tool)",
+          "User-Agent": "portfolio-mind/1.0 (portfolio analysis tool)",
         },
       });
 
