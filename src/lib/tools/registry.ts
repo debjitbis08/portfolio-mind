@@ -205,6 +205,23 @@ const getPreviousSuggestionsDeclaration: ToolDeclaration = {
   },
 };
 
+const getCommodityPricesDeclaration: ToolDeclaration = {
+  name: "get_commodity_prices",
+  description:
+    "Get current spot prices for precious metals (gold, silver, platinum) in INR. Use this to evaluate commodity exposure, compare with Gold ETF NAVs, or when making allocation decisions involving commodities. Prices are per gram.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      commodities: {
+        type: Type.STRING,
+        description:
+          "Comma-separated list of commodities to fetch (e.g., 'gold,silver'). Defaults to 'gold,silver' if not specified.",
+      },
+    },
+    required: [],
+  },
+};
+
 // ============================================================================
 // Registry
 // ============================================================================
@@ -285,6 +302,18 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       source: "internal",
       defaultConfig: {
         enabled: true,
+      },
+    },
+  ],
+  [
+    "get_commodity_prices",
+    {
+      declaration: getCommodityPricesDeclaration,
+      execute: notImplemented,
+      source: "metals_api",
+      defaultConfig: {
+        enabled: true,
+        defaultCommodities: "gold,silver",
       },
     },
   ],

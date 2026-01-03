@@ -268,6 +268,27 @@ export function initializeDatabase(): void {
       notes TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS commodity_holdings (
+      id TEXT PRIMARY KEY,
+      commodity_type TEXT NOT NULL CHECK (commodity_type IN ('GOLD', 'SILVER', 'PLATINUM', 'COPPER', 'CRUDE_OIL', 'OTHER')),
+      name TEXT NOT NULL,
+      holding_type TEXT DEFAULT 'PHYSICAL' CHECK (holding_type IN ('PHYSICAL', 'SGB', 'DIGITAL', 'OTHER')),
+      quantity REAL NOT NULL,
+      unit TEXT DEFAULT 'GRAM' CHECK (unit IN ('GRAM', 'KG', 'OZ', 'UNIT')),
+      purchase_price REAL NOT NULL,
+      purchase_date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS etf_commodity_mappings (
+      symbol TEXT PRIMARY KEY,
+      commodity_type TEXT NOT NULL CHECK (commodity_type IN ('GOLD', 'SILVER', 'PLATINUM', 'COPPER', 'CRUDE_OIL', 'OTHER')),
+      conversion_factor REAL DEFAULT 1,
+      notes TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       token TEXT NOT NULL UNIQUE,
@@ -286,6 +307,18 @@ export function initializeDatabase(): void {
 
     -- Ensure settings has at least one row
     INSERT OR IGNORE INTO settings (id) VALUES (1);
+
+    -- Seed common ETF-to-commodity mappings (Gold & Silver ETFs in India)
+    INSERT OR IGNORE INTO etf_commodity_mappings (symbol, commodity_type, notes) VALUES
+      ('GOLDBEES', 'GOLD', 'Nippon India ETF Gold BeES'),
+      ('GOLDSHARE', 'GOLD', 'UTI Gold ETF'),
+      ('GOLDCASE', 'GOLD', 'ICICI Prudential Gold ETF'),
+      ('AXISGOLD', 'GOLD', 'Axis Gold ETF'),
+      ('HDFCGOLD', 'GOLD', 'HDFC Gold ETF'),
+      ('KOTAKGOLD', 'GOLD', 'Kotak Gold ETF'),
+      ('SILVERBEES', 'SILVER', 'Nippon India ETF Silver BeES'),
+      ('ICICIBSILV', 'SILVER', 'ICICI Prudential Silver ETF'),
+      ('HDFCSILVER', 'SILVER', 'HDFC Silver ETF');
   `);
 
   // Migration: Add new columns to suggestions table (for existing databases)

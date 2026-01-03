@@ -39,6 +39,7 @@ import "./technicals";
 import "./news";
 import "./reddit";
 import "./suggestions";
+import "./commodities";
 
 // Log registered tools on import
 import { listTools } from "./registry";

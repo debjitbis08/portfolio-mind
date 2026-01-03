@@ -88,8 +88,8 @@ pnpm db:studio    # Open Drizzle Studio
 
 The AI agent uses a tool-based architecture for portfolio analysis:
 
-- Each tool in `/src/lib/ai-agent/tools/` provides specific capabilities
-- Tools are registered in `/src/lib/ai-agent/tool-registry.ts`
+- Each tool in `/src/lib/tools/` provides specific capabilities
+- Tools are registered in `/src/lib/tools/registry.ts`
 - System prompt guides investment strategy (story-first, fundamental-focused)
 
 ## Testing & Verification

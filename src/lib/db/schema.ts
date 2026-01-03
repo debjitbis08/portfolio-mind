@@ -215,6 +215,47 @@ export const watchlist = sqliteTable("watchlist", {
 });
 
 // ============================================================================
+// Commodity Holdings - Physical commodities (gold, silver, etc.)
+// ============================================================================
+
+export const commodityHoldings = sqliteTable("commodity_holdings", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  commodityType: text("commodity_type", {
+    enum: ["GOLD", "SILVER", "PLATINUM", "COPPER", "CRUDE_OIL", "OTHER"],
+  }).notNull(),
+  name: text("name").notNull(), // e.g., "Physical Gold Bar", "Gold SGB 2024"
+  holdingType: text("holding_type", {
+    enum: ["PHYSICAL", "SGB", "DIGITAL", "OTHER"],
+  }).default("PHYSICAL"),
+  quantity: real("quantity").notNull(), // In grams or units
+  unit: text("unit", { enum: ["GRAM", "KG", "OZ", "UNIT"] }).default("GRAM"),
+  purchasePrice: real("purchase_price").notNull(), // Per unit at time of purchase
+  purchaseDate: text("purchase_date").notNull(),
+  notes: text("notes"),
+  createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+});
+
+// ============================================================================
+// ETF Commodity Mappings - Maps ETF symbols to underlying commodity
+// ============================================================================
+
+/**
+ * Maps ETF symbols (e.g., GOLDBEES, SILVERBEES) to their underlying commodity.
+ * This enables the system to recognize gold ETFs as gold exposure.
+ */
+export const etfCommodityMappings = sqliteTable("etf_commodity_mappings", {
+  symbol: text("symbol").primaryKey(), // e.g., "GOLDBEES", "SILVERBEES"
+  commodityType: text("commodity_type", {
+    enum: ["GOLD", "SILVER", "PLATINUM", "COPPER", "CRUDE_OIL", "OTHER"],
+  }).notNull(),
+  conversionFactor: real("conversion_factor").default(1), // Units of commodity per share
+  notes: text("notes"),
+});
+
+// ============================================================================
 // Sessions - Authentication sessions
 // ============================================================================
 

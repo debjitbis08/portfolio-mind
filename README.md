@@ -18,6 +18,7 @@ A self-hosted AI-powered investment assistant for analyzing Indian stock portfol
 - 🤖 **AI Analysis** - Gemini-powered discovery cycles with actionable BUY/SELL/HOLD suggestions
 - 📈 **Technical Indicators** - RSI, SMA-50, SMA-200, wait zone detection
 - 📰 **Research Integration** - Looks through news, social media, and technical indicators to provide insights
+- 🪙 **Commodity Support** - Track physical gold/silver, SGBs, and automatically recognize gold ETFs as gold exposure
 - 📥 **Easy Import** - Upload Groww order history and holdings statements
 - 🔒 **Self-Hosted** - Your data stays on your machine with local database (SQLite)
 
@@ -66,6 +67,10 @@ GEMINI_API_KEY=your_gemini_api_key
 
 # Optional: Database path (defaults to ./data/investor.db)
 # DATABASE_PATH=./data/investor.db
+
+# Optional: Metals API key for commodity prices (gold, silver)
+# Get from: https://metals.dev (free tier available)
+# METALS_API_KEY=your_metals_dev_api_key
 ```
 
 #### Generating Secure Passwords

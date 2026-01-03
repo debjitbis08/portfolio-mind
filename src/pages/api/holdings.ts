@@ -176,6 +176,13 @@ export const GET: APIRoute = async ({ request }) => {
       techMap.set(t.symbol, t);
     }
 
+    // Fetch ETF-to-commodity mappings for commodity exposure detection
+    const etfMappings = await db.select().from(schema.etfCommodityMappings);
+    const commodityMap = new Map<string, string>();
+    for (const m of etfMappings) {
+      commodityMap.set(m.symbol.toUpperCase(), m.commodityType);
+    }
+
     // Merge technical data into holdings
     const holdingsWithTech = enrichedHoldings.map((h) => {
       const yahooSymbol = mapSymbol(h.symbol);
@@ -202,6 +209,10 @@ export const GET: APIRoute = async ({ request }) => {
         }
       }
 
+      // Detect commodity exposure from ETF mappings
+      const commodityExposure =
+        commodityMap.get(h.symbol.toUpperCase()) || null;
+
       return {
         ...h,
         rsi_14: tech?.rsi14 ?? null,
@@ -211,6 +222,7 @@ export const GET: APIRoute = async ({ request }) => {
         price_vs_sma200: tech?.priceVsSma200 ?? null,
         is_wait_zone: waitReasons.length > 0,
         wait_reasons: waitReasons,
+        commodity_exposure: commodityExposure,
       };
     });
 
