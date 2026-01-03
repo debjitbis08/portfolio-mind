@@ -283,3 +283,219 @@ function parseGrowwDateTime(dateStr: string): Date {
     parseInt(minute)
   );
 }
+
+// ============================================================================
+// ICICI Direct CSV Import Support
+// ============================================================================
+
+export interface ICICIDirectTransaction {
+  stockSymbol: string;
+  companyName: string;
+  isinCode: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  transactionPrice: number;
+  brokerage: number;
+  transactionCharges: number;
+  stampDuty: number;
+  segment: string;
+  sttPaid: boolean;
+  transactionDate: Date;
+  exchange: string;
+}
+
+export interface ICICIDirectHolding {
+  stockSymbol: string;
+  companyName: string;
+  isinCode: string;
+  quantity: number;
+  avgCostPrice: number;
+  currentMarketPrice: number;
+  valueAtCost: number;
+  valueAtMarketPrice: number;
+  unrealizedPnL: number;
+}
+
+/**
+ * Known ICICI Direct symbol → NSE symbol mappings
+ * ICICI uses internal symbols that differ from NSE trading symbols
+ */
+const ICICI_TO_NSE: Record<string, string> = {
+  RELIND: "RELIANCE",
+  BHADYN: "BDL",
+  FAGBEA: "SCHAEFFLER",
+  HINAER: "HAL",
+  HONAUT: "HONAUT",
+  COSFIL: "COSMOFIRST",
+  POLI: "POLYCAB",
+  RATMET: "RATNAMANI",
+  PENIND: "PENIND",
+  SBILIF: "SBILIFE",
+  SRIPIP: "SRIKALAHASTHI",
+  UNIPLY: "UNIPLY",
+  CDSL: "CDSL",
+  HUDCO: "HUDCO",
+};
+
+/**
+ * Map ICICI Direct symbol to standard NSE symbol
+ */
+export function mapICICISymbolToNSE(iciciSymbol: string): string {
+  return ICICI_TO_NSE[iciciSymbol] || iciciSymbol;
+}
+
+/**
+ * Parse ICICI Direct date format: "DD-Mon-YYYY" (e.g., "21-Mar-2018")
+ */
+function parseICICIDate(dateStr: string): Date {
+  const months: Record<string, number> = {
+    Jan: 0,
+    Feb: 1,
+    Mar: 2,
+    Apr: 3,
+    May: 4,
+    Jun: 5,
+    Jul: 6,
+    Aug: 7,
+    Sep: 8,
+    Oct: 9,
+    Nov: 10,
+    Dec: 11,
+  };
+
+  const match = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
+  if (!match) {
+    return new Date(dateStr);
+  }
+
+  const [, day, monthStr, year] = match;
+  const month = months[monthStr] ?? 0;
+
+  return new Date(parseInt(year), month, parseInt(day));
+}
+
+/**
+ * Parse ICICI Direct PortFolioEqtAll.csv (transactions)
+ */
+export function parseICICIDirectTransactions(
+  csvText: string
+): ICICIDirectTransaction[] {
+  const lines = csvText.trim().split(/\r?\n/);
+  const transactions: ICICIDirectTransaction[] = [];
+
+  // Skip header row
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // Parse CSV (simple split - ICICI CSVs don't have quoted fields with commas)
+    const cols = line.split(",");
+    if (cols.length < 14) continue;
+
+    const [
+      stockSymbol,
+      companyName,
+      isinCode,
+      action,
+      quantity,
+      transactionPrice,
+      brokerage,
+      transactionCharges,
+      stampDuty,
+      segment,
+      sttStatus,
+      _remarks,
+      transactionDate,
+      exchange,
+    ] = cols;
+
+    transactions.push({
+      stockSymbol: stockSymbol.trim(),
+      companyName: companyName.trim(),
+      isinCode: isinCode.trim(),
+      action: action.trim().toUpperCase() as "BUY" | "SELL",
+      quantity: parseInt(quantity.trim(), 10) || 0,
+      transactionPrice: parseFloat(transactionPrice.trim()) || 0,
+      brokerage: parseFloat(brokerage.trim()) || 0,
+      transactionCharges: parseFloat(transactionCharges.trim()) || 0,
+      stampDuty: parseFloat(stampDuty.trim()) || 0,
+      segment: segment.trim(),
+      sttPaid: sttStatus.trim() === "STT Paid",
+      transactionDate: parseICICIDate(transactionDate.trim()),
+      exchange: exchange.trim(),
+    });
+  }
+
+  return transactions;
+}
+
+/**
+ * Parse ICICI Direct PortFolioEqtSummary.csv (current holdings)
+ */
+export function parseICICIDirectHoldings(
+  csvText: string
+): ICICIDirectHolding[] {
+  const lines = csvText.trim().split(/\r?\n/);
+  const holdings: ICICIDirectHolding[] = [];
+
+  // Skip header row
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    const cols = line.split(",");
+    if (cols.length < 12) continue;
+
+    const [
+      stockSymbol,
+      companyName,
+      isinCode,
+      qty,
+      avgCostPrice,
+      currentMarketPrice,
+      _changePercent,
+      valueAtCost,
+      valueAtMarketPrice,
+      _realizedPnL,
+      unrealizedPnL,
+    ] = cols;
+
+    holdings.push({
+      stockSymbol: stockSymbol.trim(),
+      companyName: companyName.trim(),
+      isinCode: isinCode.trim(),
+      quantity: parseInt(qty.trim(), 10) || 0,
+      avgCostPrice: parseFloat(avgCostPrice.trim()) || 0,
+      currentMarketPrice:
+        parseFloat(currentMarketPrice.replace(/[+\s]/g, "").trim()) || 0,
+      valueAtCost: parseFloat(valueAtCost.trim()) || 0,
+      valueAtMarketPrice: parseFloat(valueAtMarketPrice.trim()) || 0,
+      unrealizedPnL: parseFloat(unrealizedPnL.replace(/[()]/g, "").trim()) || 0,
+    });
+  }
+
+  return holdings;
+}
+
+/**
+ * Convert ICICI Direct transactions to the common GrowwTransaction format
+ * This allows reusing the existing reconciliation logic
+ */
+export function convertICICIToGrowwFormat(
+  iciciTransactions: ICICIDirectTransaction[]
+): GrowwTransaction[] {
+  return iciciTransactions.map((tx) => ({
+    stockName: tx.companyName,
+    symbol: mapICICISymbolToNSE(tx.stockSymbol),
+    isin: tx.isinCode,
+    type: tx.action,
+    quantity: tx.quantity,
+    value: tx.quantity * tx.transactionPrice,
+    exchange: tx.exchange,
+    exchangeOrderId: `ICICI_${
+      tx.isinCode
+    }_${tx.transactionDate.toISOString()}_${tx.quantity}`,
+    executedAt: tx.transactionDate,
+    status: "Executed",
+  }));
+}

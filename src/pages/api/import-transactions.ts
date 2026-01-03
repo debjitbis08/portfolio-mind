@@ -1,6 +1,6 @@
 /**
  * Import Transactions API
- * POST: Import transactions from XLSX files
+ * POST: Import transactions from XLSX files (Groww/Zerodha) or CSV files (ICICI Direct)
  */
 
 import type { APIRoute } from "astro";
@@ -11,7 +11,27 @@ import {
   parseOrderHistory,
   parseHoldingsStatement,
   reconcile,
+  parseICICIDirectTransactions,
+  parseICICIDirectHoldings,
+  convertICICIToGrowwFormat,
+  type GrowwTransaction,
+  type GrowwHolding,
 } from "../../lib/xlsx-importer";
+
+/**
+ * Detect if a file is an ICICI Direct CSV based on filename or content
+ */
+function isICICIDirectFile(filename: string, content?: string): boolean {
+  // Check filename pattern: 8503558265_PortFolioEqtAll.csv
+  if (filename.includes("PortFolioEqt") && filename.endsWith(".csv")) {
+    return true;
+  }
+  // Check content for ICICI-specific header
+  if (content && content.includes("Stock Symbol,Company Name,ISIN Code")) {
+    return true;
+  }
+  return false;
+}
 
 export const POST: APIRoute = async ({ request }) => {
   // Auth check
@@ -23,7 +43,74 @@ export const POST: APIRoute = async ({ request }) => {
     const orderHistoryFile = formData.get("orderHistory") as File | null;
     const holdingsFile = formData.get("holdings") as File | null;
 
-    if (!orderHistoryFile) {
+    // Also check for ICICI Direct specific field names
+    const iciciTransactionsFile = formData.get(
+      "iciciTransactions"
+    ) as File | null;
+    const iciciHoldingsFile = formData.get("iciciHoldings") as File | null;
+
+    let transactions: GrowwTransaction[] = [];
+    let holdings: GrowwHolding[] | null = null;
+    let isICICIImport = false;
+
+    // Detect and parse ICICI Direct files
+    if (iciciTransactionsFile) {
+      isICICIImport = true;
+      const csvText = await iciciTransactionsFile.text();
+      const iciciTxs = parseICICIDirectTransactions(csvText);
+      transactions = convertICICIToGrowwFormat(iciciTxs);
+
+      if (iciciHoldingsFile) {
+        const holdingsCsv = await iciciHoldingsFile.text();
+        const iciciHoldings = parseICICIDirectHoldings(holdingsCsv);
+        // Convert to GrowwHolding format for reconciliation
+        holdings = iciciHoldings.map((h) => ({
+          stockName: h.companyName,
+          isin: h.isinCode,
+          quantity: h.quantity,
+          avgBuyPrice: h.avgCostPrice,
+          buyValue: h.valueAtCost,
+          closingPrice: h.currentMarketPrice,
+          closingValue: h.valueAtMarketPrice,
+          unrealisedPnL: h.unrealizedPnL,
+        }));
+      }
+    }
+    // Check if orderHistory is actually an ICICI file
+    else if (orderHistoryFile) {
+      const filename = orderHistoryFile.name;
+
+      if (isICICIDirectFile(filename)) {
+        isICICIImport = true;
+        const csvText = await orderHistoryFile.text();
+        const iciciTxs = parseICICIDirectTransactions(csvText);
+        transactions = convertICICIToGrowwFormat(iciciTxs);
+
+        if (holdingsFile && isICICIDirectFile(holdingsFile.name)) {
+          const holdingsCsv = await holdingsFile.text();
+          const iciciHoldings = parseICICIDirectHoldings(holdingsCsv);
+          holdings = iciciHoldings.map((h) => ({
+            stockName: h.companyName,
+            isin: h.isinCode,
+            quantity: h.quantity,
+            avgBuyPrice: h.avgCostPrice,
+            buyValue: h.valueAtCost,
+            closingPrice: h.currentMarketPrice,
+            closingValue: h.valueAtMarketPrice,
+            unrealisedPnL: h.unrealizedPnL,
+          }));
+        }
+      } else {
+        // Standard Groww/Zerodha XLSX parsing
+        const orderBuffer = await orderHistoryFile.arrayBuffer();
+        transactions = parseOrderHistory(orderBuffer);
+
+        if (holdingsFile) {
+          const holdingsBuffer = await holdingsFile.arrayBuffer();
+          holdings = parseHoldingsStatement(holdingsBuffer);
+        }
+      }
+    } else {
       return new Response(
         JSON.stringify({ error: "Order history file is required" }),
         {
@@ -33,16 +120,9 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    // Parse order history
-    const orderBuffer = await orderHistoryFile.arrayBuffer();
-    const transactions = parseOrderHistory(orderBuffer);
-
-    // Parse holdings (optional, for reconciliation)
-    let holdings = null;
+    // Reconcile if holdings provided
     let reconciliationResult = null;
-    if (holdingsFile) {
-      const holdingsBuffer = await holdingsFile.arrayBuffer();
-      holdings = parseHoldingsStatement(holdingsBuffer);
+    if (holdings) {
       reconciliationResult = reconcile(transactions, holdings);
     }
 
@@ -125,6 +205,7 @@ export const POST: APIRoute = async ({ request }) => {
     return new Response(
       JSON.stringify({
         success: true,
+        source: isICICIImport ? "icici_direct" : "groww",
         transactionsImported: insertedCount,
         adjustmentsCreated: adjustmentsInserted,
         reconciliation: reconciliationResult
