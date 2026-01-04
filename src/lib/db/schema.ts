@@ -294,6 +294,25 @@ export const actionNotes = sqliteTable(
 );
 
 // ============================================================================
+// Company Research - User-created research documents
+// ============================================================================
+
+export const companyResearch = sqliteTable(
+  "company_research",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    symbol: text("symbol").notNull(),
+    title: text("title").notNull(),
+    content: text("content").notNull(), // Markdown content
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("idx_company_research_symbol").on(table.symbol)]
+);
+
+// ============================================================================
 // Sessions - Authentication sessions
 // ============================================================================
 

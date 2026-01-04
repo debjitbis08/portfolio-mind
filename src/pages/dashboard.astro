@@ -3,6 +3,7 @@ import Layout from "../layouts/Layout.astro";
 import { validateSession } from "../lib/auth";
 import ActionNotes from "../components/notes/ActionNotes";
 import CompanyNotes from "../components/notes/CompanyNotes";
+import ResearchList from "../components/research/ResearchList";
 
 // Check auth on server side
 const session = await validateSession(Astro.request);
@@ -95,7 +96,7 @@ if (!session) {
               <th class="p-4 text-right">Market price</th>
               <th class="p-4 text-right">Returns (%)</th>
               <th class="p-4 text-right">Current (Invested)</th>
-              <th class="p-4 text-center">Notes</th>
+              <th class="p-4 text-center">Actions</th>
             </tr>
           </thead>
           <tbody id="holdings-body" class="divide-y divide-surface1"> </tbody>
@@ -385,6 +386,9 @@ if (!session) {
 
       <!-- Company Notes Modal Container -->
       <div id="company-notes-portal"></div>
+
+      <!-- Research Modal Container -->
+      <div id="research-portal"></div>
     </main>
   </div>
 
@@ -517,13 +521,22 @@ if (!session) {
                 <div class="text-sm text-subtext0">${formatCurrency(h.invested_value)}</div>
               </td>
               <td class="p-4 text-center">
-                <button
-                  onclick="showCompanyNotes('${h.symbol}')"
-                  class="px-3 py-1 text-sm bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
-                  title="View notes for ${h.stock_name}"
-                >
-                  📝 Notes
-                </button>
+                <div class="flex items-center gap-2 justify-center">
+                  <button
+                    onclick="showResearch('${h.symbol}')"
+                    class="px-3 py-1 text-sm bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
+                    title="Research for ${h.stock_name}"
+                  >
+                    📚 Research
+                  </button>
+                  <button
+                    onclick="showCompanyNotes('${h.symbol}')"
+                    class="px-3 py-1 text-sm bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
+                    title="Notes for ${h.stock_name}"
+                  >
+                    📝 Notes
+                  </button>
+                </div>
               </td>
             </tr>
           `;
@@ -1045,6 +1058,7 @@ if (!session) {
     import { render } from "solid-js/web";
     import ActionNotes from "../components/notes/ActionNotes";
     import CompanyNotes from "../components/notes/CompanyNotes";
+    import ResearchList from "../components/research/ResearchList";
 
     // State for company notes modal
     let companyNotesCleanup: (() => void) | null = null;
@@ -1081,6 +1095,37 @@ if (!session) {
 
     // Make function globally available for inline event handlers
     (window as any).showCompanyNotes = showCompanyNotes;
+
+    // Function to show research modal
+    let researchCleanup: any = null;
+
+    function showResearch(symbol: string) {
+      const portal = document.getElementById("research-portal");
+      if (!portal) return;
+
+      // Clean up previous instance if exists
+      if (researchCleanup) {
+        researchCleanup();
+      }
+
+      // Render ResearchList component
+      researchCleanup = render(
+        () =>
+          ResearchList({
+            symbol,
+            onClose: () => {
+              if (researchCleanup) {
+                researchCleanup();
+                researchCleanup = null;
+              }
+            },
+          }),
+        portal
+      );
+    }
+
+    // Make function globally available for inline event handlers
+    (window as any).showResearch = showResearch;
 
     // Function to mount ActionNotes components after suggestions are loaded
     function mountActionNotes() {
