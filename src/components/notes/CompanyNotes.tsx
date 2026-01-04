@@ -10,6 +10,7 @@ interface Note {
 interface CompanyNotesProps {
   symbol: string;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 function formatTimeAgo(dateString: string): string {
@@ -136,6 +137,102 @@ export default function CompanyNotes(props: CompanyNotesProps) {
     }
   };
 
+  // Content that is shared between modal and embedded modes
+  const notesContent = () => (
+    <div class="space-y-4">
+      {/* Add Note Form */}
+      <form onSubmit={handleSubmit} class="space-y-2">
+        <div class="relative">
+          <textarea
+            value={newNote()}
+            onInput={(e) => setNewNote(e.currentTarget.value)}
+            placeholder="Add a note about this stock..."
+            rows={3}
+            class="w-full px-3 py-2 bg-surface0 border border-surface2 rounded-lg text-sm text-text resize-none focus:outline-none focus:border-mauve"
+            disabled={isSubmitting()}
+          />
+          <div class={`absolute bottom-2 right-2 text-xs ${charLimitClass()}`}>
+            {charCount()}/500
+          </div>
+        </div>
+
+        <Show when={error()}>
+          <div class="p-2 bg-red/10 border border-red/30 rounded text-xs text-red">
+            {error()}
+          </div>
+        </Show>
+
+        <button
+          type="submit"
+          disabled={isSubmitting() || !newNote().trim() || charCount() > 500}
+          class="w-full px-4 py-2 text-sm bg-blue hover:bg-blue/80 text-base rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSubmitting() ? "Saving..." : "Add Note"}
+        </button>
+      </form>
+
+      {/* Notes List */}
+      <Show when={notes.loading}>
+        <div class="text-center py-8 text-subtext0">Loading notes...</div>
+      </Show>
+
+      <Show when={notes() && notes()!.length === 0}>
+        <div class="text-center py-8 text-subtext0 italic">
+          No notes yet. Add one above!
+        </div>
+      </Show>
+
+      <Show when={notes() && notes()!.length > 0}>
+        <div class="space-y-2">
+          <h4 class="text-sm font-medium text-subtext1">
+            All Notes ({notes()!.length})
+          </h4>
+          <ul class="space-y-2">
+            <For each={notes()}>
+              {(note) => (
+                <li class="p-3 bg-surface0 border border-surface1 rounded-lg group">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm text-text break-words whitespace-pre-wrap">
+                        {note.content}
+                      </p>
+                      <p class="text-xs text-subtext0 mt-1">
+                        {formatTimeAgo(note.createdAt)}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleDelete(note.id)}
+                      class="opacity-0 group-hover:opacity-100 flex-shrink-0 text-red hover:text-red/80 text-sm transition-opacity p-1"
+                      title="Delete note"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </li>
+              )}
+            </For>
+          </ul>
+        </div>
+      </Show>
+    </div>
+  );
+
+  // Embedded mode: render inline without modal wrapper
+  if (props.embedded) {
+    return (
+      <>
+        {/* Header for embedded mode */}
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-medium text-text">📝 Notes</h3>
+        </div>
+
+        {/* Content */}
+        <div class="flex-1">{notesContent()}</div>
+      </>
+    );
+  }
+
+  // Modal mode: render with fixed overlay
   return (
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-crust/80 backdrop-blur-sm p-4"
@@ -173,86 +270,7 @@ export default function CompanyNotes(props: CompanyNotesProps) {
         </div>
 
         {/* Content */}
-        <div class="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Add Note Form */}
-          <form onSubmit={handleSubmit} class="space-y-2">
-            <div class="relative">
-              <textarea
-                value={newNote()}
-                onInput={(e) => setNewNote(e.currentTarget.value)}
-                placeholder="Add a note about this stock..."
-                rows={3}
-                class="w-full px-3 py-2 bg-surface0 border border-surface2 rounded-lg text-sm text-text resize-none focus:outline-none focus:border-mauve"
-                disabled={isSubmitting()}
-              />
-              <div
-                class={`absolute bottom-2 right-2 text-xs ${charLimitClass()}`}
-              >
-                {charCount()}/500
-              </div>
-            </div>
-
-            <Show when={error()}>
-              <div class="p-2 bg-red/10 border border-red/30 rounded text-xs text-red">
-                {error()}
-              </div>
-            </Show>
-
-            <button
-              type="submit"
-              disabled={
-                isSubmitting() || !newNote().trim() || charCount() > 500
-              }
-              class="w-full px-4 py-2 text-sm bg-blue hover:bg-blue/80 text-base rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSubmitting() ? "Saving..." : "Add Note"}
-            </button>
-          </form>
-
-          {/* Notes List */}
-          <Show when={notes.loading}>
-            <div class="text-center py-8 text-subtext0">Loading notes...</div>
-          </Show>
-
-          <Show when={notes() && notes()!.length === 0}>
-            <div class="text-center py-8 text-subtext0 italic">
-              No notes yet. Add one above!
-            </div>
-          </Show>
-
-          <Show when={notes() && notes()!.length > 0}>
-            <div class="space-y-2">
-              <h4 class="text-sm font-medium text-subtext1">
-                All Notes ({notes()!.length})
-              </h4>
-              <ul class="space-y-2">
-                <For each={notes()}>
-                  {(note) => (
-                    <li class="p-3 bg-surface0 border border-surface1 rounded-lg group">
-                      <div class="flex items-start justify-between gap-3">
-                        <div class="flex-1 min-w-0">
-                          <p class="text-sm text-text break-words whitespace-pre-wrap">
-                            {note.content}
-                          </p>
-                          <p class="text-xs text-subtext0 mt-1">
-                            {formatTimeAgo(note.createdAt)}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleDelete(note.id)}
-                          class="opacity-0 group-hover:opacity-100 flex-shrink-0 text-red hover:text-red/80 text-sm transition-opacity p-1"
-                          title="Delete note"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </div>
-          </Show>
-        </div>
+        <div class="flex-1 overflow-y-auto p-4">{notesContent()}</div>
       </div>
     </div>
   );

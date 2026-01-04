@@ -502,7 +502,7 @@ if (!session) {
               return `
             <tr class="hover:bg-surface1/50 transition-colors">
               <td class="p-4">
-                <div class="font-medium text-text">${h.stock_name}</div>
+                <a href="/company/${encodeURIComponent(h.symbol)}" class="font-medium text-text hover:text-mauve transition-colors underline decoration-dotted hover:decoration-solid">${h.stock_name}</a>
                 <div class="text-sm text-subtext0">${h.quantity} shares • Avg. ${formatCurrencyDecimal(h.avg_buy_price)}</div>
               </td>
               <td class="p-4 text-center">

@@ -313,6 +313,27 @@ export const companyResearch = sqliteTable(
 );
 
 // ============================================================================
+// Company Links - User bookmarked URLs with fetched content
+// ============================================================================
+
+export const companyLinks = sqliteTable(
+  "company_links",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    symbol: text("symbol").notNull(),
+    url: text("url").notNull(),
+    title: text("title").notNull(),
+    description: text("description"), // Optional user note
+    fetchedContent: text("fetched_content"), // Cleaned page content
+    fetchedAt: text("fetched_at"), // When content was last fetched
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("idx_company_links_symbol").on(table.symbol)]
+);
+
+// ============================================================================
 // Sessions - Authentication sessions
 // ============================================================================
 

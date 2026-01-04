@@ -1,17 +1,19 @@
 import { createSignal, createResource, For, Show } from "solid-js";
-import ResearchEditor from "./ResearchEditor";
-import ResearchViewer from "./ResearchViewer.tsx";
+import AddLinkModal from "./AddLinkModal";
+import LinkViewer from "./LinkViewer";
 
-interface ResearchDocument {
+interface CompanyLink {
   id: string;
   symbol: string;
+  url: string;
   title: string;
-  content: string;
+  description: string | null;
+  fetchedContent: string | null;
+  fetchedAt: string | null;
   createdAt: string;
-  updatedAt: string;
 }
 
-interface ResearchListProps {
+interface LinksListProps {
   symbol: string;
   onClose: () => void;
   embedded?: boolean;
@@ -30,33 +32,41 @@ function formatTimeAgo(dateString: string): string {
   return `${Math.floor(seconds / 2592000)}mo ago`;
 }
 
-async function fetchResearch(symbol: string): Promise<ResearchDocument[]> {
-  const response = await fetch(
-    `/api/research?symbol=${encodeURIComponent(symbol)}`
-  );
-  if (!response.ok) throw new Error("Failed to fetch research");
-  const data = await response.json();
-  return data.documents || [];
+function truncateUrl(url: string, maxLength: number = 50): string {
+  try {
+    const parsed = new URL(url);
+    const display = parsed.hostname + parsed.pathname;
+    if (display.length <= maxLength) return display;
+    return display.substring(0, maxLength) + "...";
+  } catch {
+    return url.length <= maxLength ? url : url.substring(0, maxLength) + "...";
+  }
 }
 
-async function deleteResearch(id: string): Promise<void> {
-  const response = await fetch(`/api/research/${id}`, {
+async function fetchLinks(symbol: string): Promise<CompanyLink[]> {
+  const response = await fetch(
+    `/api/links?symbol=${encodeURIComponent(symbol)}`
+  );
+  if (!response.ok) throw new Error("Failed to fetch links");
+  const data = await response.json();
+  return data.links || [];
+}
+
+async function deleteLink(id: string): Promise<void> {
+  const response = await fetch(`/api/links/${id}`, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
   });
-  if (!response.ok) throw new Error("Failed to delete research");
+  if (!response.ok) throw new Error("Failed to delete link");
 }
 
-export default function ResearchList(props: ResearchListProps) {
-  const [documents, { refetch }] = createResource(
-    () => props.symbol,
-    fetchResearch
-  );
-  const [showEditor, setShowEditor] = createSignal(false);
+export default function LinksList(props: LinksListProps) {
+  const [links, { refetch }] = createResource(() => props.symbol, fetchLinks);
+  const [showAddModal, setShowAddModal] = createSignal(false);
   const [showViewer, setShowViewer] = createSignal(false);
-  const [selectedDocument, setSelectedDocument] = createSignal<
-    ResearchDocument | undefined
-  >(undefined);
+  const [selectedLink, setSelectedLink] = createSignal<CompanyLink | undefined>(
+    undefined
+  );
   const [displayInfo, setDisplayInfo] = createSignal<{
     name: string;
     isEtf: boolean;
@@ -77,75 +87,61 @@ export default function ResearchList(props: ResearchListProps) {
         });
       }
     } catch {
-      // Fallback to original symbol
       setDisplayInfo({ name: props.symbol, isEtf: false });
     }
   });
 
-  const handleCreate = () => {
-    setSelectedDocument(undefined);
-    setShowEditor(true);
+  const handleAdd = () => {
+    setShowAddModal(true);
   };
 
-  const handleEdit = (doc: ResearchDocument) => {
-    setSelectedDocument(doc);
-    setShowEditor(true);
-  };
-
-  const handleView = (doc: ResearchDocument) => {
-    setSelectedDocument(doc);
+  const handleView = (link: CompanyLink) => {
+    setSelectedLink(link);
     setShowViewer(true);
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this research document? This cannot be undone."))
-      return;
+    if (!confirm("Delete this link? This cannot be undone.")) return;
 
     try {
-      await deleteResearch(id);
+      await deleteLink(id);
       refetch();
       setError("");
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to delete research"
-      );
+      setError(err instanceof Error ? err.message : "Failed to delete link");
     }
   };
 
   const handleSave = () => {
-    setShowEditor(false);
-    setSelectedDocument(undefined);
+    setShowAddModal(false);
     refetch();
   };
 
-  const handleCloseEditor = () => {
-    setShowEditor(false);
-    setSelectedDocument(undefined);
+  const handleCloseAddModal = () => {
+    setShowAddModal(false);
   };
 
   const handleCloseViewer = () => {
     setShowViewer(false);
-    setSelectedDocument(undefined);
+    setSelectedLink(undefined);
   };
 
-  const truncateContent = (content: string, maxLength: number = 200) => {
-    if (content.length <= maxLength) return content;
-    return content.substring(0, maxLength) + "...";
+  const handleRefetch = () => {
+    refetch();
   };
 
-  // Close on Escape key
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && !showEditor() && !showViewer()) {
+    if (e.key === "Escape" && !showAddModal() && !showViewer()) {
       props.onClose();
     }
   };
 
   // Content that is shared between modal and embedded modes
-  const researchContent = () => (
+  const linksContent = () => (
     <>
-      <Show when={documents.loading}>
+      <Show when={links.loading}>
         <div class="text-center py-12 text-subtext0">
-          Loading research documents...
+          Loading saved links...
         </div>
       </Show>
 
@@ -155,48 +151,62 @@ export default function ResearchList(props: ResearchListProps) {
         </div>
       </Show>
 
-      <Show when={documents() && documents()!.length === 0}>
+      <Show when={links() && links()!.length === 0}>
         <div class="text-center py-12">
-          <div class="text-4xl mb-3">📄</div>
+          <div class="text-4xl mb-3">🔗</div>
           <p class="text-subtext0 mb-4">
-            No research documents yet for {displayInfo().name}
+            No saved links yet for {displayInfo().name}
           </p>
           <button
-            onClick={handleCreate}
+            onClick={handleAdd}
             class="px-4 py-2 text-sm bg-blue hover:bg-blue/80 text-base rounded-lg transition-colors"
           >
-            Create First Document
+            Add First Link
           </button>
         </div>
       </Show>
 
-      <Show when={documents() && documents()!.length > 0}>
+      <Show when={links() && links()!.length > 0}>
         <div class="space-y-3">
-          <For each={documents()}>
-            {(doc) => (
+          <For each={links()}>
+            {(link) => (
               <div class="p-4 bg-surface0 border border-surface1 rounded-lg hover:border-surface2 transition-colors group">
                 <div class="flex items-start justify-between gap-3">
                   <div
                     class="flex-1 min-w-0 cursor-pointer"
-                    onClick={() => handleView(doc)}
+                    onClick={() => handleView(link)}
                   >
                     <h4 class="text-base font-medium text-text mb-1 group-hover:text-blue transition-colors">
-                      {doc.title}
+                      {link.title}
                     </h4>
-                    <p class="text-sm text-subtext0 mb-2 line-clamp-2">
-                      {truncateContent(doc.content)}
+                    <p class="text-sm text-subtext0 mb-2 truncate">
+                      {truncateUrl(link.url)}
                     </p>
+                    <Show when={link.description}>
+                      <p class="text-sm text-subtext1 mb-2 line-clamp-1">
+                        {link.description}
+                      </p>
+                    </Show>
                     <div class="flex items-center gap-3 text-xs text-subtext1">
-                      <span>Updated {formatTimeAgo(doc.updatedAt)}</span>
-                      <span>•</span>
-                      <span>{doc.content.length} characters</span>
+                      <span>Added {formatTimeAgo(link.createdAt)}</span>
+                      <Show when={link.fetchedAt}>
+                        <span>•</span>
+                        <span class="text-green">✓ Content fetched</span>
+                      </Show>
+                      <Show when={!link.fetchedAt && !link.fetchedContent}>
+                        <span>•</span>
+                        <span class="text-yellow">⚠ No content</span>
+                      </Show>
                     </div>
                   </div>
                   <div class="flex items-center gap-1 flex-shrink-0">
-                    <button
-                      onClick={() => handleEdit(doc)}
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       class="p-2 text-subtext0 hover:text-blue hover:bg-surface1 rounded transition-all"
-                      title="Edit"
+                      title="Open in new tab"
+                      onClick={(e) => e.stopPropagation()}
                     >
                       <svg
                         class="w-4 h-4"
@@ -208,12 +218,12 @@ export default function ResearchList(props: ResearchListProps) {
                           stroke-linecap="round"
                           stroke-linejoin="round"
                           stroke-width={2}
-                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
                         />
                       </svg>
-                    </button>
+                    </a>
                     <button
-                      onClick={() => handleDelete(doc.id)}
+                      onClick={() => handleDelete(link.id)}
                       class="p-2 text-subtext0 hover:text-red hover:bg-surface1 rounded transition-all"
                       title="Delete"
                     >
@@ -247,36 +257,32 @@ export default function ResearchList(props: ResearchListProps) {
       <>
         {/* Header for embedded mode */}
         <div class="flex items-center justify-between mb-4">
-          <h3 class="text-lg font-medium text-text">📚 Research</h3>
+          <h3 class="text-lg font-medium text-text">🔗 Links</h3>
           <button
-            onClick={handleCreate}
+            onClick={handleAdd}
             class="px-3 py-1.5 text-sm bg-blue hover:bg-blue/80 text-base rounded-lg transition-colors"
           >
-            + New Document
+            + Add Link
           </button>
         </div>
 
         {/* Content */}
-        <div class="flex-1">{researchContent()}</div>
+        <div class="flex-1">{linksContent()}</div>
 
-        {/* Editor Modal */}
-        <Show when={showEditor()}>
-          <ResearchEditor
+        {/* Add Modal */}
+        <Show when={showAddModal()}>
+          <AddLinkModal
             symbol={props.symbol}
-            document={selectedDocument()}
             onSave={handleSave}
-            onClose={handleCloseEditor}
+            onClose={handleCloseAddModal}
           />
         </Show>
 
         {/* Viewer Modal */}
-        <Show when={showViewer() && selectedDocument()}>
-          <ResearchViewer
-            document={selectedDocument()!}
-            onEdit={() => {
-              setShowViewer(false);
-              setShowEditor(true);
-            }}
+        <Show when={showViewer() && selectedLink()}>
+          <LinkViewer
+            link={selectedLink()!}
+            onRefetch={handleRefetch}
             onClose={handleCloseViewer}
           />
         </Show>
@@ -299,14 +305,14 @@ export default function ResearchList(props: ResearchListProps) {
           {/* Header */}
           <div class="flex items-center justify-between p-4 border-b border-surface1">
             <h3 class="text-lg font-medium text-text">
-              📚 Research: {displayInfo().name}
+              🔗 Links: {displayInfo().name}
             </h3>
             <div class="flex items-center gap-2">
               <button
-                onClick={handleCreate}
+                onClick={handleAdd}
                 class="px-3 py-1.5 text-sm bg-blue hover:bg-blue/80 text-base rounded-lg transition-colors"
               >
-                + New Document
+                + Add Link
               </button>
               <button
                 onClick={props.onClose}
@@ -331,28 +337,24 @@ export default function ResearchList(props: ResearchListProps) {
           </div>
 
           {/* Content */}
-          <div class="flex-1 overflow-y-auto p-4">{researchContent()}</div>
+          <div class="flex-1 overflow-y-auto p-4">{linksContent()}</div>
         </div>
       </div>
 
-      {/* Editor Modal */}
-      <Show when={showEditor()}>
-        <ResearchEditor
+      {/* Add Modal */}
+      <Show when={showAddModal()}>
+        <AddLinkModal
           symbol={props.symbol}
-          document={selectedDocument()}
           onSave={handleSave}
-          onClose={handleCloseEditor}
+          onClose={handleCloseAddModal}
         />
       </Show>
 
       {/* Viewer Modal */}
-      <Show when={showViewer() && selectedDocument()}>
-        <ResearchViewer
-          document={selectedDocument()!}
-          onEdit={() => {
-            setShowViewer(false);
-            setShowEditor(true);
-          }}
+      <Show when={showViewer() && selectedLink()}>
+        <LinkViewer
+          link={selectedLink()!}
+          onRefetch={handleRefetch}
           onClose={handleCloseViewer}
         />
       </Show>

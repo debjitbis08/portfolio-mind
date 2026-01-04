@@ -13,7 +13,7 @@
       "idx": 1,
       "version": "6",
       "when": 1767499203953,
-      "tag": "0001_magenta_old_lace",
+      "tag": "0001_add_notes_tables",
       "breakpoints": true
     },
     {
@@ -21,6 +21,20 @@
       "version": "6",
       "when": 1767509608638,
       "tag": "0002_purple_wiccan",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1767522874790,
+      "tag": "0003_gifted_jackal",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1767627090000,
+      "tag": "0004_fix_company_links",
       "breakpoints": true
     }
   ]

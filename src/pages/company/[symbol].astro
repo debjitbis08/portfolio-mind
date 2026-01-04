@@ -1,0 +1,489 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { validateSession } from "../../lib/auth";
+
+// Check auth on server side
+const session = await validateSession(Astro.request);
+
+// Redirect if not logged in
+if (!session) {
+  return Astro.redirect("/login");
+}
+
+// Get symbol from URL
+const { symbol } = Astro.params;
+
+if (!symbol) {
+  return Astro.redirect("/dashboard");
+}
+---
+
+<Layout title={`${symbol} - Portfolio Mind`}>
+  <div class="min-h-screen p-4 md:p-8">
+    <!-- Header -->
+    <header class="max-w-6xl mx-auto flex items-center justify-between mb-6">
+      <div class="flex items-center gap-4">
+        <a
+          href="/dashboard"
+          class="text-subtext0 hover:text-text transition-colors"
+          title="Back to Dashboard"
+        >
+          ← Back
+        </a>
+        <div>
+          <h1 id="company-name" class="text-2xl font-bold text-text">
+            {symbol}
+          </h1>
+          <p id="company-symbol" class="text-sm text-subtext0">{symbol}</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-6xl mx-auto">
+      <!-- Tab Navigation -->
+      <nav class="border-b border-surface1 mb-6">
+        <div class="flex gap-1">
+          <button
+            data-tab="overview"
+            class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-mauve text-mauve transition-colors"
+          >
+            Overview
+          </button>
+          <button
+            data-tab="research"
+            class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-subtext0 hover:text-text transition-colors"
+          >
+            Research
+          </button>
+          <button
+            data-tab="notes"
+            class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-subtext0 hover:text-text transition-colors"
+          >
+            Notes
+          </button>
+          <button
+            data-tab="links"
+            class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-subtext0 hover:text-text transition-colors"
+          >
+            Links
+          </button>
+          <button
+            data-tab="tables"
+            class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-subtext0 hover:text-text transition-colors"
+          >
+            Tables
+          </button>
+        </div>
+      </nav>
+
+      <!-- Tab Content -->
+      <div id="tab-content">
+        <!-- Overview Tab -->
+        <section id="tab-overview" class="tab-panel">
+          <!-- Holdings Summary -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div class="bg-surface0 border border-surface1 rounded-xl p-4">
+              <h3 class="text-sm font-medium text-subtext0 mb-3">
+                Holdings Summary
+              </h3>
+              <div class="space-y-2" id="holdings-summary">
+                <div class="flex justify-between">
+                  <span class="text-subtext1">Quantity</span>
+                  <span id="summary-qty" class="text-text font-medium">—</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-subtext1">Avg Cost</span>
+                  <span id="summary-avg" class="text-text">—</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-subtext1">Current Price</span>
+                  <span id="summary-price" class="text-text">—</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-subtext1">Value</span>
+                  <span id="summary-value" class="text-text font-medium">—</span
+                  >
+                </div>
+                <div class="flex justify-between pt-2 border-t border-surface1">
+                  <span class="text-subtext1">P&L</span>
+                  <span id="summary-pnl" class="font-medium">—</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-surface0 border border-surface1 rounded-xl p-4">
+              <h3 class="text-sm font-medium text-subtext0 mb-3">
+                Technical Snapshot
+              </h3>
+              <div class="space-y-2" id="technical-summary">
+                <div class="flex justify-between items-center">
+                  <span class="text-subtext1">RSI(14)</span>
+                  <span id="tech-rsi" class="text-text">—</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-subtext1">vs SMA50</span>
+                  <span id="tech-sma50" class="text-text">—</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-subtext1">vs SMA200</span>
+                  <span id="tech-sma200" class="text-text">—</span>
+                </div>
+                <div
+                  class="flex justify-between items-center pt-2 border-t border-surface1"
+                >
+                  <span class="text-subtext1">Trend</span>
+                  <span id="tech-trend" class="text-text">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Latest AI Suggestion -->
+          <div class="bg-surface0 border border-surface1 rounded-xl p-4 mb-6">
+            <h3 class="text-sm font-medium text-subtext0 mb-3">
+              Latest AI Suggestion
+            </h3>
+            <div id="latest-suggestion" class="text-subtext1">Loading...</div>
+          </div>
+
+          <!-- Your Knowledge Summary -->
+          <div class="bg-surface0 border border-surface1 rounded-xl p-4">
+            <h3 class="text-sm font-medium text-subtext0 mb-3">
+              Your Knowledge
+            </h3>
+            <div
+              class="grid grid-cols-2 md:grid-cols-4 gap-4"
+              id="knowledge-summary"
+            >
+              <button
+                data-goto="research"
+                class="p-3 bg-surface1 rounded-lg hover:bg-surface2 transition-colors text-left"
+              >
+                <div class="text-2xl mb-1">📄</div>
+                <div class="text-xs text-subtext1">Research</div>
+                <div id="count-research" class="text-lg font-medium text-text">
+                  —
+                </div>
+              </button>
+              <button
+                data-goto="notes"
+                class="p-3 bg-surface1 rounded-lg hover:bg-surface2 transition-colors text-left"
+              >
+                <div class="text-2xl mb-1">📝</div>
+                <div class="text-xs text-subtext1">Notes</div>
+                <div id="count-notes" class="text-lg font-medium text-text">
+                  —
+                </div>
+              </button>
+              <button
+                data-goto="links"
+                class="p-3 bg-surface1 rounded-lg hover:bg-surface2 transition-colors text-left"
+              >
+                <div class="text-2xl mb-1">🔗</div>
+                <div class="text-xs text-subtext1">Links</div>
+                <div id="count-links" class="text-lg font-medium text-text">
+                  —
+                </div>
+              </button>
+              <button
+                data-goto="tables"
+                class="p-3 bg-surface1 rounded-lg hover:bg-surface2 transition-colors text-left"
+              >
+                <div class="text-2xl mb-1">📊</div>
+                <div class="text-xs text-subtext1">Tables</div>
+                <div id="count-tables" class="text-lg font-medium text-text">
+                  0
+                </div>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Research Tab -->
+        <section id="tab-research" class="tab-panel hidden">
+          <div id="research-container"></div>
+        </section>
+
+        <!-- Notes Tab -->
+        <section id="tab-notes" class="tab-panel hidden">
+          <div id="notes-container"></div>
+        </section>
+
+        <!-- Links Tab -->
+        <section id="tab-links" class="tab-panel hidden">
+          <div id="links-container"></div>
+        </section>
+
+        <!-- Tables Tab -->
+        <section id="tab-tables" class="tab-panel hidden">
+          <div class="text-center py-12 text-subtext0">
+            <div class="text-4xl mb-3">📊</div>
+            <p>Tables feature coming soon</p>
+            <p class="text-sm mt-2">
+              Create custom tables to track financials, comparisons, and more.
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script define:vars={{ symbol }}>
+    const SYMBOL = symbol;
+
+    // Format currency
+    function formatCurrency(value) {
+      return new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+        maximumFractionDigits: 0,
+      }).format(value);
+    }
+
+    function formatCurrencyDecimal(value) {
+      return new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(value);
+    }
+
+    // Tab switching
+    const tabBtns = document.querySelectorAll(".tab-btn");
+    const tabPanels = document.querySelectorAll(".tab-panel");
+
+    function switchTab(tabId) {
+      // Update buttons
+      tabBtns.forEach((btn) => {
+        const isActive = btn.dataset.tab === tabId;
+        btn.classList.toggle("border-mauve", isActive);
+        btn.classList.toggle("text-mauve", isActive);
+        btn.classList.toggle("border-transparent", !isActive);
+        btn.classList.toggle("text-subtext0", !isActive);
+      });
+
+      // Update panels
+      tabPanels.forEach((panel) => {
+        const isActive = panel.id === `tab-${tabId}`;
+        panel.classList.toggle("hidden", !isActive);
+      });
+
+      // Lazy mount SolidJS components
+      if (tabId === "research" && !window.researchMounted) {
+        mountResearch();
+      } else if (tabId === "notes" && !window.notesMounted) {
+        mountNotes();
+      } else if (tabId === "links" && !window.linksMounted) {
+        mountLinks();
+      }
+    }
+
+    tabBtns.forEach((btn) => {
+      btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+    });
+
+    // Knowledge summary shortcuts
+    document.querySelectorAll("[data-goto]").forEach((btn) => {
+      btn.addEventListener("click", () => switchTab(btn.dataset.goto));
+    });
+
+    // Load overview data
+    async function loadOverview() {
+      try {
+        // Fetch holdings data
+        const holdingsRes = await fetch("/api/holdings");
+        const holdingsData = await holdingsRes.json();
+
+        // Find this stock in holdings
+        const holding = holdingsData.holdings?.find((h) => h.symbol === SYMBOL);
+
+        if (holding) {
+          document.getElementById("company-name").textContent =
+            holding.stock_name;
+          document.getElementById("summary-qty").textContent =
+            `${holding.quantity} shares`;
+          document.getElementById("summary-avg").textContent =
+            formatCurrencyDecimal(holding.avg_buy_price);
+          document.getElementById("summary-price").textContent =
+            formatCurrencyDecimal(holding.current_price);
+          document.getElementById("summary-value").textContent = formatCurrency(
+            holding.current_value
+          );
+
+          const pnlEl = document.getElementById("summary-pnl");
+          const isPositive = holding.returns >= 0;
+          pnlEl.textContent = `${isPositive ? "+" : ""}${formatCurrency(holding.returns)} (${holding.returns_percent.toFixed(2)}%)`;
+          pnlEl.className = `font-medium ${isPositive ? "text-green" : "text-red"}`;
+
+          // Technical data
+          if (holding.rsi_14 !== null) {
+            const rsiEl = document.getElementById("tech-rsi");
+            const rsiVal = holding.rsi_14.toFixed(1);
+            const rsiLabel =
+              holding.rsi_14 > 70
+                ? "Overbought"
+                : holding.rsi_14 < 30
+                  ? "Oversold"
+                  : "Neutral";
+            rsiEl.textContent = `${rsiVal} (${rsiLabel})`;
+            rsiEl.className =
+              holding.rsi_14 > 70
+                ? "text-red"
+                : holding.rsi_14 < 30
+                  ? "text-green"
+                  : "text-text";
+          }
+
+          if (holding.price_vs_sma50 !== null) {
+            const sma50El = document.getElementById("tech-sma50");
+            const isAbove = holding.price_vs_sma50 >= 0;
+            sma50El.textContent = `${isAbove ? "+" : ""}${holding.price_vs_sma50.toFixed(1)}%`;
+            sma50El.className = isAbove ? "text-green" : "text-red";
+          }
+
+          if (holding.price_vs_sma200 !== null) {
+            const sma200El = document.getElementById("tech-sma200");
+            const isAbove = holding.price_vs_sma200 >= 0;
+            sma200El.textContent = `${isAbove ? "+" : ""}${holding.price_vs_sma200.toFixed(1)}%`;
+            sma200El.className = isAbove ? "text-green" : "text-red";
+          }
+
+          // Trend
+          const trendEl = document.getElementById("tech-trend");
+          if (
+            holding.price_vs_sma50 !== null &&
+            holding.price_vs_sma200 !== null
+          ) {
+            if (holding.price_vs_sma50 > 0 && holding.price_vs_sma200 > 0) {
+              trendEl.textContent = "Bullish ▲";
+              trendEl.className = "text-green font-medium";
+            } else if (
+              holding.price_vs_sma50 < 0 &&
+              holding.price_vs_sma200 < 0
+            ) {
+              trendEl.textContent = "Bearish ▼";
+              trendEl.className = "text-red font-medium";
+            } else {
+              trendEl.textContent = "Mixed ─";
+              trendEl.className = "text-yellow font-medium";
+            }
+          }
+        } else {
+          document.getElementById("holdings-summary").innerHTML =
+            '<p class="text-subtext1">Not in portfolio</p>';
+        }
+
+        // Load latest suggestion
+        const suggestionsRes = await fetch(
+          `/api/suggestions?symbol=${SYMBOL}&limit=1`
+        );
+        const suggestionsData = await suggestionsRes.json();
+        const latestSuggestion = suggestionsData.suggestions?.[0];
+
+        const suggestionEl = document.getElementById("latest-suggestion");
+        if (latestSuggestion) {
+          const actionColors = {
+            BUY: "text-green bg-green/20",
+            SELL: "text-red bg-red/20",
+            HOLD: "text-yellow bg-yellow/20",
+            WATCH: "text-blue bg-blue/20",
+            RAISE_CASH: "text-peach bg-peach/20",
+          };
+          const color =
+            actionColors[latestSuggestion.action] ||
+            "text-subtext0 bg-surface1";
+
+          suggestionEl.innerHTML = `
+            <div class="flex items-start gap-3">
+              <span class="px-2 py-1 text-xs font-bold rounded ${color}">${latestSuggestion.action}</span>
+              <div class="flex-1">
+                <p class="text-sm text-text">${latestSuggestion.rationale}</p>
+                <p class="text-xs text-subtext1 mt-1">
+                  ${latestSuggestion.confidence ? `Confidence: ${latestSuggestion.confidence}/10 • ` : ""}
+                  ${new Date(latestSuggestion.created_at).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+          `;
+        } else {
+          suggestionEl.innerHTML =
+            '<p class="text-subtext1">No AI suggestions yet</p>';
+        }
+
+        // Load knowledge counts
+        const [researchRes, notesRes, linksRes] = await Promise.all([
+          fetch(`/api/research?symbol=${SYMBOL}`),
+          fetch(`/api/notes/company?symbol=${SYMBOL}`),
+          fetch(`/api/links?symbol=${SYMBOL}`),
+        ]);
+
+        const researchData = await researchRes.json();
+        const notesData = await notesRes.json();
+        const linksData = await linksRes.json();
+
+        document.getElementById("count-research").textContent =
+          researchData.documents?.length || 0;
+        document.getElementById("count-notes").textContent =
+          notesData.notes?.length || 0;
+        document.getElementById("count-links").textContent =
+          linksData.links?.length || 0;
+      } catch (err) {
+        console.error("Failed to load overview:", err);
+      }
+    }
+
+    loadOverview();
+  </script>
+
+  <script>
+    // SolidJS component mounting
+    import { render } from "solid-js/web";
+    import ResearchList from "../../components/research/ResearchList";
+    import CompanyNotes from "../../components/notes/CompanyNotes";
+    import LinksList from "../../components/links/LinksList";
+
+    const SYMBOL = window.location.pathname.split("/").pop() || "";
+
+    window.researchMounted = false;
+    window.notesMounted = false;
+    window.linksMounted = false;
+
+    window.mountResearch = function () {
+      const container = document.getElementById("research-container");
+      if (container && !window.researchMounted) {
+        render(
+          () =>
+            ResearchList({ symbol: SYMBOL, onClose: () => {}, embedded: true }),
+          container
+        );
+        window.researchMounted = true;
+      }
+    };
+
+    window.mountNotes = function () {
+      const container = document.getElementById("notes-container");
+      if (container && !window.notesMounted) {
+        render(
+          () =>
+            CompanyNotes({ symbol: SYMBOL, onClose: () => {}, embedded: true }),
+          container
+        );
+        window.notesMounted = true;
+      }
+    };
+
+    window.mountLinks = function () {
+      const container = document.getElementById("links-container");
+      if (container && !window.linksMounted) {
+        render(
+          () =>
+            LinksList({ symbol: SYMBOL, onClose: () => {}, embedded: true }),
+          container
+        );
+        window.linksMounted = true;
+      }
+    };
+  </script>
+</Layout>

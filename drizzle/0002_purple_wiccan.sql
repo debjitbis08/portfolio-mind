@@ -1,4 +1,4 @@
-CREATE TABLE `company_research` (
+CREATE TABLE IF NOT EXISTS `company_research` (
 	`id` text PRIMARY KEY NOT NULL,
 	`symbol` text NOT NULL,
 	`title` text NOT NULL,
@@ -7,4 +7,4 @@ CREATE TABLE `company_research` (
 	`updated_at` text
 );
 --> statement-breakpoint
-CREATE INDEX `idx_company_research_symbol` ON `company_research` (`symbol`);
+CREATE INDEX IF NOT EXISTS `idx_company_research_symbol` ON `company_research` (`symbol`);

@@ -6,6 +6,7 @@
 
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { sql, eq, and, gt, lt, sum, max, desc } from "drizzle-orm";
 import * as schema from "./schema";
 
@@ -16,8 +17,8 @@ import * as schema from "./schema";
 const DB_PATH = process.env.DATABASE_PATH || "./data/investor.db";
 
 // Ensure data directory exists
-import { mkdirSync } from "fs";
-import { dirname } from "path";
+import { mkdirSync, existsSync } from "fs";
+import { dirname, resolve } from "path";
 try {
   mkdirSync(dirname(DB_PATH), { recursive: true });
 } catch {
@@ -28,6 +29,80 @@ const sqlite = new Database(DB_PATH);
 sqlite.pragma("journal_mode = WAL"); // Better concurrent access
 
 export const db = drizzle(sqlite, { schema });
+
+// ============================================================================
+// Automatic Migrations
+// ============================================================================
+
+/**
+ * Run pending database migrations automatically on startup.
+ * This ensures the database schema is always up-to-date when the app starts,
+ * which is essential for desktop app distribution where users can't run CLI commands.
+ *
+ * All migration SQL files use IF NOT EXISTS syntax, making them idempotent
+ * and safe to run on both fresh and existing databases.
+ */
+function runMigrations(): void {
+  // Find the migrations folder - check multiple possible locations
+  const possiblePaths = [
+    resolve(process.cwd(), "drizzle"),
+    resolve(dirname(DB_PATH), "../drizzle"),
+    resolve(import.meta.dirname || "", "../../../../drizzle"),
+  ];
+
+  let migrationsFolder: string | null = null;
+  for (const p of possiblePaths) {
+    if (existsSync(p)) {
+      migrationsFolder = p;
+      break;
+    }
+  }
+
+  if (!migrationsFolder) {
+    console.warn(
+      "[DB] Migrations folder not found, skipping automatic migrations"
+    );
+    return;
+  }
+
+  try {
+    console.log(`[DB] Running migrations from: ${migrationsFolder}`);
+    migrate(db, { migrationsFolder });
+    console.log("[DB] Migrations completed successfully");
+  } catch (error) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+
+    // Handle migration file mismatch (legacy DB has different migration history)
+    const isMigrationMismatch =
+      error.message.includes("No file") && error.message.includes("found in");
+
+    if (isMigrationMismatch) {
+      console.warn(
+        "[DB] Migration history mismatch - resetting and re-running migrations"
+      );
+      // Clear old migration history and retry
+      // Migrations are idempotent (IF NOT EXISTS) so this is safe
+      sqlite.exec("DROP TABLE IF EXISTS __drizzle_migrations");
+      try {
+        migrate(db, { migrationsFolder });
+        console.log("[DB] Migrations completed successfully after reset");
+      } catch (retryError) {
+        console.error("[DB] Migration retry failed:", retryError);
+        throw retryError;
+      }
+    } else if (error.message.includes("already been applied")) {
+      console.log("[DB] All migrations already applied");
+    } else {
+      console.error("[DB] Migration failed:", error);
+      throw error;
+    }
+  }
+}
+
+// Run migrations on module load (before seeding)
+runMigrations();
 
 // ============================================================================
 // Holdings "View" - Computed from transactions

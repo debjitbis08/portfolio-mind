@@ -5,9 +5,9 @@ CREATE TABLE IF NOT EXISTS `company_notes` (
   `content` text NOT NULL,
   `created_at` text
 );
-
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_company_notes_symbol` ON `company_notes` (`symbol`);
-
+--> statement-breakpoint
 -- Add action_notes table
 CREATE TABLE IF NOT EXISTS `action_notes` (
   `id` text PRIMARY KEY NOT NULL,
@@ -16,5 +16,5 @@ CREATE TABLE IF NOT EXISTS `action_notes` (
   `created_at` text,
   FOREIGN KEY (`suggestion_id`) REFERENCES `suggestions`(`id`) ON UPDATE no action ON DELETE cascade
 );
-
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_action_notes_suggestion` ON `action_notes` (`suggestion_id`);
