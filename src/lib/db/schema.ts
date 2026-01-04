@@ -349,3 +349,44 @@ export const sessions = sqliteTable(
   },
   (table) => [index("idx_sessions_token").on(table.token)]
 );
+
+// ============================================================================
+// User Tables - User-defined flexible tables
+// ============================================================================
+
+export const userTables = sqliteTable(
+  "user_tables",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    symbol: text("symbol").notNull(), // Company-level tables only for now (no global tables yet)
+    name: text("name").notNull(),
+    columns: text("columns").notNull(), // JSON array of column definitions
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("idx_user_tables_symbol").on(table.symbol)]
+);
+
+// ============================================================================
+// User Table Rows - Data rows for user-defined tables
+// ============================================================================
+
+export const userTableRows = sqliteTable(
+  "user_table_rows",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    tableId: text("table_id")
+      .references(() => userTables.id, {
+        onDelete: "cascade",
+      })
+      .notNull(),
+    data: text("data").notNull(), // JSON object with column values
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("idx_user_table_rows_table_id").on(table.tableId)]
+);

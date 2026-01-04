@@ -488,12 +488,12 @@ The default landing tab showing a stock-at-a-glance summary:
 - [x] Build link management UI
 - [x] Handle fetch failures gracefully
 
-### Phase 4: Flexible Tables
+### Phase 4: Flexible Tables ✅ COMPLETE
 
-- [ ] Add tables schema and API
-- [ ] Build table schema editor (add/edit columns)
-- [ ] Build table data editor (spreadsheet-like)
-- [ ] Support global tables
+- [x] Add tables schema and API
+- [x] Build table schema editor (add/edit columns)
+- [x] Build table data editor (spreadsheet-like)
+- [ ] Support global tables (DEFERRED)
 
 ### Phase 5: Agent Integration
 

@@ -182,6 +182,9 @@ export function isPriceStale(updatedAt: string | null): boolean {
   const dayOfWeek = nowIST.getUTCDay();
   const minuteOfDay = nowIST.getUTCHours() * 60 + nowIST.getUTCMinutes();
 
+  // Weekend (Saturday = 6, Sunday = 0)
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
   const isMarketHours =
     dayOfWeek >= 1 &&
     dayOfWeek <= 5 &&
@@ -189,9 +192,14 @@ export function isPriceStale(updatedAt: string | null): boolean {
     minuteOfDay <= 930; // 15:30
 
   if (isMarketHours) {
-    return cacheAgeMinutes > 5; // 5 min cache during market hours
+    // During market hours: 5 min cache
+    return cacheAgeMinutes > 5;
+  } else if (isWeekend) {
+    // Weekends: 24 hour cache (markets closed, no point refreshing)
+    return cacheAgeMinutes > 1440; // 24 hours
   } else {
-    return cacheAgeMinutes > 30; // 30 min cache outside market hours
+    // Weekday after-hours: 2 hour cache
+    return cacheAgeMinutes > 120;
   }
 }
 

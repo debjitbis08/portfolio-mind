@@ -36,6 +36,13 @@
       "when": 1767627090000,
       "tag": "0004_fix_company_links",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1767535410454,
+      "tag": "0005_dear_skreet",
+      "breakpoints": true
     }
   ]
 }

@@ -217,13 +217,7 @@ if (!symbol) {
 
         <!-- Tables Tab -->
         <section id="tab-tables" class="tab-panel hidden">
-          <div class="text-center py-12 text-subtext0">
-            <div class="text-4xl mb-3">📊</div>
-            <p>Tables feature coming soon</p>
-            <p class="text-sm mt-2">
-              Create custom tables to track financials, comparisons, and more.
-            </p>
-          </div>
+          <div id="tables-container"></div>
         </section>
       </div>
     </main>
@@ -277,6 +271,8 @@ if (!symbol) {
         mountNotes();
       } else if (tabId === "links" && !window.linksMounted) {
         mountLinks();
+      } else if (tabId === "tables" && !window.tablesMounted) {
+        mountTables();
       }
     }
 
@@ -413,15 +409,17 @@ if (!symbol) {
         }
 
         // Load knowledge counts
-        const [researchRes, notesRes, linksRes] = await Promise.all([
+        const [researchRes, notesRes, linksRes, tablesRes] = await Promise.all([
           fetch(`/api/research?symbol=${SYMBOL}`),
           fetch(`/api/notes/company?symbol=${SYMBOL}`),
           fetch(`/api/links?symbol=${SYMBOL}`),
+          fetch(`/api/tables?symbol=${SYMBOL}`),
         ]);
 
         const researchData = await researchRes.json();
         const notesData = await notesRes.json();
         const linksData = await linksRes.json();
+        const tablesData = await tablesRes.json();
 
         document.getElementById("count-research").textContent =
           researchData.documents?.length || 0;
@@ -429,6 +427,8 @@ if (!symbol) {
           notesData.notes?.length || 0;
         document.getElementById("count-links").textContent =
           linksData.links?.length || 0;
+        document.getElementById("count-tables").textContent =
+          tablesData.tables?.length || 0;
       } catch (err) {
         console.error("Failed to load overview:", err);
       }
@@ -443,12 +443,14 @@ if (!symbol) {
     import ResearchList from "../../components/research/ResearchList";
     import CompanyNotes from "../../components/notes/CompanyNotes";
     import LinksList from "../../components/links/LinksList";
+    import TablesList from "../../components/tables/TablesList";
 
     const SYMBOL = window.location.pathname.split("/").pop() || "";
 
     window.researchMounted = false;
     window.notesMounted = false;
     window.linksMounted = false;
+    window.tablesMounted = false;
 
     window.mountResearch = function () {
       const container = document.getElementById("research-container");
@@ -483,6 +485,18 @@ if (!symbol) {
           container
         );
         window.linksMounted = true;
+      }
+    };
+
+    window.mountTables = function () {
+      const container = document.getElementById("tables-container");
+      if (container && !window.tablesMounted) {
+        render(
+          () =>
+            TablesList({ symbol: SYMBOL, onClose: () => {}, embedded: true }),
+          container
+        );
+        window.tablesMounted = true;
       }
     };
   </script>

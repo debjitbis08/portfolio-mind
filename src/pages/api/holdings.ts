@@ -133,6 +133,18 @@ export const GET: APIRoute = async ({ request }) => {
         }
       } catch (err) {
         console.error("Yahoo Finance error:", err);
+
+        // GRACEFUL DEGRADATION: Use stale cache as fallback
+        // When Yahoo Finance is rate-limited or unavailable, use cached data even if stale
+        for (const yahoo of staleSymbols) {
+          const cached = cachedPrices.find((c) => c.symbol === yahoo);
+          if (cached && !freshPrices[yahoo]) {
+            console.log(
+              `Using stale cache for ${yahoo} (age: ${cached.updatedAt})`
+            );
+            freshPrices[yahoo] = cached.price;
+          }
+        }
       }
     }
 
