@@ -1,5 +1,6 @@
 import { createSignal, Show } from "solid-js";
 import { markdownToHtml } from "../../lib/utils/markdown";
+import MarkdownEditor from "./MarkdownEditor";
 
 interface ResearchDocument {
   id: string;
@@ -171,17 +172,16 @@ export default function ResearchEditor(props: ResearchEditorProps) {
                 {showPreview() ? "📝 Edit" : "👁️ Preview"}
               </button>
               <span class="text-xs text-subtext0">
-                Supports markdown: **bold**, *italic*, # headers, - lists,
-                [links](url)
+                Rich markdown editor with live formatting: **bold**, *italic*, # headers, - lists, [links](url), tables, and more
               </span>
             </div>
 
             {/* Content Editor/Preview */}
             <div class="flex-1">
               <Show when={!showPreview()}>
-                <textarea
+                <MarkdownEditor
                   value={content()}
-                  onInput={(e) => setContent(e.currentTarget.value)}
+                  onChange={setContent}
                   placeholder="Write your research in markdown...
 
 # Key Points
@@ -194,8 +194,6 @@ export default function ResearchEditor(props: ResearchEditorProps) {
 
 Current PE: 45
 Target PE: 50"
-                  rows={15}
-                  class="w-full px-3 py-2 bg-surface0 border border-surface2 rounded-lg text-sm text-text font-mono resize-none focus:outline-none focus:border-mauve"
                   disabled={isSubmitting()}
                 />
               </Show>

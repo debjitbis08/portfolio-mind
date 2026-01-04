@@ -410,12 +410,12 @@ Accessed via Holdings → Click on stock → "Research" tab
 - [x] Add inline note entry on suggestion cards
 - [x] Add simple notes view on holdings
 
-### Phase 2: Research Documents
+### Phase 2: Research Documents ✅ COMPLETE
 
-- [ ] Add research table and API
-- [ ] Create markdown editor component
-- [ ] Build company detail page with research tab
-- [ ] Index research for search
+- [x] Add research table and API
+- [x] Create markdown editor component (Milkdown Crepe)
+- [x] Build company detail page with research tab
+- [x] Index research for search
 
 ### Phase 3: Links Store
 
