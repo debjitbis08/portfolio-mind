@@ -207,37 +207,55 @@ if (!session) {
           </div>
         </section>
 
-        <!-- AI Tools -->
-        <section class="bg-surface0 border border-surface1 rounded-2xl p-6">
-          <div class="flex items-center gap-3 mb-4">
-            <h2 class="text-xl font-semibold text-green">AI Tools</h2>
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <h2 class="text-xl font-semibold text-green">AI Assistant</h2>
             <span class="px-2 py-0.5 bg-surface1 text-xs rounded text-subtext0"
-              >Per-Tool Config</span
+              >Global Control</span
             >
           </div>
+          <label
+            class="relative inline-flex items-center cursor-pointer scale-110"
+          >
+            <input
+              type="checkbox"
+              id="ai-enabled-toggle"
+              class="sr-only peer"
+              checked
+            />
+            <div
+              class="w-14 h-7 bg-surface1 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-subtext0 after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-green peer-checked:after:bg-crust"
+            >
+            </div>
+          </label>
+        </div>
 
-          <p class="text-sm text-subtext0 mb-6">
-            Enable or disable specific tools the AI agent can use during
-            analysis. Disabled tools will not be available to Gemini.
-          </p>
+        <p class="text-sm text-subtext0 mb-6">
+          Enable or disable AI features globally. When disabled, the AI will not
+          analyze your portfolio or provide suggestions.
+        </p>
 
+        <div id="ai-tools-section" class="transition-opacity duration-300">
+          <h3 class="text-sm font-medium text-text mb-4">
+            Specific Tool Config
+          </h3>
           <div id="tools-container" class="space-y-4">
             <!-- Tool cards will be populated by JavaScript -->
           </div>
-        </section>
-
-        <!-- Save Actions -->
-        <div
-          class="flex items-center justify-end gap-3 pt-4 border-t border-surface1"
-        >
-          <span id="save-status" class="text-sm"></span>
-          <button
-            id="save-settings-btn"
-            class="px-6 py-2.5 bg-mauve hover:bg-mauve/90 text-crust font-medium rounded-xl transition-colors shadow-lg shadow-mauve/20"
-          >
-            Save Changes
-          </button>
         </div>
+      </div>
+
+      <!-- Save Actions -->
+      <div
+        class="flex items-center justify-end gap-3 pt-4 border-t border-surface1"
+      >
+        <span id="save-status" class="text-sm"></span>
+        <button
+          id="save-settings-btn"
+          class="px-6 py-2.5 bg-mauve hover:bg-mauve/90 text-crust font-medium rounded-xl transition-colors shadow-lg shadow-mauve/20"
+        >
+          Save Changes
+        </button>
       </div>
     </div>
   </main>
@@ -265,6 +283,10 @@ if (!session) {
   ) as HTMLButtonElement;
   const statusEl = document.getElementById("save-status");
   const toolsContainer = document.getElementById("tools-container");
+  const aiEnabledToggle = document.getElementById(
+    "ai-enabled-toggle"
+  ) as HTMLInputElement;
+  const aiToolsSection = document.getElementById("ai-tools-section");
 
   // Tool metadata for display
   const TOOL_METADATA: Record<
@@ -353,6 +375,12 @@ if (!session) {
         if (settings.tool_config) {
           currentToolConfig = settings.tool_config;
           renderToolCards();
+        }
+
+        // Set AI Enabled toggle
+        if (settings.ai_enabled !== undefined) {
+          aiEnabledToggle.checked = settings.ai_enabled;
+          updateAIVisibility();
         }
       }
     } catch (err) {
@@ -452,6 +480,20 @@ if (!session) {
   }
 
   // Event Listeners
+  aiEnabledToggle?.addEventListener("change", () => {
+    updateAIVisibility();
+  });
+
+  function updateAIVisibility() {
+    if (aiToolsSection) {
+      if (aiEnabledToggle.checked) {
+        aiToolsSection.classList.remove("opacity-40", "pointer-events-none");
+      } else {
+        aiToolsSection.classList.add("opacity-40", "pointer-events-none");
+      }
+    }
+  }
+
   addUrlBtn?.addEventListener("click", () => addUrlRow());
   addMappingBtn?.addEventListener("click", () => addMappingRow());
 
@@ -496,6 +538,7 @@ if (!session) {
 
     // Add tool config
     payload.tool_config = currentToolConfig;
+    payload.ai_enabled = aiEnabledToggle.checked;
 
     try {
       const res = await fetch("/api/settings", {

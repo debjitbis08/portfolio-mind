@@ -1,14 +1,7 @@
--- ============================================================================
--- Phase 6: Full-text Search (FTS5) and Tags
--- ============================================================================
-
--- Add tags column to content tables (JSON array stored as text)
-ALTER TABLE company_research ADD COLUMN tags TEXT;
---> statement-breakpoint
-ALTER TABLE company_notes ADD COLUMN tags TEXT;
---> statement-breakpoint
-ALTER TABLE company_links ADD COLUMN tags TEXT;
---> statement-breakpoint
+ALTER TABLE `company_links` ADD `tags` text;--> statement-breakpoint
+ALTER TABLE `company_notes` ADD `tags` text;--> statement-breakpoint
+ALTER TABLE `company_research` ADD `tags` text;--> statement-breakpoint
+ALTER TABLE `settings` ADD `ai_enabled` integer DEFAULT true;--> statement-breakpoint
 
 -- ============================================================================
 -- FTS5 Virtual Tables

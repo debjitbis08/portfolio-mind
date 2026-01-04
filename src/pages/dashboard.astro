@@ -21,7 +21,14 @@ if (!session) {
     <header class="max-w-6xl mx-auto flex items-center justify-between mb-6">
       <div>
         <h1 class="text-2xl font-bold text-mauve">Portfolio Mind</h1>
-        <p class="text-sm text-subtext0">Single User Mode</p>
+        <div class="flex items-center gap-2">
+          <p class="text-sm text-subtext0">Single User Mode</p>
+          <span
+            id="ai-status-badge"
+            class="hidden px-2 py-0.5 bg-red/20 text-red text-[10px] uppercase font-bold rounded tracking-wider border border-red/30"
+            >AI Disabled</span
+          >
+        </div>
       </div>
       <div class="flex items-center gap-2">
         <GlobalSearch client:load />
@@ -164,6 +171,22 @@ if (!session) {
         <div id="suggestions-container" class="divide-y divide-surface1">
           <div id="suggestions-loading" class="p-6 text-center text-subtext0">
             Click "Run Discovery Cycle" to analyze your portfolio with AI
+          </div>
+          <div id="ai-disabled-message" class="hidden p-8 text-center">
+            <div class="text-4xl mb-3">🤖💤</div>
+            <h3 class="text-lg font-medium text-text mb-1">
+              AI Assistant is Disabled
+            </h3>
+            <p class="text-subtext0 text-sm max-w-sm mx-auto">
+              You've disabled AI features in settings. Enable the AI Assistant
+              to get automated investment suggestions and portfolio analysis.
+            </p>
+            <a
+              href="/settings"
+              class="inline-block mt-4 text-mauve hover:underline text-sm font-medium"
+            >
+              Go to Settings →
+            </a>
           </div>
           <div id="suggestions-list" class="hidden"></div>
         </div>
@@ -559,6 +582,49 @@ if (!session) {
 
     // Initial load
     loadHoldings();
+    checkAIAvailability();
+
+    async function checkAIAvailability() {
+      try {
+        const res = await fetch("/api/settings");
+        const { settings } = await res.json();
+        const aiEnabled = settings?.ai_enabled !== false;
+
+        const badge = document.getElementById("ai-status-badge");
+        const discoveryBtn = document.getElementById("run-discovery-btn");
+        const discoverySection = discoveryBtn?.closest("section");
+        const aiDisabledMsg = document.getElementById("ai-disabled-message");
+        const suggestionsLoading = document.getElementById(
+          "suggestions-loading"
+        );
+
+        if (!aiEnabled) {
+          badge?.classList.remove("hidden");
+          if (discoveryBtn) {
+            discoveryBtn.classList.add("hidden");
+          }
+          if (discoverySection) {
+            discoverySection.classList.add("opacity-80");
+          }
+          if (aiDisabledMsg) {
+            aiDisabledMsg.classList.remove("hidden");
+          }
+          if (suggestionsLoading) {
+            suggestionsLoading.classList.add("hidden");
+          }
+        } else {
+          badge?.classList.add("hidden");
+          discoveryBtn?.classList.remove("hidden");
+          discoverySection?.classList.remove("opacity-80");
+          aiDisabledMsg?.classList.add("hidden");
+          suggestionsLoading?.classList.remove("hidden");
+          loadSuggestions();
+        }
+      } catch (err) {
+        console.error("Failed to check AI status:", err);
+        loadSuggestions();
+      }
+    }
 
     // Refresh button
     document
@@ -610,6 +676,9 @@ if (!session) {
     let currentSuggestionStatus = "pending";
 
     async function loadSuggestions(status: string = "pending") {
+      // Don't load if AI is disabled (handled by checkAIAvailability)
+      const aiDisabledMsg = document.getElementById("ai-disabled-message");
+      if (aiDisabledMsg && !aiDisabledMsg.classList.contains("hidden")) return;
       const loadingEl = document.getElementById("suggestions-loading")!;
       const listEl = document.getElementById("suggestions-list")!;
       currentSuggestionStatus = status;

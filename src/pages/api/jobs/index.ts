@@ -7,7 +7,7 @@
 import type { APIRoute } from "astro";
 import { requireAuth } from "../../../lib/middleware/requireAuth";
 import { db, schema } from "../../../lib/db";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 export const POST: APIRoute = async ({ request }) => {
   // Auth check
@@ -23,6 +23,28 @@ export const POST: APIRoute = async ({ request }) => {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    // For discovery_cycle jobs, check if AI is enabled in settings
+    if (type === "discovery_cycle") {
+      const settings = await db
+        .select({ aiEnabled: schema.settings.aiEnabled })
+        .from(schema.settings)
+        .where(eq(schema.settings.id, 1))
+        .limit(1);
+
+      if (settings[0] && settings[0].aiEnabled === false) {
+        return new Response(
+          JSON.stringify({
+            error:
+              "AI is disabled in settings. Enable it to run discovery cycles.",
+          }),
+          {
+            status: 403,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
     }
 
     // Create the job

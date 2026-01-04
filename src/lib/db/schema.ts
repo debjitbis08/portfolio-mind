@@ -140,6 +140,7 @@ export const settings = sqliteTable("settings", {
   screenerUrls: text("screener_urls"), // JSON array stored as text
   symbolMappings: text("symbol_mappings"), // JSON object stored as text
   toolConfig: text("tool_config"), // JSON: { toolName: { enabled: boolean, ...options } }
+  aiEnabled: integer("ai_enabled", { mode: "boolean" }).default(true),
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
 

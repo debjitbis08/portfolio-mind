@@ -16,8 +16,27 @@ export const POST: APIRoute = async ({ request }) => {
   if (authError) return authError;
 
   let cycleId: string | null = null;
-
   try {
+    // Check if AI is enabled in settings
+    const settings = await db
+      .select()
+      .from(schema.settings)
+      .where(eq(schema.settings.id, 1))
+      .limit(1);
+
+    if (settings[0] && settings[0].aiEnabled === false) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "AI is disabled in settings. Enable it to run discovery cycles.",
+        }),
+        {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
     // Create cycle run record
     const [cycleRun] = await db.insert(schema.cycleRuns).values({}).returning();
 

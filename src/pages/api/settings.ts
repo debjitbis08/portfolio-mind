@@ -27,6 +27,7 @@ export const GET: APIRoute = async ({ request }) => {
     const availableFunds = data?.availableFunds ?? 0;
     const riskProfile = data?.riskProfile ?? "balanced";
     const notificationEmail = data?.notificationEmail ?? null;
+    const aiEnabled = data?.aiEnabled ?? true;
 
     // Parse screenerUrls
     let screenerUrlsParsed = null;
@@ -74,6 +75,7 @@ export const GET: APIRoute = async ({ request }) => {
           available_funds: availableFunds,
           risk_profile: riskProfile,
           notification_email: notificationEmail,
+          ai_enabled: aiEnabled,
           screener_urls: screenerUrlsParsed,
           user_mappings: userMappings,
           built_in_mappings: BUILT_IN_MAPPINGS,
@@ -126,6 +128,9 @@ export const POST: APIRoute = async ({ request }) => {
     }
     if (body.tool_config !== undefined) {
       updates.toolConfig = JSON.stringify(body.tool_config);
+    }
+    if (body.ai_enabled !== undefined) {
+      updates.aiEnabled = body.ai_enabled;
     }
 
     // Upsert settings (id=1 is always the single row)
