@@ -59,7 +59,7 @@ export const PUT: APIRoute = async ({ request, params }) => {
   try {
     const { id } = params;
     const body = await request.json();
-    const { title, description, refetch } = body;
+    const { title, description, tags, refetch } = body;
 
     if (!id) {
       return new Response(JSON.stringify({ error: "Link ID is required" }), {
@@ -87,6 +87,7 @@ export const PUT: APIRoute = async ({ request, params }) => {
     const updates: {
       title?: string;
       description?: string | null;
+      tags?: string | null;
       fetchedContent?: string | null;
       fetchedAt?: string | null;
     } = {};
@@ -106,6 +107,10 @@ export const PUT: APIRoute = async ({ request, params }) => {
 
     if (description !== undefined) {
       updates.description = description?.trim() || null;
+    }
+
+    if (tags !== undefined) {
+      updates.tags = Array.isArray(tags) ? JSON.stringify(tags) : null;
     }
 
     // Re-fetch content if requested

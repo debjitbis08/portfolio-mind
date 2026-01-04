@@ -57,7 +57,7 @@ export const POST: APIRoute = async ({ request }) => {
 
   try {
     const body = await request.json();
-    const { symbol, title, content } = body;
+    const { symbol, title, content, tags } = body;
 
     // Validation
     if (!symbol || !title || !content) {
@@ -106,6 +106,7 @@ export const POST: APIRoute = async ({ request }) => {
         symbol: resolvedSymbol,
         title: title.trim(),
         content: content.trim(),
+        tags: Array.isArray(tags) ? JSON.stringify(tags) : null,
       })
       .returning();
 

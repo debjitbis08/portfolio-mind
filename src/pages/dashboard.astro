@@ -4,6 +4,7 @@ import { validateSession } from "../lib/auth";
 import ActionNotes from "../components/notes/ActionNotes";
 import CompanyNotes from "../components/notes/CompanyNotes";
 import ResearchList from "../components/research/ResearchList";
+import GlobalSearch from "../components/common/GlobalSearch";
 
 // Check auth on server side
 const session = await validateSession(Astro.request);
@@ -22,7 +23,8 @@ if (!session) {
         <h1 class="text-2xl font-bold text-mauve">Portfolio Mind</h1>
         <p class="text-sm text-subtext0">Single User Mode</p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex items-center gap-2">
+        <GlobalSearch client:load />
         <button
           id="refresh-btn"
           class="px-4 py-2 bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
@@ -685,6 +687,47 @@ if (!session) {
                   ? `<div class="text-xs text-yellow mt-1">⚠️ ${s.superseded_reason}${s.superseded_by ? ` → Suggestion #${s.superseded_by}` : ""}</div>`
                   : "";
 
+              // Citations display
+              let citationsHtml = "";
+              if (s.citations && s.citations.length > 0) {
+                const citationIcons: Record<string, string> = {
+                  research: "📄",
+                  link: "🔗",
+                  note: "📝",
+                  table: "📊",
+                  valuepickr: "💬",
+                  news: "📰",
+                  reddit: "🗣️",
+                  technicals: "📈",
+                };
+
+                const citationItems = s.citations
+                  .map((c: any) => {
+                    const icon = citationIcons[c.type] || "📌";
+                    const label = c.title || c.source || c.type;
+                    // For user content with IDs, create a link to the company page
+                    if (
+                      c.id &&
+                      ["research", "link", "note", "table"].includes(c.type)
+                    ) {
+                      return `<a href="/company/${encodeURIComponent(s.symbol)}?tab=${c.type}" class="hover:text-mauve transition-colors">${icon} ${label}</a>`;
+                    }
+                    return `<span>${icon} ${label}</span>`;
+                  })
+                  .join(
+                    '</span><span class="text-surface2 mx-1">•</span><span>'
+                  );
+
+                citationsHtml = `
+                  <div class="mt-2 pt-2 border-t border-surface2/50">
+                    <div class="flex items-center gap-1 text-xs text-subtext0 flex-wrap">
+                      <span class="font-medium text-subtext1">📚 Sources:</span>
+                      <span>${citationItems}</span>
+                    </div>
+                  </div>
+                `;
+              }
+
               // Action buttons (only for pending)
               const actionButtons =
                 status === "pending"
@@ -711,6 +754,7 @@ if (!session) {
                       ${details}
                     </div>
                     <p class="text-sm text-subtext0 mt-1">${s.rationale}</p>
+                    ${citationsHtml}
                     ${supersededInfo}
                   </div>
                   ${actionButtons}

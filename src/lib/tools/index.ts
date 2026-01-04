@@ -40,6 +40,10 @@ import "./news";
 import "./reddit";
 import "./suggestions";
 import "./commodities";
+import "./knowledge";
+
+// Export Citation type for use in gemini.ts
+export { type Citation } from "./knowledge";
 
 // Log registered tools on import
 import { listTools } from "./registry";

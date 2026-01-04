@@ -114,6 +114,7 @@ export const suggestions = sqliteTable(
     confidence: integer("confidence"), // 1-10 scale
     supersededBy: text("superseded_by"), // ID of newer suggestion
     supersededReason: text("superseded_reason"),
+    citations: text("citations"), // JSON array of citation objects
     createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
     expiresAt: text("expires_at").$defaultFn(() => {
       const d = new Date();
@@ -267,6 +268,7 @@ export const companyNotes = sqliteTable(
       .$defaultFn(() => crypto.randomUUID()),
     symbol: text("symbol").notNull(),
     content: text("content").notNull(),
+    tags: text("tags"), // JSON array of tag strings
     createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
   },
   (table) => [index("idx_company_notes_symbol").on(table.symbol)]
@@ -306,6 +308,7 @@ export const companyResearch = sqliteTable(
     symbol: text("symbol").notNull(),
     title: text("title").notNull(),
     content: text("content").notNull(), // Markdown content
+    tags: text("tags"), // JSON array of tag strings
     createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
     updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
   },
@@ -328,6 +331,7 @@ export const companyLinks = sqliteTable(
     description: text("description"), // Optional user note
     fetchedContent: text("fetched_content"), // Cleaned page content
     fetchedAt: text("fetched_at"), // When content was last fetched
+    tags: text("tags"), // JSON array of tag strings
     createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
   },
   (table) => [index("idx_company_links_symbol").on(table.symbol)]

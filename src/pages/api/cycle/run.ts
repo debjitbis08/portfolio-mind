@@ -97,6 +97,7 @@ export const POST: APIRoute = async ({ request }) => {
           technicalScore: s.technical_score,
           currentPrice: holdings.find((h) => h.symbol === s.symbol)
             ?.current_price,
+          citations: s.citations ? JSON.stringify(s.citations) : null,
         });
       }
 

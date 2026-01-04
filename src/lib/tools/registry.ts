@@ -222,6 +222,23 @@ const getCommodityPricesDeclaration: ToolDeclaration = {
   },
 };
 
+const getCompanyKnowledgeDeclaration: ToolDeclaration = {
+  name: "get_company_knowledge",
+  description:
+    "Get user-contributed research, notes, saved links, and tables for a stock. Use this BEFORE making recommendations to check if the user has provided their own research or thesis. User research should be respected and cited in your analysis.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      symbol: {
+        type: Type.STRING,
+        description:
+          "Stock symbol to fetch user knowledge for (e.g., 'CDSL', 'RELIANCE'). Do not include exchange suffix.",
+      },
+    },
+    required: ["symbol"],
+  },
+};
+
 // ============================================================================
 // Registry
 // ============================================================================
@@ -314,6 +331,17 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       defaultConfig: {
         enabled: true,
         defaultCommodities: "gold,silver",
+      },
+    },
+  ],
+  [
+    "get_company_knowledge",
+    {
+      declaration: getCompanyKnowledgeDeclaration,
+      execute: notImplemented,
+      source: "internal",
+      defaultConfig: {
+        enabled: true,
       },
     },
   ],

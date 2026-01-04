@@ -61,7 +61,7 @@ export const PUT: APIRoute = async ({ request, params }) => {
   try {
     const { id } = params;
     const body = await request.json();
-    const { title, content } = body;
+    const { title, content, tags } = body;
 
     if (!id) {
       return new Response(
@@ -92,7 +92,12 @@ export const PUT: APIRoute = async ({ request, params }) => {
     }
 
     // Build update object
-    const updates: { title?: string; content?: string; updatedAt: string } = {
+    const updates: {
+      title?: string;
+      content?: string;
+      tags?: string | null;
+      updatedAt: string;
+    } = {
       updatedAt: new Date().toISOString(),
     };
 
@@ -102,6 +107,10 @@ export const PUT: APIRoute = async ({ request, params }) => {
 
     if (content !== undefined) {
       updates.content = content.trim();
+    }
+
+    if (tags !== undefined) {
+      updates.tags = Array.isArray(tags) ? JSON.stringify(tags) : null;
     }
 
     // Update document

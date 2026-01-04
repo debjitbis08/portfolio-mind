@@ -1,12 +1,14 @@
 import { createSignal, Show } from "solid-js";
 import { markdownToHtml } from "../../lib/utils/markdown";
 import MarkdownEditor from "./MarkdownEditor";
+import TagInput from "../common/TagInput";
 
 interface ResearchDocument {
   id: string;
   symbol: string;
   title: string;
   content: string;
+  tags?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -21,12 +23,13 @@ interface ResearchEditorProps {
 async function saveResearch(
   symbol: string,
   title: string,
-  content: string
+  content: string,
+  tags: string[]
 ): Promise<ResearchDocument> {
   const response = await fetch("/api/research", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ symbol, title, content }),
+    body: JSON.stringify({ symbol, title, content, tags }),
   });
   if (!response.ok) {
     const error = await response.json();
@@ -39,12 +42,13 @@ async function saveResearch(
 async function updateResearch(
   id: string,
   title: string,
-  content: string
+  content: string,
+  tags: string[]
 ): Promise<ResearchDocument> {
   const response = await fetch(`/api/research/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, content }),
+    body: JSON.stringify({ title, content, tags }),
   });
   if (!response.ok) {
     const error = await response.json();
@@ -55,8 +59,19 @@ async function updateResearch(
 }
 
 export default function ResearchEditor(props: ResearchEditorProps) {
+  // Parse existing tags from JSON string
+  const parseTags = (): string[] => {
+    if (!props.document?.tags) return [];
+    try {
+      return JSON.parse(props.document.tags);
+    } catch {
+      return [];
+    }
+  };
+
   const [title, setTitle] = createSignal(props.document?.title || "");
   const [content, setContent] = createSignal(props.document?.content || "");
+  const [tags, setTags] = createSignal<string[]>(parseTags());
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [error, setError] = createSignal("");
   const [showPreview, setShowPreview] = createSignal(false);
@@ -84,9 +99,14 @@ export default function ResearchEditor(props: ResearchEditorProps) {
 
     try {
       if (isEditMode()) {
-        await updateResearch(props.document!.id, titleValue, contentValue);
+        await updateResearch(
+          props.document!.id,
+          titleValue,
+          contentValue,
+          tags()
+        );
       } else {
-        await saveResearch(props.symbol, titleValue, contentValue);
+        await saveResearch(props.symbol, titleValue, contentValue, tags());
       }
       props.onSave();
     } catch (err) {
@@ -160,6 +180,18 @@ export default function ResearchEditor(props: ResearchEditorProps) {
                   placeholder="e.g., Investment Thesis"
                   class="w-full px-3 py-2 bg-surface0 border border-surface2 rounded-lg text-text focus:outline-none focus:border-mauve"
                   disabled={isSubmitting()}
+                />
+              </div>
+
+              {/* Tags Input */}
+              <div>
+                <label class="block text-sm font-medium text-subtext1 mb-1">
+                  Tags
+                </label>
+                <TagInput
+                  tags={tags()}
+                  onChange={setTags}
+                  placeholder="Add tags (press Enter or comma)..."
                 />
               </div>
 

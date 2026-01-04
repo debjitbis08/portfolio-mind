@@ -58,7 +58,7 @@ export const POST: APIRoute = async ({ request }) => {
 
   try {
     const body = await request.json();
-    const { symbol, url, title, description } = body;
+    const { symbol, url, title, description, tags } = body;
 
     // Validation
     if (!symbol || !url) {
@@ -101,6 +101,7 @@ export const POST: APIRoute = async ({ request }) => {
         description: description?.trim() || null,
         fetchedContent: fetchResult.content || null,
         fetchedAt: fetchResult.success ? new Date().toISOString() : null,
+        tags: Array.isArray(tags) ? JSON.stringify(tags) : null,
       })
       .returning();
 

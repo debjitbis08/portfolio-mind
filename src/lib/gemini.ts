@@ -13,6 +13,7 @@ import {
   clearRequestCache,
   type ToolResponse,
   type ToolConfig,
+  type Citation,
 } from "./tools";
 import { getPendingSuggestionsForSymbols } from "./tools/suggestions";
 
@@ -53,6 +54,7 @@ export interface Suggestion {
   sell_quantity?: number;
   technical_score?: number;
   cash_deployment_notes?: string; // For RAISE_CASH: when/why to deploy this cash
+  citations?: Citation[]; // Sources used by agent for transparency
 }
 
 export interface ToolCallProgress {
@@ -310,6 +312,7 @@ Your primary goal is WEALTH BUILDING through patient accumulation of quality bus
 
 ## Your Tools
 - \`browse_screener\`: Get stocks from pre-built screener.in screens (discovery)
+- \`get_company_knowledge\`: Get user's research docs, notes, saved links, and tables for a stock (CHECK THIS FIRST!)
 - \`get_stock_thesis\`: Get ValuePickr investment thesis (FUNDAMENTAL ANALYSIS - highest trust)
 - \`get_stock_news\`: Get Google News headlines (CURRENT EVENTS - medium trust)
 - \`get_reddit_sentiment\`: Get Reddit discussions with posts and top comments (read like a human!)
@@ -318,13 +321,14 @@ Your primary goal is WEALTH BUILDING through patient accumulation of quality bus
 - \`get_commodity_prices\`: Get gold/silver spot prices in INR per gram
 
 ## Tool Priority & Trust Hierarchy
-1. **ValuePickr thesis** = PRIMARY source for buy/sell decisions (highest trust)
-2. **Google News** = Recent events, context (medium trust)
-3. **Reddit discussions** = Read the actual posts and comments like a human would:
+1. **User's Own Research** = HIGHEST TRUST - always check \`get_company_knowledge\` first!
+2. **ValuePickr thesis** = PRIMARY external source for buy/sell decisions (high trust)
+3. **Google News** = Recent events, context (medium trust)
+4. **Reddit discussions** = Read the actual posts and comments like a human would:
    - What specific concerns are retail investors raising?
    - Is the discussion quality high (informed analysis) or low (hype/FUD)?
    - Use as CONTRARIAN signal: extreme bullishness = crowded trade, extreme fear = opportunity
-4. **Technicals** = Timing signals, not reasons to buy
+5. **Technicals** = Timing signals, not reasons to buy
 
 ## Investment Philosophy
 Available Cash: ₹${availableFunds.toLocaleString("en-IN")}
@@ -397,12 +401,28 @@ When analyzing commodity positions, use \`get_commodity_prices\` to compare:
 - Overall portfolio allocation to commodities
 
 ## Your Rationale Should Reference:
+✓ User's own research (if they have any - cite it!)
 ✓ The investment thesis/story (from ValuePickr)
 ✓ Business quality signals
 ✓ Why NOW is a good time (technicals as confirmation)
 ✗ NOT just "RSI is low" or "near SMA" - that's not enough!
 
+## User Research
+
+Before making recommendations, check if the user has contributed research using \`get_company_knowledge\`.
+
+If they have:
+1. Reference their investment thesis in your analysis
+2. Don't contradict documented research without strong evidence
+3. Cite specific insights: "Based on your notes about..."
+4. Note when their thesis aligns with or conflicts with current data
+
+User research represents their conviction and deep analysis - respect it.
+
 ## Output Format
+
+**IMPORTANT**: You MUST include citations for every source you used - not just user content but also ValuePickr, News, Reddit, and Technicals. This makes your reasoning transparent.
+
 \`\`\`json
 [
   {
@@ -412,10 +432,20 @@ When analyzing commodity positions, use \`get_commodity_prices\` to compare:
     "rationale": "Strong thesis because [story reason]. Timing favorable with RSI at X.",
     "technical_score": 85,
     "allocation_amount": 50000,
-    "cash_deployment_notes": "Optional: when/why to deploy this cash later"
+    "cash_deployment_notes": "Optional: when/why to deploy this cash later",
+    "citations": [
+      { "type": "research", "id": "uuid", "title": "Investment Thesis", "excerpt": "Key insight used..." },
+      { "type": "valuepickr", "title": "Stock Thread Summary", "source": "ValuePickr" },
+      { "type": "news", "title": "Recent headline", "source": "Google News" },
+      { "type": "technicals", "title": "RSI 34, -5% from SMA50" }
+    ]
   }
 ]
 \`\`\`
+
+**Citation Types:**
+- \`research\`, \`link\`, \`note\`, \`table\` = User's own content (include \`id\` field)
+- \`valuepickr\`, \`news\`, \`reddit\`, \`technicals\` = External tool results (include \`source\` field)
 
 If no HIGH CONVICTION actions → return empty array: []
 Better to do nothing than to make a low-conviction trade.`;
@@ -465,6 +495,24 @@ Better to do nothing than to make a low-conviction trade.`;
             ? s.action
             : "BUY";
 
+          // Parse and validate citations if present
+          let citations: Citation[] | undefined;
+          if (Array.isArray(s.citations)) {
+            citations = s.citations
+              .filter(
+                (c: any) =>
+                  c && typeof c.type === "string" && typeof c.title === "string"
+              )
+              .map((c: any) => ({
+                type: c.type,
+                id: c.id,
+                title: c.title,
+                excerpt: c.excerpt,
+                source: c.source,
+                url: c.url,
+              }));
+          }
+
           return {
             symbol: s.symbol,
             stock_name: holding?.stock_name || s.symbol,
@@ -477,6 +525,7 @@ Better to do nothing than to make a low-conviction trade.`;
             sell_symbol: s.sell_symbol,
             sell_quantity: s.sell_quantity,
             technical_score: s.technical_score,
+            citations,
           };
         });
     } catch (error) {

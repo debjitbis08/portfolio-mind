@@ -34,24 +34,37 @@ export const GET: APIRoute = async ({ request, url }) => {
       .orderBy(desc(schema.suggestions.createdAt));
 
     // Convert to snake_case for API response consistency
-    const formatted = suggestions.map((s) => ({
-      id: s.id,
-      cycle_id: s.cycleId,
-      symbol: s.symbol,
-      stock_name: s.stockName,
-      action: s.action,
-      rationale: s.rationale,
-      technical_score: s.technicalScore,
-      confidence: s.confidence,
-      current_price: s.currentPrice,
-      target_price: s.targetPrice,
-      status: s.status,
-      superseded_by: s.supersededBy,
-      superseded_reason: s.supersededReason,
-      created_at: s.createdAt,
-      expires_at: s.expiresAt,
-      reviewed_at: s.reviewedAt,
-    }));
+    const formatted = suggestions.map((s) => {
+      // Parse citations JSON if present
+      let citations = [];
+      if (s.citations) {
+        try {
+          citations = JSON.parse(s.citations);
+        } catch {
+          citations = [];
+        }
+      }
+
+      return {
+        id: s.id,
+        cycle_id: s.cycleId,
+        symbol: s.symbol,
+        stock_name: s.stockName,
+        action: s.action,
+        rationale: s.rationale,
+        technical_score: s.technicalScore,
+        confidence: s.confidence,
+        current_price: s.currentPrice,
+        target_price: s.targetPrice,
+        status: s.status,
+        superseded_by: s.supersededBy,
+        superseded_reason: s.supersededReason,
+        created_at: s.createdAt,
+        expires_at: s.expiresAt,
+        reviewed_at: s.reviewedAt,
+        citations,
+      };
+    });
 
     return new Response(JSON.stringify({ suggestions: formatted }), {
       status: 200,

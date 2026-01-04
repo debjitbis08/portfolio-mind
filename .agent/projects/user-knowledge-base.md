@@ -495,17 +495,17 @@ The default landing tab showing a stock-at-a-glance summary:
 - [x] Build table data editor (spreadsheet-like)
 - [ ] Support global tables (DEFERRED)
 
-### Phase 5: Agent Integration
+### Phase 5: Agent Integration ✅ COMPLETE
 
-- [ ] Create `get_company_knowledge` tool
-- [ ] Update system prompt with research guidance
-- [ ] Inject user knowledge into analysis context
-- [ ] Add citations in agent responses
+- [x] Create `get_company_knowledge` tool
+- [x] Update system prompt with research guidance
+- [x] Inject user knowledge into analysis context
+- [x] Add citations in agent responses (all sources, not just user content)
 
 ### Phase 6: Polish
 
-- [ ] Full-text search across all content
-- [ ] Tags/categories for organization
+- [x] Full-text search across all content (FTS5)
+- [x] Tags/categories for organization
 - [ ] Export functionality
 - [ ] Mobile-friendly views
 
