@@ -146,36 +146,38 @@ export default function ResearchEditor(props: ResearchEditorProps) {
           onSubmit={handleSubmit}
           class="flex-1 overflow-hidden flex flex-col"
         >
-          <div class="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* Title Input */}
-            <div>
-              <label class="block text-sm font-medium text-subtext1 mb-1">
-                Title
-              </label>
-              <input
-                type="text"
-                value={title()}
-                onInput={(e) => setTitle(e.currentTarget.value)}
-                placeholder="e.g., Investment Thesis"
-                class="w-full px-3 py-2 bg-surface0 border border-surface2 rounded-lg text-text focus:outline-none focus:border-mauve"
-                disabled={isSubmitting()}
-              />
-            </div>
+          <div class="flex-1 overflow-y-auto space-y-4">
+            <div class="p-4 space-y-4">
+              {/* Title Input */}
+              <div>
+                <label class="block text-sm font-medium text-subtext1 mb-1">
+                  Title
+                </label>
+                <input
+                  type="text"
+                  value={title()}
+                  onInput={(e) => setTitle(e.currentTarget.value)}
+                  placeholder="e.g., Investment Thesis"
+                  class="w-full px-3 py-2 bg-surface0 border border-surface2 rounded-lg text-text focus:outline-none focus:border-mauve"
+                  disabled={isSubmitting()}
+                />
+              </div>
 
-            {/* Preview Toggle */}
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowPreview(!showPreview())}
-                class="px-3 py-1 text-sm bg-surface0 hover:bg-surface1 text-text rounded-lg transition-colors border border-surface2"
-              >
-                {showPreview() ? "📝 Edit" : "👁️ Preview"}
-              </button>
-              <span class="text-xs text-subtext0">
-                Rich markdown editor with live formatting: **bold**, *italic*, # headers, - lists, [links](url), tables, and more
-              </span>
+              {/* Preview Toggle */}
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPreview(!showPreview())}
+                  class="px-3 py-1 text-sm bg-surface0 hover:bg-surface1 text-text rounded-lg transition-colors border border-surface2"
+                >
+                  {showPreview() ? "📝 Edit" : "👁️ Preview"}
+                </button>
+                <span class="text-xs text-subtext0">
+                  Rich markdown editor with live formatting: **bold**, *italic*,
+                  # headers, - lists, [links](url), tables, and more
+                </span>
+              </div>
             </div>
-
             {/* Content Editor/Preview */}
             <div class="flex-1">
               <Show when={!showPreview()}>
@@ -200,7 +202,8 @@ Target PE: 50"
 
               <Show when={showPreview()}>
                 <div
-                  class="w-full min-h-[300px] px-4 py-3 bg-surface0 border border-surface2 rounded-lg text-sm text-text prose prose-invert max-w-none overflow-auto"
+                  class="w-full min-h-[300px] p-6 border-t border-surface2 prose prose-invert prose-sm max-w-none overflow-auto"
+                  // biome-ignore lint: Using innerHTML for markdown rendering
                   innerHTML={previewHtml()}
                 />
               </Show>

@@ -29,11 +29,13 @@
     "@milkdown/preset-gfm": "^7.17.3",
     "@milkdown/prose": "^7.17.3",
     "@milkdown/theme-nord": "^7.17.3",
+    "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.18",
     "astro": "^5.16.6",
     "better-sqlite3": "^12.5.0",
     "drizzle-orm": "^0.45.1",
     "fast-xml-parser": "^5.3.3",
+    "markdown-it": "^14.1.0",
     "puppeteer": "^24.34.0",
     "solid-js": "^1.9.10",
     "tailwindcss": "^4.1.18",
@@ -43,6 +45,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/markdown-it": "^14.1.2",
     "drizzle-kit": "^0.31.8"
   },
   "volta": {

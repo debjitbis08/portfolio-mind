@@ -47,7 +47,6 @@ export default function MarkdownEditor(props: MarkdownEditorProps) {
       style={{
         "min-height": "400px",
         "border": "1px solid var(--ctp-surface1)",
-        "border-radius": "0.75rem",
         "background": "var(--ctp-surface0)",
         "box-shadow": "0 2px 8px rgba(0, 0, 0, 0.3)",
         "transition": "border-color 0.15s ease-out, box-shadow 0.15s ease-out",
