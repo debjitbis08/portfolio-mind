@@ -146,169 +146,20 @@ export function isWaitZone(tech: {
 }
 
 // ============================================================================
-// Database Initialization
-// ============================================================================
 
 /**
- * Initialize database tables.
- * Call this on app startup.
+ * Seed reference data into the database.
+ * Call this on app startup AFTER migrations have run.
+ *
+ * NOTE: Schema creation is handled by Drizzle migrations in /drizzle folder.
+ * This function only seeds static reference data.
  */
-export function initializeDatabase(): void {
-  // Create tables if they don't exist
+export function seedReferenceData(): void {
+  // Ensure settings has at least one row
+  sqlite.exec(`INSERT OR IGNORE INTO settings (id) VALUES (1);`);
+
+  // Seed common ETF-to-commodity mappings (Gold & Silver ETFs in India)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS transactions (
-      id TEXT PRIMARY KEY,
-      isin TEXT NOT NULL,
-      symbol TEXT NOT NULL,
-      stock_name TEXT NOT NULL,
-      type TEXT NOT NULL CHECK (type IN ('BUY', 'SELL', 'OPENING_BALANCE')),
-      quantity INTEGER NOT NULL,
-      value REAL NOT NULL,
-      exchange TEXT,
-      exchange_order_id TEXT,
-      executed_at TEXT NOT NULL,
-      status TEXT DEFAULT 'Executed',
-      created_at TEXT,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS price_cache (
-      symbol TEXT PRIMARY KEY,
-      price REAL NOT NULL,
-      change_percent REAL,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS technical_data (
-      symbol TEXT PRIMARY KEY,
-      current_price REAL,
-      rsi_14 REAL,
-      sma_50 REAL,
-      sma_200 REAL,
-      price_vs_sma50 REAL,
-      price_vs_sma200 REAL,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS cycle_runs (
-      id TEXT PRIMARY KEY,
-      started_at TEXT,
-      completed_at TEXT,
-      symbols_analyzed INTEGER DEFAULT 0,
-      suggestions_count INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed')),
-      error_message TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS suggestions (
-      id TEXT PRIMARY KEY,
-      cycle_id TEXT REFERENCES cycle_runs(id) ON DELETE CASCADE,
-      symbol TEXT NOT NULL,
-      stock_name TEXT,
-      action TEXT NOT NULL CHECK (action IN ('BUY', 'SELL', 'HOLD', 'WATCH')),
-      rationale TEXT NOT NULL,
-      technical_score REAL,
-      current_price REAL,
-      target_price REAL,
-      status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'superseded')),
-      confidence INTEGER CHECK (confidence IS NULL OR (confidence >= 1 AND confidence <= 10)),
-      superseded_by TEXT,
-      superseded_reason TEXT,
-      created_at TEXT,
-      expires_at TEXT,
-      reviewed_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      id INTEGER PRIMARY KEY DEFAULT 1,
-      available_funds REAL DEFAULT 0,
-      risk_profile TEXT DEFAULT 'balanced' CHECK (risk_profile IN ('conservative', 'balanced', 'aggressive')),
-      notification_email TEXT,
-      screener_urls TEXT,
-      symbol_mappings TEXT,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS tool_cache (
-      id TEXT PRIMARY KEY,
-      cache_key TEXT NOT NULL UNIQUE,
-      source TEXT NOT NULL,
-      query_args TEXT NOT NULL,
-      response TEXT NOT NULL,
-      created_at TEXT,
-      expires_at TEXT NOT NULL,
-      hit_count INTEGER DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      type TEXT NOT NULL,
-      status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
-      progress INTEGER DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
-      progress_message TEXT,
-      result TEXT,
-      error_message TEXT,
-      created_at TEXT,
-      started_at TEXT,
-      completed_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS stock_intel (
-      symbol TEXT PRIMARY KEY,
-      fundamentals TEXT,
-      news_sentiment TEXT,
-      social_sentiment TEXT,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS watchlist (
-      symbol TEXT PRIMARY KEY,
-      added_at TEXT,
-      source TEXT DEFAULT 'manual',
-      notes TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS commodity_holdings (
-      id TEXT PRIMARY KEY,
-      commodity_type TEXT NOT NULL CHECK (commodity_type IN ('GOLD', 'SILVER', 'PLATINUM', 'COPPER', 'CRUDE_OIL', 'OTHER')),
-      name TEXT NOT NULL,
-      holding_type TEXT DEFAULT 'PHYSICAL' CHECK (holding_type IN ('PHYSICAL', 'SGB', 'DIGITAL', 'OTHER')),
-      quantity REAL NOT NULL,
-      unit TEXT DEFAULT 'GRAM' CHECK (unit IN ('GRAM', 'KG', 'OZ', 'UNIT')),
-      purchase_price REAL NOT NULL,
-      purchase_date TEXT NOT NULL,
-      notes TEXT,
-      created_at TEXT,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS etf_commodity_mappings (
-      symbol TEXT PRIMARY KEY,
-      commodity_type TEXT NOT NULL CHECK (commodity_type IN ('GOLD', 'SILVER', 'PLATINUM', 'COPPER', 'CRUDE_OIL', 'OTHER')),
-      conversion_factor REAL DEFAULT 1,
-      notes TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      token TEXT NOT NULL UNIQUE,
-      created_at TEXT,
-      expires_at TEXT NOT NULL
-    );
-
-    -- Indexes
-    CREATE INDEX IF NOT EXISTS idx_transactions_isin ON transactions(isin);
-    CREATE INDEX IF NOT EXISTS idx_transactions_executed_at ON transactions(executed_at);
-    CREATE INDEX IF NOT EXISTS idx_suggestions_pending ON suggestions(status);
-    CREATE INDEX IF NOT EXISTS idx_tool_cache_key ON tool_cache(cache_key);
-    CREATE INDEX IF NOT EXISTS idx_tool_cache_expires ON tool_cache(expires_at);
-    CREATE INDEX IF NOT EXISTS idx_jobs_pending ON jobs(status);
-    CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-
-    -- Ensure settings has at least one row
-    INSERT OR IGNORE INTO settings (id) VALUES (1);
-
-    -- Seed common ETF-to-commodity mappings (Gold & Silver ETFs in India)
     INSERT OR IGNORE INTO etf_commodity_mappings (symbol, commodity_type, notes) VALUES
       ('GOLDBEES', 'GOLD', 'Nippon India ETF Gold BeES'),
       ('GOLDSHARE', 'GOLD', 'UTI Gold ETF'),
@@ -320,28 +171,9 @@ export function initializeDatabase(): void {
       ('ICICIBSILV', 'SILVER', 'ICICI Prudential Silver ETF'),
       ('HDFCSILVER', 'SILVER', 'HDFC Silver ETF');
   `);
-
-  // Migration: Add new columns to suggestions table (for existing databases)
-  try {
-    sqlite.exec(
-      `ALTER TABLE suggestions ADD COLUMN confidence INTEGER CHECK (confidence IS NULL OR (confidence >= 1 AND confidence <= 10))`
-    );
-  } catch {
-    // Column already exists
-  }
-  try {
-    sqlite.exec(`ALTER TABLE suggestions ADD COLUMN superseded_by TEXT`);
-  } catch {
-    // Column already exists
-  }
-  try {
-    sqlite.exec(`ALTER TABLE suggestions ADD COLUMN superseded_reason TEXT`);
-  } catch {
-    // Column already exists
-  }
 }
 
-// Initialize on module load
-initializeDatabase();
+// Seed reference data on module load
+seedReferenceData();
 
 export { schema };

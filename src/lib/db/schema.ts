@@ -256,6 +256,44 @@ export const etfCommodityMappings = sqliteTable("etf_commodity_mappings", {
 });
 
 // ============================================================================
+// Company Notes - User notes at company/stock level
+// ============================================================================
+
+export const companyNotes = sqliteTable(
+  "company_notes",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    symbol: text("symbol").notNull(),
+    content: text("content").notNull(),
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("idx_company_notes_symbol").on(table.symbol)]
+);
+
+// ============================================================================
+// Action Notes - User notes attached to AI suggestions
+// ============================================================================
+
+export const actionNotes = sqliteTable(
+  "action_notes",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    suggestionId: text("suggestion_id")
+      .references(() => suggestions.id, {
+        onDelete: "cascade",
+      })
+      .notNull(),
+    content: text("content").notNull(),
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("idx_action_notes_suggestion").on(table.suggestionId)]
+);
+
+// ============================================================================
 // Sessions - Authentication sessions
 // ============================================================================
 

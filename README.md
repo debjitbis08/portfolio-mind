@@ -84,6 +84,28 @@ Choose one of these methods to generate a strong password:
 | **pwgen**               | `pwgen -s 32 1`                                                 |
 | **1Password/Bitwarden** | Use your password manager's generator                           |
 
+### Database Setup
+
+The database schema is managed by Drizzle migrations:
+
+```bash
+# Run migrations (first-time setup or after pulling new changes)
+pnpm db:migrate
+```
+
+This will:
+
+- Create all necessary tables in your SQLite database
+- Apply any pending migrations
+- Automatically seed reference data (ETF mappings, default settings)
+
+**For developers**: When modifying the schema in `src/lib/db/schema.ts`, generate a new migration:
+
+```bash
+pnpm db:generate  # Creates migration file
+pnpm db:migrate   # Applies it to your database
+```
+
 ### Running
 
 ```bash

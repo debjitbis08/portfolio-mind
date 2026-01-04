@@ -1,6 +1,8 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import { validateSession } from "../lib/auth";
+import ActionNotes from "../components/notes/ActionNotes";
+import CompanyNotes from "../components/notes/CompanyNotes";
 
 // Check auth on server side
 const session = await validateSession(Astro.request);
@@ -93,6 +95,7 @@ if (!session) {
               <th class="p-4 text-right">Market price</th>
               <th class="p-4 text-right">Returns (%)</th>
               <th class="p-4 text-right">Current (Invested)</th>
+              <th class="p-4 text-center">Notes</th>
             </tr>
           </thead>
           <tbody id="holdings-body" class="divide-y divide-surface1"> </tbody>
@@ -379,6 +382,9 @@ if (!session) {
           </div>
         </div>
       </details>
+
+      <!-- Company Notes Modal Container -->
+      <div id="company-notes-portal"></div>
     </main>
   </div>
 
@@ -509,6 +515,15 @@ if (!session) {
               <td class="p-4 text-right">
                 <div class="text-text font-medium">${formatCurrency(h.current_value)}</div>
                 <div class="text-sm text-subtext0">${formatCurrency(h.invested_value)}</div>
+              </td>
+              <td class="p-4 text-center">
+                <button
+                  onclick="showCompanyNotes('${h.symbol}')"
+                  class="px-3 py-1 text-sm bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
+                  title="View notes for ${h.stock_name}"
+                >
+                  📝 Notes
+                </button>
               </td>
             </tr>
           `;
@@ -673,18 +688,21 @@ if (!session) {
                   : `<span class="text-xs text-subtext0 ml-4">${dateStr}</span>`;
 
               return `
-              <div class="p-4 flex items-center justify-between hover:bg-surface1/50 transition-colors ${status === "superseded" ? "opacity-70" : ""}" data-id="${s.id}">
-                <div class="flex-1">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="font-medium text-text">${s.stock_name || s.symbol}</span>
-                    <span class="px-2 py-0.5 text-xs font-bold rounded ${actionBg} ${actionColor}">${actionIcon}</span>
-                    ${confidenceBadge}
-                    ${details}
+              <div class="bg-surface0 border border-surface1 rounded-lg overflow-hidden mb-2 hover:bg-surface1/50 transition-colors ${status === "superseded" ? "opacity-70" : ""}" data-id="${s.id}" data-suggestion-id="${s.id}">
+                <div class="p-4 flex items-center justify-between">
+                  <div class="flex-1">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-medium text-text">${s.stock_name || s.symbol}</span>
+                      <span class="px-2 py-0.5 text-xs font-bold rounded ${actionBg} ${actionColor}">${actionIcon}</span>
+                      ${confidenceBadge}
+                      ${details}
+                    </div>
+                    <p class="text-sm text-subtext0 mt-1">${s.rationale}</p>
+                    ${supersededInfo}
                   </div>
-                  <p class="text-sm text-subtext0 mt-1">${s.rationale}</p>
-                  ${supersededInfo}
+                  ${actionButtons}
                 </div>
-                ${actionButtons}
+                <div class="action-notes-container"></div>
               </div>
             `;
             })
@@ -1018,5 +1036,104 @@ if (!session) {
 
     // Load commodity holdings on page load
     loadCommodityHoldings();
+
+    // ============================================================
+    // SolidJS Components Integration - Notes Feature
+    // ============================================================
+
+    // Import SolidJS render function
+    import { render } from "solid-js/web";
+    import ActionNotes from "../components/notes/ActionNotes";
+    import CompanyNotes from "../components/notes/CompanyNotes";
+
+    // State for company notes modal
+    let companyNotesCleanup: (() => void) | null = null;
+    let currentSymbol: string | null = null;
+
+    // Function to show company notes modal
+    function showCompanyNotes(symbol: string) {
+      const portal = document.getElementById("company-notes-portal");
+      if (!portal) return;
+
+      // Clean up previous instance if exists
+      if (companyNotesCleanup) {
+        companyNotesCleanup();
+      }
+
+      currentSymbol = symbol;
+
+      // Render CompanyNotes component
+      companyNotesCleanup = render(
+        () =>
+          CompanyNotes({
+            symbol,
+            onClose: () => {
+              if (companyNotesCleanup) {
+                companyNotesCleanup();
+                companyNotesCleanup = null;
+                currentSymbol = null;
+              }
+            },
+          }),
+        portal
+      );
+    }
+
+    // Make function globally available for inline event handlers
+    (window as any).showCompanyNotes = showCompanyNotes;
+
+    // Function to mount ActionNotes components after suggestions are loaded
+    function mountActionNotes() {
+      const suggestionCards = document.querySelectorAll("[data-suggestion-id]");
+
+      suggestionCards.forEach((card) => {
+        const suggestionId = card.getAttribute("data-suggestion-id");
+        const notesContainer = card.querySelector(".action-notes-container");
+
+        if (notesContainer && suggestionId) {
+          render(() => ActionNotes({ suggestionId }), notesContainer);
+        }
+      });
+    }
+
+    // Enhance loadSuggestions with ActionNotes mounting
+    const _loadSuggestions = loadSuggestions;
+    window.addEventListener("DOMContentLoaded", () => {
+      // Override calls to loadSuggestions throughout the page
+      const originalCall = loadSuggestions.bind(window);
+      (window as any).loadSuggestionsOriginal = originalCall;
+    });
+
+    // Call mountActionNotes after initial load
+    loadSuggestions().then(() => {
+      setTimeout(mountActionNotes, 100);
+    });
+
+    // Intercept filter button clicks to mount notes
+    document.querySelectorAll(".suggestion-filter").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setTimeout(mountActionNotes, 200);
+      });
+    });
+
+    // Intercept discovery button to mount notes after completion
+    const discoveryBtn = document.getElementById("run-discovery-btn");
+    if (discoveryBtn) {
+      discoveryBtn.addEventListener("click", () => {
+        // Listen for suggestions to be loaded
+        const observer = new MutationObserver((mutations) => {
+          const listEl = document.getElementById("suggestions-list");
+          if (listEl && !listEl.classList.contains("hidden")) {
+            setTimeout(mountActionNotes, 200);
+            observer.disconnect();
+          }
+        });
+
+        observer.observe(document.getElementById("suggestions-list")!, {
+          attributes: true,
+          attributeFilter: ["class"],
+        });
+      });
+    }
   </script>
 </Layout>
