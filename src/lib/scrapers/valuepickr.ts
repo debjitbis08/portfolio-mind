@@ -54,7 +54,8 @@ export interface QualitativeIntel {
   raw_thesis?: string; // Optional: include raw for debugging
 }
 
-const MIN_SIGNIFICANT_POST_LENGTH = 200; // Characters - filter out short "thanks" posts
+// We just filter out very short junk like "Thanks" or emojis
+const MIN_POST_LENGTH = 15;
 
 export class ValuePickrService {
   private static BASE_URL = "https://forum.valuepickr.com";
@@ -150,12 +151,13 @@ export class ValuePickrService {
       const thesisPost = posts.find((p) => p.post_number === 1);
       if (!thesisPost) return null;
 
-      // 2. Fetch recent posts (last 10 post IDs if thread is long)
+      // 2. Fetch recent posts (last 20 post IDs if thread is long)
       let recentPosts: ValuePickrPost[] = [];
+      const fetchCount = 20;
 
-      if (allPostIds && allPostIds.length > 20) {
-        // Thread is long, fetch the last 10 posts by ID
-        const lastPostIds = allPostIds.slice(-10);
+      if (allPostIds && allPostIds.length > fetchCount) {
+        // Thread is long, fetch the last N posts by ID
+        const lastPostIds = allPostIds.slice(-fetchCount);
         const idsParam = lastPostIds.join(",");
         const recentUrl = `${this.BASE_URL}/t/${topic.id}/posts.json?post_ids[]=${idsParam}`;
 
@@ -168,20 +170,23 @@ export class ValuePickrService {
         } catch (e) {
           console.warn("[ValuePickr] Failed to fetch recent posts:", e);
           // Fall back to posts from initial fetch
-          recentPosts = posts.slice(-5);
+          recentPosts = posts.slice(-fetchCount);
         }
       } else {
         // Thread is short, use last posts from initial fetch
-        recentPosts = posts.filter((p) => p.post_number !== 1).slice(-10);
+        recentPosts = posts
+          .filter((p) => p.post_number !== 1)
+          .slice(-fetchCount);
       }
 
-      // 3. Filter to significant posts (longer content)
+      // 3. Filter to significant posts - LIGHT filter only
+      // We rely on the LLM to process more context.
       const significantRecent = recentPosts
         .filter((p) => {
           const content = this.stripHtml(p.cooked);
-          return content.length >= MIN_SIGNIFICANT_POST_LENGTH;
+          return content.length >= MIN_POST_LENGTH;
         })
-        .slice(-5); // Take last 5 significant posts
+        .slice(-20); // pass up to 20 recent posts to LLM
 
       return {
         topic_url: `${this.BASE_URL}/t/${topic.slug}/${topic.id}`,
@@ -325,6 +330,60 @@ SENTIMENT:
       recent_sentiment_summary: summaries.sentiment_summary,
       last_activity: discussion.last_activity,
     };
+  }
+
+  /**
+   * Manual entry point: Get research from a direct URL
+   */
+  static async getResearchFromUrl(
+    url: string
+  ): Promise<QualitativeIntel | null> {
+    try {
+      // url format: https://forum.valuepickr.com/t/vinati-organics-limited/1234/5
+      // or https://forum.valuepickr.com/t/vinati-organics-limited/1234
+      const urlObj = new URL(url);
+      if (urlObj.hostname !== "forum.valuepickr.com") return null;
+
+      const pathParts = urlObj.pathname.split("/").filter((p) => p);
+      // expect ["t", "slug", "id", ...]
+      if (pathParts[0] !== "t" || pathParts.length < 3) return null;
+
+      const slug = pathParts[1];
+      const id = parseInt(pathParts[2]);
+
+      if (isNaN(id)) return null;
+
+      // Create a mock topic object to reuse fetchDiscussion
+      const mockTopic: ValuePickrTopic = {
+        id,
+        slug,
+        title: slug.replace(/-/g, " "), // Fallback title
+        posts_count: 0, // Will be updated by fetchDiscussion potentially if we fetched topic details first
+      };
+
+      // We actually need the real topic title and updated stats.
+      // fetchDiscussion does a fetch to `topicUrl` which returns the full topic object including title.
+      // Let's rely on fetchDiscussion to do the heavy lifting, but we might need to verify the title if we want to be perfect,
+      // but fetchDiscussion uses the slug and ID to fetch.
+
+      const discussion = await this.fetchDiscussion(mockTopic);
+      if (!discussion) return null;
+
+      // Summarize with LLM
+      const summaries = await this.summarizeWithLLM(discussion);
+
+      return {
+        source: "valuepickr",
+        topic_url: discussion.topic_url,
+        topic_title: discussion.topic_title,
+        thesis_summary: summaries.thesis_summary,
+        recent_sentiment_summary: summaries.sentiment_summary,
+        last_activity: discussion.last_activity,
+      };
+    } catch (e) {
+      console.error("[ValuePickr] Error fetching from URL:", e);
+      return null;
+    }
   }
 
   private static stripHtml(html: string): string {

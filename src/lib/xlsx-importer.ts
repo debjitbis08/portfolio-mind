@@ -59,7 +59,9 @@ export function parseOrderHistory(buffer: ArrayBuffer): GrowwTransaction[] {
   }
 
   if (headerRowIndex === -1) {
-    throw new Error("Could not find header row in Order History file");
+    throw new Error(
+      "Could not find header row in Order History file. Please ensure you're uploading a valid Groww/Zerodha order history file."
+    );
   }
 
   // Parse data rows
@@ -121,7 +123,12 @@ export function parseHoldingsStatement(buffer: ArrayBuffer): GrowwHolding[] {
   }
 
   if (headerRowIndex === -1) {
-    throw new Error("Could not find header row in Holdings Statement file");
+    // If header not found, return empty array instead of throwing
+    // This allows import to proceed without holdings reconciliation
+    console.warn(
+      "Could not find header row in Holdings Statement file - skipping reconciliation"
+    );
+    return [];
   }
 
   // Parse data rows

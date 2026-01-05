@@ -14,6 +14,7 @@ import LinksList from "../links/LinksList";
 import TablesList from "../tables/TablesList";
 import PriceChart from "../charts/PriceChart";
 import EarningsPanel from "../earnings/EarningsPanel";
+import { FaSolidArrowsRotate, FaSolidTrashCan } from "solid-icons/fa";
 
 interface CompanyDetailsProps {
   symbol: string;
@@ -502,6 +503,41 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                       <Show when={intel()?.thesis_summary}>
                         <button
                           onClick={async () => {
+                            const btn = document.getElementById(
+                              "vp-refresh-btn"
+                            ) as HTMLButtonElement;
+                            if (btn) btn.disabled = true;
+                            try {
+                              const res = await fetch(
+                                `/api/intel/${encodeURIComponent(
+                                  props.symbol
+                                )}/valuepickr`,
+                                { method: "POST" }
+                              );
+                              if (res.ok) {
+                                window.location.reload();
+                              } else {
+                                alert("Failed to refresh data");
+                              }
+                            } catch (e) {
+                              console.error(
+                                "Failed to refresh ValuePickr data",
+                                e
+                              );
+                              alert("Failed to refresh data");
+                            } finally {
+                              if (btn) btn.disabled = false;
+                            }
+                          }}
+                          id="vp-refresh-btn"
+                          class="text-xs material-symbols-outlined text-subtext0 hover:text-text cursor-pointer"
+                          title="Refresh Data"
+                        >
+                          <FaSolidArrowsRotate />
+                        </button>
+
+                        <button
+                          onClick={async () => {
                             if (
                               !confirm(
                                 "Are you sure you want to remove this ValuePickr data? It may be incorrect."
@@ -529,10 +565,10 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                               alert("Failed to delete data");
                             }
                           }}
-                          class="text-[10px] text-red hover:text-red/80 px-2 py-0.5 rounded border border-red/20 hover:bg-red/5"
+                          class="text-xs material-symbols-outlined text-red/60 hover:text-red cursor-pointer"
                           title="Remove incorrect data"
                         >
-                          Remove
+                          <FaSolidTrashCan />
                         </button>
                       </Show>
                       <Show when={intel()?.topic_url}>
@@ -554,10 +590,94 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                     <Show
                       when={intel()?.thesis_summary}
                       fallback={
-                        <p class="text-subtext1">
-                          No ValuePickr thesis available. Run "Sync Data" on the
-                          watchlist to fetch.
-                        </p>
+                        <div class="text-subtext1">
+                          <p class="mb-2">No ValuePickr thesis available.</p>
+                          <div class="flex gap-2 items-center">
+                            <button
+                              onClick={() => {
+                                const el =
+                                  document.getElementById("vp-manual-add");
+                                if (el) el.classList.remove("hidden");
+                              }}
+                              class="text-xs text-blue hover:text-sapphire hover:underline"
+                            >
+                              Add Manually
+                            </button>
+                            <span class="text-xs text-subtext1">|</span>
+                            <span class="text-xs text-subtext1">
+                              Run "Sync Data" on watchlist to auto-fetch
+                            </span>
+                          </div>
+
+                          <div
+                            id="vp-manual-add"
+                            class="hidden mt-3 p-3 bg-surface1/30 rounded-lg"
+                          >
+                            <p class="text-xs text-subtext0 mb-2">
+                              Paste ValuePickr thread URL:
+                            </p>
+                            <div class="flex gap-2">
+                              <input
+                                type="text"
+                                id="vp-url-input"
+                                placeholder="https://forum.valuepickr.com/t/..."
+                                class="flex-1 bg-surface0 border border-surface2 rounded px-2 py-1 text-xs text-text focus:border-mauve focus:outline-none"
+                              />
+                              <button
+                                onClick={async () => {
+                                  const input = document.getElementById(
+                                    "vp-url-input"
+                                  ) as HTMLInputElement;
+                                  const url = input.value.trim();
+                                  if (!url) return;
+
+                                  const btn = document.getElementById(
+                                    "vp-save-btn"
+                                  ) as HTMLButtonElement;
+                                  if (btn) {
+                                    btn.disabled = true;
+                                    btn.innerText = "Saving...";
+                                  }
+
+                                  try {
+                                    const res = await fetch(
+                                      `/api/intel/${encodeURIComponent(
+                                        props.symbol
+                                      )}/valuepickr`,
+                                      {
+                                        method: "POST",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({ url }),
+                                      }
+                                    );
+
+                                    if (res.ok) {
+                                      window.location.reload();
+                                    } else {
+                                      alert(
+                                        "Failed to fetch data from URL. Please check if it's a valid ValuePickr thread."
+                                      );
+                                    }
+                                  } catch (e) {
+                                    console.error(e);
+                                    alert("Error saving URL");
+                                  } finally {
+                                    if (btn) {
+                                      btn.disabled = false;
+                                      btn.innerText = "Save";
+                                    }
+                                  }
+                                }}
+                                id="vp-save-btn"
+                                class="px-3 py-1 bg-mauve text-base text-xs font-medium rounded hover:bg-mauve/90 disabled:opacity-50"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       }
                     >
                       <div class="text-subtext1">

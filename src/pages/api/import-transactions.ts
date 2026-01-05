@@ -19,6 +19,13 @@ import {
 } from "../../lib/xlsx-importer";
 
 /**
+ * Check if a file has actual content (not an empty file input)
+ */
+function isValidFile(file: File | null): file is File {
+  return file !== null && file.size > 0 && file.name !== "";
+}
+
+/**
  * Detect if a file is an ICICI Direct CSV based on filename or content
  */
 function isICICIDirectFile(filename: string, content?: string): boolean {
@@ -60,7 +67,7 @@ export const POST: APIRoute = async ({ request }) => {
       const iciciTxs = parseICICIDirectTransactions(csvText);
       transactions = await convertICICIToGrowwFormat(iciciTxs);
 
-      if (iciciHoldingsFile) {
+      if (isValidFile(iciciHoldingsFile)) {
         const holdingsCsv = await iciciHoldingsFile.text();
         const iciciHoldings = parseICICIDirectHoldings(holdingsCsv);
         // Convert to GrowwHolding format for reconciliation
@@ -86,7 +93,7 @@ export const POST: APIRoute = async ({ request }) => {
         const iciciTxs = parseICICIDirectTransactions(csvText);
         transactions = await convertICICIToGrowwFormat(iciciTxs);
 
-        if (holdingsFile && isICICIDirectFile(holdingsFile.name)) {
+        if (isValidFile(holdingsFile) && isICICIDirectFile(holdingsFile.name)) {
           const holdingsCsv = await holdingsFile.text();
           const iciciHoldings = parseICICIDirectHoldings(holdingsCsv);
           holdings = iciciHoldings.map((h) => ({
@@ -105,7 +112,7 @@ export const POST: APIRoute = async ({ request }) => {
         const orderBuffer = await orderHistoryFile.arrayBuffer();
         transactions = parseOrderHistory(orderBuffer);
 
-        if (holdingsFile) {
+        if (isValidFile(holdingsFile)) {
           const holdingsBuffer = await holdingsFile.arrayBuffer();
           holdings = parseHoldingsStatement(holdingsBuffer);
         }
