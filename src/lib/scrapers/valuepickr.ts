@@ -64,7 +64,8 @@ export class ValuePickrService {
    */
   static async searchThread(query: string): Promise<ValuePickrTopic | null> {
     try {
-      const url = `${this.BASE_URL}/search/query.json?term=${encodeURIComponent(
+      // 1. First try: Exact query
+      let url = `${this.BASE_URL}/search/query.json?term=${encodeURIComponent(
         query
       )}`;
       const res = await fetch(url);
@@ -72,16 +73,54 @@ export class ValuePickrService {
       if (!res.ok) return null;
 
       const data = await res.json();
-      const topics = data.topics as ValuePickrTopic[];
+      let topics = data.topics as ValuePickrTopic[];
 
-      if (!topics || topics.length === 0) return null;
+      if (!topics || topics.length === 0) {
+        // 2. Second try: If query has multiple words (e.g. "Tata Motors"), try adding "Limited" or "Ltd" if short
+        // Or if it failed, maybe just try the first word if it's unique enough?
+        // For now, let's stick to the primary query to avoid drift.
+        return null;
+      }
 
-      // Find topic with query in title (more relevant) or fallback to first
-      const match = topics.find((t) =>
-        t.title.toLowerCase().includes(query.toLowerCase())
-      );
+      // Filter candidates
+      const candidates = topics.filter((t) => {
+        const titleLower = t.title.toLowerCase();
+        const queryLower = query.toLowerCase();
 
-      return match || topics[0];
+        // automatic exclusion of portfolio threads unless the user is specifically searching for one
+        // (which they shouldn't be via this tool usually)
+        if (
+          titleLower.includes("portfolio") &&
+          !queryLower.includes("portfolio")
+        ) {
+          return false;
+        }
+
+        // Title must contain the query words (at least the first word if multi-word)
+        // actually, let's require the main part of the query
+        const queryWords = queryLower.split(" ");
+        const firstWord = queryWords[0];
+
+        // Check if at least the first significant word is in the title
+        if (!titleLower.includes(firstWord)) return false;
+
+        return true;
+      });
+
+      if (candidates.length === 0) return null;
+
+      // Find best match:
+      // 1. Exact match start
+      // 2. Contains full query
+      const match =
+        candidates.find((t) =>
+          t.title.toLowerCase().startsWith(query.toLowerCase())
+        ) ||
+        candidates.find((t) =>
+          t.title.toLowerCase().includes(query.toLowerCase())
+        );
+
+      return match || candidates[0];
     } catch (err) {
       console.error(`ValuePickr search error for ${query}:`, err);
       return null;

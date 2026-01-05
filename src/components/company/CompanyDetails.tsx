@@ -498,16 +498,54 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                     <h3 class="text-sm font-medium text-subtext0">
                       💬 ValuePickr Thesis
                     </h3>
-                    <Show when={intel()?.topic_url}>
-                      <a
-                        href={intel()?.topic_url}
-                        target="_blank"
-                        rel="noopener"
-                        class="text-xs text-blue hover:text-sapphire"
-                      >
-                        View on Forum →
-                      </a>
-                    </Show>
+                    <div class="flex items-center gap-2">
+                      <Show when={intel()?.thesis_summary}>
+                        <button
+                          onClick={async () => {
+                            if (
+                              !confirm(
+                                "Are you sure you want to remove this ValuePickr data? It may be incorrect."
+                              )
+                            )
+                              return;
+                            try {
+                              const res = await fetch(
+                                `/api/intel/${encodeURIComponent(
+                                  props.symbol
+                                )}/valuepickr`,
+                                {
+                                  method: "DELETE",
+                                }
+                              );
+                              if (res.ok) {
+                                // Refresh the page or just the resource
+                                window.location.reload();
+                              }
+                            } catch (e) {
+                              console.error(
+                                "Failed to delete ValuePickr data",
+                                e
+                              );
+                              alert("Failed to delete data");
+                            }
+                          }}
+                          class="text-[10px] text-red hover:text-red/80 px-2 py-0.5 rounded border border-red/20 hover:bg-red/5"
+                          title="Remove incorrect data"
+                        >
+                          Remove
+                        </button>
+                      </Show>
+                      <Show when={intel()?.topic_url}>
+                        <a
+                          href={intel()?.topic_url}
+                          target="_blank"
+                          rel="noopener"
+                          class="text-xs text-blue hover:text-sapphire"
+                        >
+                          View on Forum →
+                        </a>
+                      </Show>
+                    </div>
                   </div>
                   <Show
                     when={!intel.loading}
