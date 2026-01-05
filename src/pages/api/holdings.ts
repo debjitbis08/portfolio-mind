@@ -20,9 +20,16 @@ export const GET: APIRoute = async ({ request }) => {
   const authError = await requireAuth(request);
   if (authError) return authError;
 
+  const url = new URL(request.url);
+  const requestedSymbol = url.searchParams.get("symbol")?.toUpperCase();
+
   try {
     // Fetch holdings from computed view
-    const holdings = await getHoldings();
+    let holdings = await getHoldings();
+
+    if (requestedSymbol) {
+      holdings = holdings.filter((h) => h.symbol === requestedSymbol);
+    }
 
     if (holdings.length === 0) {
       return new Response(JSON.stringify({ holdings: [], summary: null }), {

@@ -49,6 +49,10 @@ export const GET: APIRoute = async ({ request }) => {
       }
     }
 
+    // Get screener credentials
+    const screenerEmail = data?.screenerEmail ?? null;
+    const hasScreenerPassword = !!data?.screenerPassword;
+
     // Parse tool configuration
     let toolConfig = null;
     if (data?.toolConfig) {
@@ -77,6 +81,8 @@ export const GET: APIRoute = async ({ request }) => {
           notification_email: notificationEmail,
           ai_enabled: aiEnabled,
           screener_urls: screenerUrlsParsed,
+          screener_email: screenerEmail,
+          has_screener_password: hasScreenerPassword,
           user_mappings: userMappings,
           built_in_mappings: BUILT_IN_MAPPINGS,
           tool_config: mergedToolConfig,
@@ -119,6 +125,13 @@ export const POST: APIRoute = async ({ request }) => {
     }
     if (body.risk_profile !== undefined) {
       updates.riskProfile = body.risk_profile;
+    }
+    if (body.screener_email !== undefined) {
+      updates.screenerEmail = body.screener_email;
+    }
+    if (body.screener_password !== undefined && body.screener_password) {
+      // Only update password if provided (non-empty)
+      updates.screenerPassword = body.screener_password;
     }
     if (body.user_mappings !== undefined) {
       updates.symbolMappings = JSON.stringify(body.user_mappings);

@@ -1,1 +1,0 @@
-ALTER TABLE `settings` ADD `ai_enabled` integer DEFAULT true;

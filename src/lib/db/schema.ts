@@ -140,6 +140,8 @@ export const settings = sqliteTable("settings", {
   }).default("balanced"),
   notificationEmail: text("notification_email"),
   screenerUrls: text("screener_urls"), // JSON array stored as text
+  screenerEmail: text("screener_email"), // Screener.in login email
+  screenerPassword: text("screener_password"), // Screener.in password
   symbolMappings: text("symbol_mappings"), // JSON object stored as text
   toolConfig: text("tool_config"), // JSON: { toolName: { enabled: boolean, ...options } }
   aiEnabled: integer("ai_enabled", { mode: "boolean" }).default(true),
@@ -213,9 +215,11 @@ export const stockIntel = sqliteTable("stock_intel", {
 
 export const watchlist = sqliteTable("watchlist", {
   symbol: text("symbol").primaryKey(),
+  name: text("name"), // Stock name (useful for BSE code stocks)
   addedAt: text("added_at").$defaultFn(() => new Date().toISOString()),
   source: text("source").default("manual"), // 'screener', 'manual', 'ai_discovery'
   notes: text("notes"),
+  interesting: integer("interesting", { mode: "boolean" }).default(false), // Mark as priority/interesting
 });
 
 // ============================================================================
@@ -396,4 +400,79 @@ export const userTableRows = sqliteTable(
     updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
   },
   (table) => [index("idx_user_table_rows_table_id").on(table.tableId)]
+);
+
+// ============================================================================
+// Company Financials - Structured quarterly/annual financial data
+// ============================================================================
+
+export const companyFinancials = sqliteTable(
+  "company_financials",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    symbol: text("symbol").notNull(),
+    periodType: text("period_type", {
+      enum: ["annual", "quarterly"],
+    }).notNull(),
+    reportDate: text("report_date").notNull(), // ISO date string
+
+    // P&L (in Crores)
+    sales: real("sales"),
+    operatingProfit: real("operating_profit"),
+    netProfit: real("net_profit"),
+    eps: real("eps"),
+    opmPercent: real("opm_percent"),
+
+    // Balance Sheet
+    equity: real("equity"),
+    reserves: real("reserves"),
+    borrowings: real("borrowings"),
+    receivables: real("receivables"),
+    inventory: real("inventory"),
+
+    // Cash Flow
+    operatingCashFlow: real("operating_cash_flow"),
+    investingCashFlow: real("investing_cash_flow"),
+    financingCashFlow: real("financing_cash_flow"),
+
+    // Price at report date
+    price: real("price"),
+
+    // Metadata
+    source: text("source").default("screener"),
+    updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index("idx_company_financials_symbol").on(table.symbol),
+    index("idx_company_financials_period").on(table.symbol, table.reportDate),
+  ]
+);
+
+// ============================================================================
+// Concall Highlights - AI-extracted key points from earnings calls
+// ============================================================================
+
+export const concallHighlights = sqliteTable(
+  "concall_highlights",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    symbol: text("symbol").notNull(),
+    quarter: text("quarter").notNull(), // "Q3 FY25"
+    callDate: text("call_date"), // ISO date
+    sourceUrl: text("source_url"),
+
+    // Structured highlights (stored as text, can be JSON)
+    managementGuidance: text("management_guidance"),
+    keyNumbers: text("key_numbers"), // JSON: {"capex": "500cr", "orderBook": "2000cr"}
+    positives: text("positives"),
+    risksDiscussed: text("risks_discussed"),
+    analystConcerns: text("analyst_concerns"),
+
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("idx_concall_highlights_symbol").on(table.symbol)]
 );

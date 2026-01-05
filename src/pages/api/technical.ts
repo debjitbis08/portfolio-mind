@@ -7,6 +7,7 @@
 import type { APIRoute } from "astro";
 import { requireAuth } from "../../lib/middleware/requireAuth";
 import { db, getHoldings, schema } from "../../lib/db";
+import { eq } from "drizzle-orm";
 import {
   getTechnicalData,
   type TechnicalData,
@@ -20,8 +21,25 @@ export const GET: APIRoute = async ({ request }) => {
   const authError = await requireAuth(request);
   if (authError) return authError;
 
+  const url = new URL(request.url);
+  const requestedSymbol = url.searchParams.get("symbol")?.toUpperCase();
+
   try {
-    const technicalData = await db.select().from(schema.technicalData);
+    let query = db.select().from(schema.technicalData);
+
+    if (requestedSymbol) {
+      // In technicalData table, the symbol is the Yahoo symbol (stored via POST)
+      // or the mapped symbol. We'll try both just in case, but usually it's the mapped one.
+      const mappings = await getSymbolMappings();
+      const mappedSymbol = mappings[requestedSymbol] || requestedSymbol;
+
+      query = db
+        .select()
+        .from(schema.technicalData)
+        .where(eq(schema.technicalData.symbol, mappedSymbol)) as any;
+    }
+
+    const technicalData = await query;
 
     // Convert to snake_case for API consistency
     const formatted = technicalData.map((t) => ({
@@ -54,30 +72,38 @@ export const POST: APIRoute = async ({ request }) => {
   if (authError) return authError;
 
   try {
-    // Get holdings
-    const holdings = await getHoldings();
-
-    if (holdings.length === 0) {
-      return new Response(JSON.stringify({ success: true, updated: 0 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    const body = await request.json().catch(() => ({}));
+    const { symbol } = body;
 
     // Fetch mappings once
     const mappings = await getSymbolMappings();
     const mapSymbol = (s: string) => mappings[s] || s;
 
-    // Get unique symbols with Yahoo mapping
-    const symbols = [...new Set(holdings.map((h) => mapSymbol(h.symbol)))];
+    let symbolsToRefresh: string[] = [];
+
+    if (symbol) {
+      // Refresh single symbol
+      symbolsToRefresh = [mapSymbol(symbol)];
+    } else {
+      // Get all holdings
+      const holdings = await getHoldings();
+      if (holdings.length === 0) {
+        return new Response(JSON.stringify({ success: true, updated: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      // Get unique symbols with Yahoo mapping
+      symbolsToRefresh = [...new Set(holdings.map((h) => mapSymbol(h.symbol)))];
+    }
 
     const results: TechnicalData[] = [];
     const errors: string[] = [];
 
     // Fetch technical data for each symbol
-    for (const symbol of symbols) {
+    for (const s of symbolsToRefresh) {
       try {
-        const data = await getTechnicalData(symbol);
+        const data = await getTechnicalData(s);
         if (data) {
           results.push(data);
 
@@ -85,7 +111,7 @@ export const POST: APIRoute = async ({ request }) => {
           await db
             .insert(schema.technicalData)
             .values({
-              symbol,
+              symbol: s,
               currentPrice: data.currentPrice,
               rsi14: data.rsi14,
               sma50: data.sma50,
@@ -108,7 +134,7 @@ export const POST: APIRoute = async ({ request }) => {
             });
         }
       } catch (err) {
-        errors.push(`${symbol}: ${err}`);
+        errors.push(`${s}: ${err}`);
       }
     }
 

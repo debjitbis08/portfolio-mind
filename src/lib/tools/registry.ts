@@ -79,7 +79,7 @@ export interface ToolRegistration {
 const browseScreenerDeclaration: ToolDeclaration = {
   name: "browse_screener",
   description:
-    "Get stocks from cached screener.in screens. Returns pre-filtered value stocks. Data is cached for 24 hours to prevent rate limiting. Call this FIRST for discovery.",
+    "Get enriched stocks from cached screener.in screens. Returns stocks with fundamentals (PE, ROE, sector), technicals (RSI, SMAs), research flags (has_valuepickr_thesis, has_user_research), and opportunity_score (0-100). Stocks are pre-sorted by opportunity_score descending. PRIORITIZE opportunity_score >= 50. Call this FIRST for discovery.",
   parameters: {
     type: Type.OBJECT,
     properties: {

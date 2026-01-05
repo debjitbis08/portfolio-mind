@@ -15,6 +15,11 @@ interface ScreenerConfig {
   screenUrls: string[];
 }
 
+interface StockInfo {
+  symbol: string;
+  name: string;
+}
+
 interface ImportResult {
   url: string;
   symbols: string[];
@@ -50,7 +55,7 @@ export class ScreenerService {
     });
 
     const results: ImportResult[] = [];
-    let allSymbols: string[] = [];
+    let allStocks: StockInfo[] = [];
 
     try {
       const page = await browser.newPage();
@@ -78,10 +83,10 @@ export class ScreenerService {
       for (const url of config.screenUrls) {
         console.log(`[Screener] Processing: ${url}`);
         try {
-          const symbols = await this.extractSymbolsFromScreen(page, url);
-          results.push({ url, symbols });
-          allSymbols = [...allSymbols, ...symbols];
-          console.log(`[Screener] Found ${symbols.length} symbols from ${url}`);
+          const stocks = await this.extractStocksFromScreen(page, url);
+          results.push({ url, symbols: stocks.map((s) => s.symbol) });
+          allStocks = [...allStocks, ...stocks];
+          console.log(`[Screener] Found ${stocks.length} stocks from ${url}`);
         } catch (error) {
           const errorMsg =
             error instanceof Error ? error.message : "Unknown error";
@@ -91,21 +96,29 @@ export class ScreenerService {
         await randomDelay(2000, 4000);
       }
 
-      // Step 3: Save all symbols to watchlist
-      if (allSymbols.length > 0) {
-        const uniqueSymbols = [...new Set(allSymbols)];
+      // Step 3: Save all stocks to watchlist (dedupe by symbol)
+      if (allStocks.length > 0) {
+        const stockMap = new Map<string, StockInfo>();
+        for (const stock of allStocks) {
+          const key = stock.symbol.toUpperCase();
+          if (!stockMap.has(key)) {
+            stockMap.set(key, stock);
+          }
+        }
 
-        for (const symbol of uniqueSymbols) {
+        for (const stock of stockMap.values()) {
           await db
             .insert(schema.watchlist)
             .values({
-              symbol: symbol.toUpperCase(),
+              symbol: stock.symbol.toUpperCase(),
+              name: stock.name || null,
               source: "screener",
               notes: "Imported from Screener.in",
             })
             .onConflictDoUpdate({
               target: schema.watchlist.symbol,
               set: {
+                name: stock.name || null,
                 source: "screener",
                 notes: "Imported from Screener.in",
                 addedAt: new Date().toISOString(),
@@ -114,11 +127,11 @@ export class ScreenerService {
         }
 
         console.log(
-          `[Screener] Saved ${uniqueSymbols.length} unique symbols to watchlist`
+          `[Screener] Saved ${stockMap.size} unique stocks to watchlist`
         );
       }
 
-      return { results, totalSymbols: [...new Set(allSymbols)].length };
+      return { results, totalSymbols: allStocks.length };
     } catch (error) {
       console.error("[Screener] Import Error:", error);
       await this.saveDebugScreenshot(browser);
@@ -194,12 +207,12 @@ export class ScreenerService {
   }
 
   /**
-   * Extract symbols from a screen URL
+   * Extract stocks (symbol + name) from a screen URL
    */
-  private static async extractSymbolsFromScreen(
+  private static async extractStocksFromScreen(
     page: Page,
     screenUrl: string
-  ): Promise<string[]> {
+  ): Promise<StockInfo[]> {
     await page.goto(screenUrl, {
       waitUntil: "domcontentloaded",
       timeout: 60000,
@@ -218,7 +231,7 @@ export class ScreenerService {
 
     await randomDelay(500, 1000);
 
-    const symbols = await page.evaluate(() => {
+    const stocks = await page.evaluate(() => {
       const links = Array.from(
         document.querySelectorAll(
           'table.data-table tbody tr td a[href^="/company/"]'
@@ -228,12 +241,15 @@ export class ScreenerService {
         .map((link) => {
           const href = link.getAttribute("href") || "";
           const parts = href.split("/");
-          return parts[2];
+          const symbol = parts[2] || "";
+          // Get the visible text as the stock name
+          const name = link.textContent?.trim() || symbol;
+          return { symbol, name };
         })
-        .filter((s) => s && s.length > 0);
+        .filter((s) => s.symbol && s.symbol.length > 0);
     });
 
-    return symbols;
+    return stocks;
   }
 
   /**

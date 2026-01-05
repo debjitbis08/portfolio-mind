@@ -202,21 +202,23 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
 ## Your Task (IMPORTANT: Focus on DISCOVERY!)
 
 1. **REVIEW PREVIOUS SUGGESTIONS**: If you have pending suggestions above, evaluate them first
-2. **DISCOVERY PHASE**: Use \`browse_screener\` to get stocks from my watchlist screens
-   - Look for stocks that are NOT already in my portfolio
-   - My current holdings are: ${holdingSymbols.join(", ")}
-   - Find NEW opportunities from the screener list!
+2. **DISCOVERY PHASE**: Use \`browse_screener\` to get enriched stock data from my watchlist
+   - Stocks are pre-sorted by opportunity_score (0-100)
+   - **PRIORITIZE**: opportunity_score >= 50 (good thesis + timing)
+   - **FOCUS ON**: value_zone=true stocks (good accumulation timing)
+   - **RESPECT**: has_user_research=true (my documented conviction)
+   - Look for stocks NOT already in my portfolio: ${holdingSymbols.join(", ")}
 
-3. **RESEARCH PHASE**: For promising NEW stocks (not in holdings):
-   - Use \`get_stock_thesis\` to understand the investment story
+3. **RESEARCH PHASE**: For top opportunity stocks (pick 2-4 highest scores):
+   - Use \`get_company_knowledge\` first if has_user_research=true
+   - Use \`get_stock_thesis\` if has_valuepickr_thesis=true
    - Use \`get_stock_news\` to check recent sentiment
 
-4. **TIMING CHECK**: Use \`get_technicals\` to verify if NOW is a good entry point
+4. **TIMING CHECK**: Technicals are already in screener data (rsi_14, price_vs_sma50/200)
+   - Only call \`get_technicals\` if you need more detail
 
-5. **OUTPUT**: Recommend stocks with updated analysis. Include previous suggestions if still valid.
-
-Focus on finding 1-3 NEW stock opportunities from the screener that would diversify my portfolio.
-Only recommend existing holdings if there's a clear action (add more in value zone, or strategic rotation).`;
+5. **OUTPUT**: Recommend 1-3 NEW opportunities from screener.
+   Include previous suggestions if still valid.`;
 
     // Build config with tools (filtered by enabled status)
     const mergedConfig = getMergedToolConfig(toolConfig ?? null);

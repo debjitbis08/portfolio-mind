@@ -16,29 +16,39 @@ export const GET: APIRoute = async ({ request, url }) => {
 
   try {
     const statusFilter = url.searchParams.get("status") || "pending";
+    const symbol = url.searchParams.get("symbol");
 
     // Build query conditions
-    let statusCondition;
+    const conditions = [];
+
     if (statusFilter === "history") {
-      // "history" includes everything that's resolved/not active
-      statusCondition = inArray(schema.suggestions.status, [
-        "approved",
-        "rejected",
-        "superseded",
-        "expired",
-      ]);
-    } else {
-      // Simple equality for specific status (e.g. "pending")
-      statusCondition = eq(
-        schema.suggestions.status,
-        statusFilter as "pending" // ... TS cast logic
+      conditions.push(
+        inArray(schema.suggestions.status, [
+          "approved",
+          "rejected",
+          "superseded",
+          "expired",
+        ])
       );
+    } else {
+      conditions.push(eq(schema.suggestions.status, statusFilter as any));
     }
+
+    if (symbol) {
+      conditions.push(eq(schema.suggestions.symbol, symbol.toUpperCase()));
+    }
+
+    const whereCondition =
+      conditions.length > 0
+        ? conditions.length === 1
+          ? conditions[0]
+          : (await import("drizzle-orm")).and(...conditions)
+        : undefined;
 
     const suggestions = await db
       .select()
       .from(schema.suggestions)
-      .where(statusCondition)
+      .where(whereCondition)
       .orderBy(desc(schema.suggestions.createdAt));
 
     // Convert to snake_case for API response consistency
