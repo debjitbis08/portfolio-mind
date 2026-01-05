@@ -1,6 +1,6 @@
 # User Knowledge Base Project
 
-## Status: PROPOSED 📋
+## Status: COMPLETED ✅
 
 ## Goal
 
@@ -506,8 +506,8 @@ The default landing tab showing a stock-at-a-glance summary:
 
 - [x] Full-text search across all content (FTS5)
 - [x] Tags/categories for organization
-- [ ] Export functionality
-- [ ] Mobile-friendly views
+- [ ] Export functionality (DEFERRED)
+- [ ] Mobile-friendly views (DEFERRED)
 
 ---
 
