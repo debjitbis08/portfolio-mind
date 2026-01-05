@@ -29,12 +29,17 @@ export default defineConfig({
         context: "server",
         access: "secret",
       }),
-      // Database path - optional, defaults to ./data/investor.db
       DATABASE_PATH: envField.string({
         context: "server",
         access: "secret",
         optional: true,
         default: "./data/investor.db",
+      }),
+      // Metals Dev API - for commodity prices
+      METALS_API_KEY: envField.string({
+        context: "server",
+        access: "secret",
+        optional: true,
       }),
     },
   },

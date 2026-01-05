@@ -138,9 +138,9 @@ if (!session) {
               Pending
             </button>
             <button
-              id="filter-superseded"
+              id="filter-history"
               class="suggestion-filter px-2 py-1 text-xs bg-surface2 text-subtext0 hover:bg-surface1 rounded transition-colors"
-              data-status="superseded"
+              data-status="history"
             >
               History
             </button>
@@ -836,6 +836,9 @@ if (!session) {
 
           loadingEl.classList.add("hidden");
           listEl.classList.remove("hidden");
+
+          // Mount action notes on the newly created elements
+          mountActionNotes();
 
           // Add click handlers for approve/reject (only for pending)
           if (status === "pending") {

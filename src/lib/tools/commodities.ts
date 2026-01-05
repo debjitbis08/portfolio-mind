@@ -7,6 +7,7 @@
 
 import { registerToolExecutor, type ToolResponse } from "./registry";
 import { getCached, setCache } from "./cache";
+import { METALS_API_KEY } from "astro:env/server";
 
 // metals.dev API (free tier)
 const METALS_API_BASE = "https://api.metals.dev/v1";
@@ -94,7 +95,7 @@ async function getCommodityPrices(
   }
 
   // Get API key from environment
-  const apiKey = process.env.METALS_API_KEY;
+  const apiKey = METALS_API_KEY;
   if (!apiKey) {
     // If no API key, return a helpful message with mock data for development
     console.warn(

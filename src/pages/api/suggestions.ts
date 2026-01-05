@@ -7,7 +7,7 @@
 import type { APIRoute } from "astro";
 import { requireAuth } from "../../lib/middleware/requireAuth";
 import { db, schema } from "../../lib/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 
 export const GET: APIRoute = async ({ request, url }) => {
   // Auth check
@@ -17,20 +17,28 @@ export const GET: APIRoute = async ({ request, url }) => {
   try {
     const statusFilter = url.searchParams.get("status") || "pending";
 
+    // Build query conditions
+    let statusCondition;
+    if (statusFilter === "history") {
+      // "history" includes everything that's resolved/not active
+      statusCondition = inArray(schema.suggestions.status, [
+        "approved",
+        "rejected",
+        "superseded",
+        "expired",
+      ]);
+    } else {
+      // Simple equality for specific status (e.g. "pending")
+      statusCondition = eq(
+        schema.suggestions.status,
+        statusFilter as "pending" // ... TS cast logic
+      );
+    }
+
     const suggestions = await db
       .select()
       .from(schema.suggestions)
-      .where(
-        eq(
-          schema.suggestions.status,
-          statusFilter as
-            | "pending"
-            | "approved"
-            | "rejected"
-            | "expired"
-            | "superseded"
-        )
-      )
+      .where(statusCondition)
       .orderBy(desc(schema.suggestions.createdAt));
 
     // Convert to snake_case for API response consistency

@@ -41,18 +41,24 @@ export interface NewsIntel {
   fetched_at: string;
 }
 
-// Known paywall indicators
+// Known paywall indicators - more specific phrases to avoid false positives
+// from site-wide "subscribe" buttons in nav/footer
 const PAYWALL_INDICATORS = [
-  "subscribe",
-  "subscription",
+  "subscribe to continue",
+  "subscribe to read",
+  "subscription required",
   "sign in to read",
-  "login to continue",
+  "login to continue reading",
   "premium content",
   "exclusive to subscribers",
-  "register to read",
+  "register to read the full",
   "unlock this article",
-  "member-only",
-  "already a member",
+  "unlock full article",
+  "member-only content",
+  "already a subscriber",
+  "become a member to read",
+  "this content is for subscribers",
+  "full article available to",
 ];
 
 // Known free sources (usually accessible)
@@ -100,23 +106,24 @@ async function fetchArticleContent(
 
     const html = await response.text();
 
-    // Check for paywall indicators
-    const htmlLower = html.toLowerCase();
+    // Extract main content FIRST (this removes nav, header, footer, etc.)
+    const content = extractMainContent(html);
+
+    if (!content || content.length < 200) {
+      return null;
+    }
+
+    // Check for paywall indicators in the EXTRACTED CONTENT, not raw HTML
+    // This avoids false positives from site-wide "subscribe" buttons
+    const contentLower = content.toLowerCase();
     for (const indicator of PAYWALL_INDICATORS) {
-      if (htmlLower.includes(indicator)) {
+      if (contentLower.includes(indicator)) {
         console.log(`[News] Skipping paywalled article: ${source}`);
         return null;
       }
     }
 
-    // Extract main content (simple extraction)
-    const content = extractMainContent(html);
-
-    if (content && content.length > 200) {
-      return content;
-    }
-
-    return null;
+    return content;
   } catch (error) {
     console.warn(`[News] Error fetching article from ${source}:`, error);
     return null;

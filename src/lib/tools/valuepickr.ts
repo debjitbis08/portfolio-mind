@@ -38,7 +38,22 @@ async function getStockThesis(
   try {
     console.log(`[ValuePickr Tool] Researching: ${query}`);
 
-    const intel = await ValuePickrService.getResearch(query.trim());
+    let intel = await ValuePickrService.getResearch(query.trim());
+
+    // RETRY LOGIC: If not found, try stripping common suffixes or simplifying the name
+    if (!intel) {
+      // 1. Try cleaning suffixes
+      const cleanQuery = query
+        .replace(/\s+(Limited|Ltd|Corporation|Corp|Inc|Company|Co)\.?\s*$/i, "")
+        .replace(/\s+and\s+/i, " ") // Housing and Urban -> Housing Urban
+        .replace(/developmentoration/i, "Development") // Fix specific hallucination if persistent
+        .trim();
+
+      if (cleanQuery !== query.trim() && cleanQuery.length > 2) {
+        console.log(`[ValuePickr Tool] Retry: "${query}" -> "${cleanQuery}"`);
+        intel = await ValuePickrService.getResearch(cleanQuery);
+      }
+    }
 
     if (!intel) {
       return {

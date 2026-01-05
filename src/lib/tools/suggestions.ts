@@ -7,7 +7,7 @@
 
 import { registerToolExecutor, type ToolResponse } from "./registry";
 import { db, schema } from "../db";
-import { eq, and, inArray, desc } from "drizzle-orm";
+import { eq, and, inArray, desc, gt } from "drizzle-orm";
 
 interface GetPreviousSuggestionsArgs {
   symbols?: string[];
@@ -157,41 +157,127 @@ export async function supersedeSuggestion(
 /**
  * Get pending suggestions for specific symbols (for context injection)
  */
-export async function getPendingSuggestionsForSymbols(
-  symbols: string[]
-): Promise<
+/**
+ * Get suggestions context for AI (Pending + Recent History)
+ */
+export async function getSuggestionsContext(symbols?: string[]): Promise<
   Array<{
     id: string;
     symbol: string;
     action: string;
     rationale: string;
     confidence: number | null;
+    status: string; // 'pending' | 'approved' | 'rejected'
     createdAt: string | null;
+    notes: string[];
   }>
 > {
-  if (symbols.length === 0) return [];
+  const cleanSymbols = symbols?.map((s) => s.trim().toUpperCase()) || [];
 
-  const cleanSymbols = symbols.map((s) => s.trim().toUpperCase());
+  // 1. Fetch ALL pending suggestions (or filter by symbol if provided)
+  const pendingConditions = [eq(schema.suggestions.status, "pending")];
+  if (cleanSymbols.length > 0) {
+    pendingConditions.push(inArray(schema.suggestions.symbol, cleanSymbols));
+  }
 
-  const results = await db
-    .select({
-      id: schema.suggestions.id,
-      symbol: schema.suggestions.symbol,
-      action: schema.suggestions.action,
-      rationale: schema.suggestions.rationale,
-      confidence: schema.suggestions.confidence,
-      createdAt: schema.suggestions.createdAt,
-    })
-    .from(schema.suggestions)
-    .where(
-      and(
-        eq(schema.suggestions.status, "pending"),
-        inArray(schema.suggestions.symbol, cleanSymbols)
+  // 2. Fetch RECENT resolved suggestions (last 30 days)
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const historyConditions = [
+    inArray(schema.suggestions.status, ["approved", "rejected"]),
+    gt(schema.suggestions.createdAt, thirtyDaysAgo.toISOString()),
+  ];
+  if (cleanSymbols.length > 0) {
+    historyConditions.push(inArray(schema.suggestions.symbol, cleanSymbols));
+  }
+
+  // Execute queries
+  const [pendingRows, historyRows] = await Promise.all([
+    db
+      .select({
+        id: schema.suggestions.id,
+        symbol: schema.suggestions.symbol,
+        action: schema.suggestions.action,
+        rationale: schema.suggestions.rationale,
+        confidence: schema.suggestions.confidence,
+        status: schema.suggestions.status,
+        createdAt: schema.suggestions.createdAt,
+        noteContent: schema.actionNotes.content,
+      })
+      .from(schema.suggestions)
+      .leftJoin(
+        schema.actionNotes,
+        eq(schema.suggestions.id, schema.actionNotes.suggestionId)
       )
-    )
-    .orderBy(desc(schema.suggestions.createdAt));
+      .where(and(...pendingConditions))
+      .orderBy(desc(schema.suggestions.createdAt))
+      .limit(50), // Cap pending to 50
 
-  return results;
+    db
+      .select({
+        id: schema.suggestions.id,
+        symbol: schema.suggestions.symbol,
+        action: schema.suggestions.action,
+        rationale: schema.suggestions.rationale,
+        confidence: schema.suggestions.confidence,
+        status: schema.suggestions.status,
+        createdAt: schema.suggestions.createdAt,
+        noteContent: schema.actionNotes.content,
+      })
+      .from(schema.suggestions)
+      .leftJoin(
+        schema.actionNotes,
+        eq(schema.suggestions.id, schema.actionNotes.suggestionId)
+      )
+      .where(and(...historyConditions))
+      .orderBy(desc(schema.suggestions.createdAt))
+      .limit(20), // Cap history to 20
+  ]);
+
+  // Merge and group by ID
+  const allRows = [...pendingRows, ...historyRows];
+
+  const map = new Map<
+    string,
+    {
+      id: string;
+      symbol: string;
+      action: string;
+      rationale: string;
+      confidence: number | null;
+      status: string;
+      createdAt: string | null;
+      notes: string[];
+    }
+  >();
+
+  for (const row of allRows) {
+    if (!map.has(row.id)) {
+      map.set(row.id, {
+        id: row.id,
+        symbol: row.symbol,
+        action: row.action,
+        rationale: row.rationale,
+        confidence: row.confidence,
+        status: row.status || "pending",
+        createdAt: row.createdAt,
+        notes: [],
+      });
+    }
+
+    if (row.noteContent) {
+      map.get(row.id)!.notes.push(row.noteContent);
+    }
+  }
+
+  // Sort by created date desc
+  return Array.from(map.values()).sort((a, b) => {
+    return (
+      new Date(b.createdAt || 0).getTime() -
+      new Date(a.createdAt || 0).getTime()
+    );
+  });
 }
 
 // Register the executor

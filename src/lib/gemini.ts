@@ -15,7 +15,7 @@ import {
   type ToolConfig,
   type Citation,
 } from "./tools";
-import { getPendingSuggestionsForSymbols } from "./tools/suggestions";
+import { getSuggestionsContext } from "./tools/suggestions";
 
 // ============================================================================
 // Types
@@ -128,39 +128,71 @@ export class GeminiService {
     // User message with holdings
     const holdingSymbols = holdings.map((h) => h.symbol);
 
-    // Fetch previous suggestions for context injection
-    progress(8, "Checking for previous suggestions...");
-    const previousSuggestions = await getPendingSuggestionsForSymbols(
-      holdingSymbols
+    // Fetch previous suggestions context (Pending + History)
+    progress(8, "Fetching suggestion history...");
+    const suggestionsContext = await getSuggestionsContext();
+
+    // Split into Pending vs History
+    const pendingSuggestions = suggestionsContext.filter(
+      (s) => s.status === "pending"
+    );
+    const historySuggestions = suggestionsContext.filter((s) =>
+      ["approved", "rejected"].includes(s.status)
     );
 
-    // Build previous suggestions context
+    // Build context string
     let previousSuggestionsContext = "";
-    if (previousSuggestions.length > 0) {
-      previousSuggestionsContext = `## Your Previous Pending Suggestions
 
-You made the following recommendations previously that are still pending review:
+    if (suggestionsContext.length > 0) {
+      previousSuggestionsContext += `## Previous Suggestions & Context\n\n`;
 
-${previousSuggestions
-  .map(
-    (s) =>
-      `- **${s.symbol}**: ${s.action} (${
-        s.createdAt
-          ? new Date(s.createdAt).toLocaleDateString()
-          : "unknown date"
-      })${s.confidence ? ` [Confidence: ${s.confidence}/10]` : ""}
-  Rationale: ${s.rationale}`
-  )
-  .join("\n\n")}
+      if (pendingSuggestions.length > 0) {
+        previousSuggestionsContext += `### ⚠️ PENDING REVIEW (Action Required)\n`;
+        previousSuggestionsContext += `You previously recommended these. You MUST decide: STILL VALID, UPDATE, or INVALIDATE.\n\n`;
+        previousSuggestionsContext += pendingSuggestions
+          .map(
+            (s) =>
+              `- **${s.symbol}**: ${s.action} (${
+                s.createdAt
+                  ? new Date(s.createdAt).toLocaleDateString()
+                  : "unknown date"
+              }) [Confidence: ${s.confidence || "?"}/10]
+  Rationale: ${s.rationale}${
+                s.notes && s.notes.length > 0
+                  ? `\n  User Notes:\n${s.notes
+                      .map((n) => `  - "${n}"`)
+                      .join("\n")}`
+                  : ""
+              }`
+          )
+          .join("\n\n");
+        previousSuggestionsContext += `\n\n`;
+      }
 
-**IMPORTANT**: For each previous suggestion, you MUST decide:
-1. **STILL VALID** - If your analysis confirms it's still a good recommendation, include it again in your output
-2. **UPDATE** - If conditions changed, provide a new recommendation with updated rationale
-3. **INVALIDATE** - If the thesis is broken or you no longer recommend it, explicitly state this
-
-Do NOT ignore your previous suggestions - the user relies on consistency.
-
-`;
+      if (historySuggestions.length > 0) {
+        previousSuggestionsContext += `### 📜 RECENT HISTORY (Context Only)\n`;
+        previousSuggestionsContext += `Recent user decisions on your suggestions. Use this to learn user preferences.\n\n`;
+        previousSuggestionsContext += historySuggestions
+          .map(
+            (s) =>
+              `- **${s.symbol}**: ${
+                s.action
+              } -> **${s.status.toUpperCase()}** (${
+                s.createdAt
+                  ? new Date(s.createdAt).toLocaleDateString()
+                  : "unknown date"
+              })
+  Your Rationale: ${s.rationale}${
+                s.notes && s.notes.length > 0
+                  ? `\n  User Notes:\n${s.notes
+                      .map((n) => `  - "${n}"`)
+                      .join("\n")}`
+                  : ""
+              }`
+          )
+          .join("\n\n");
+        previousSuggestionsContext += `\n\n`;
+      }
     }
 
     const userMessage = `${previousSuggestionsContext}## Current Portfolio
@@ -319,6 +351,12 @@ Your primary goal is WEALTH BUILDING through patient accumulation of quality bus
 - \`get_technicals\`: Get RSI, SMA50, SMA200 for timing signals
 - \`check_wait_zone\`: Check if a stock is overextended (timing only)
 - \`get_commodity_prices\`: Get gold/silver spot prices in INR per gram
+
+## Important: Tool Usage & Retry Logic
+- IF \`get_stock_thesis\` or \`get_stock_news\` returns "Not Found": **YOU MUST RETRY** with a different query.
+  - If you tried the Company Name (e.g., "Reliance Industries"), retry with the Symbol (e.g., "RELIANCE").
+  - If you tried the Symbol, retry with the full Company Name.
+  - This is critical for finding data. Do not give up after one failed attempt.
 
 ## Tool Priority & Trust Hierarchy
 1. **User's Own Research** = HIGHEST TRUST - always check \`get_company_knowledge\` first!
