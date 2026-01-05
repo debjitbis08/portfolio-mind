@@ -41,6 +41,7 @@ import "./reddit";
 import "./suggestions";
 import "./commodities";
 import "./knowledge";
+import "./trades";
 
 // Export Citation type for use in gemini.ts
 export { type Citation } from "./knowledge";

@@ -239,6 +239,28 @@ const getCompanyKnowledgeDeclaration: ToolDeclaration = {
   },
 };
 
+const getRecentTradesDeclaration: ToolDeclaration = {
+  name: "get_recent_trades",
+  description:
+    "Get recent buy/sell transactions to understand trading activity. Use this to check when the user last bought/sold a stock, understand position building, and avoid recommending stocks that were just traded. IMPORTANT: Check this before suggesting trades on stocks the user may have recently bought/sold.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      symbol: {
+        type: Type.STRING,
+        description:
+          "Optional: Filter to a specific stock symbol. Leave empty to get all recent trades.",
+      },
+      days_back: {
+        type: Type.NUMBER,
+        description:
+          "How many days of trade history to fetch. Default is 30. Max is 365.",
+      },
+    },
+    required: [],
+  },
+};
+
 // ============================================================================
 // Registry
 // ============================================================================
@@ -342,6 +364,18 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       source: "internal",
       defaultConfig: {
         enabled: true,
+      },
+    },
+  ],
+  [
+    "get_recent_trades",
+    {
+      declaration: getRecentTradesDeclaration,
+      execute: notImplemented,
+      source: "internal",
+      defaultConfig: {
+        enabled: true,
+        defaultDaysBack: 30,
       },
     },
   ],
