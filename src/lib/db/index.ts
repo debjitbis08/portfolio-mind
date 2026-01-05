@@ -105,67 +105,6 @@ function runMigrations(): void {
     }
   }
 
-  // Apply schema fixes for columns that might be missing on legacy databases
-  // These are safe to run multiple times (will fail silently if column exists)
-  applySchemaFixes();
-}
-
-/**
- * Apply schema fixes for columns that might be missing on legacy databases.
- * SQLite doesn't support IF NOT EXISTS for ALTER TABLE ADD COLUMN,
- * so we catch the "duplicate column" error and ignore it.
- */
-function applySchemaFixes(): void {
-  const fixes = [
-    // Phase 3: Links Store - fetched_content column
-    {
-      table: "company_links",
-      column: "fetched_content",
-      sql: "ALTER TABLE company_links ADD COLUMN fetched_content TEXT",
-    },
-    // Phase 5: Agent Integration - citations column
-    {
-      table: "suggestions",
-      column: "citations",
-      sql: "ALTER TABLE suggestions ADD COLUMN citations TEXT",
-    },
-    // Phase 6: Tags columns
-    {
-      table: "company_research",
-      column: "tags",
-      sql: "ALTER TABLE company_research ADD COLUMN tags TEXT",
-    },
-    {
-      table: "company_notes",
-      column: "tags",
-      sql: "ALTER TABLE company_notes ADD COLUMN tags TEXT",
-    },
-    {
-      table: "company_links",
-      column: "tags",
-      sql: "ALTER TABLE company_links ADD COLUMN tags TEXT",
-    },
-  ];
-
-  for (const fix of fixes) {
-    try {
-      sqlite.exec(fix.sql);
-      console.log(`[DB] Added missing column: ${fix.table}.${fix.column}`);
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes("duplicate column")
-      ) {
-        // Column already exists, this is fine
-      } else {
-        console.warn(
-          `[DB] Could not apply fix for ${fix.table}.${fix.column}:`,
-          error
-        );
-      }
-    }
-  }
-
   // Populate FTS indexes for existing data (if FTS tables exist)
   populateFTSIndexes();
 }

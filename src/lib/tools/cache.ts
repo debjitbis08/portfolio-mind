@@ -17,6 +17,7 @@ const SOURCE_TTL: Record<string, number> = {
   google_news: 2 * 60 * 60, // 2 hours - news changes frequently
   reddit: 1 * 60 * 60, // 1 hour - sentiment can shift
   yahoo: 30 * 60, // 30 minutes - prices change during market
+  yahoo_chart: 30 * 60, // 30 minutes - chart data, same as prices
   metals_api: 30 * 60, // 30 minutes - commodity prices change during market
   internal: 5 * 60, // 5 minutes - internal computations
   screener: 24 * 60 * 60, // 24 hours - already cached in watchlist

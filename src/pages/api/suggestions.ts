@@ -54,6 +54,8 @@ export const GET: APIRoute = async ({ request, url }) => {
         rationale: s.rationale,
         technical_score: s.technicalScore,
         confidence: s.confidence,
+        quantity: s.quantity,
+        allocation_amount: s.allocationAmount,
         current_price: s.currentPrice,
         target_price: s.targetPrice,
         status: s.status,

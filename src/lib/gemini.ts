@@ -430,6 +430,7 @@ User research represents their conviction and deep analysis - respect it.
     "symbol": "STOCKNAME",
     "quantity": 10,
     "rationale": "Strong thesis because [story reason]. Timing favorable with RSI at X.",
+    "confidence": 8,
     "technical_score": 85,
     "allocation_amount": 50000,
     "cash_deployment_notes": "Optional: when/why to deploy this cash later",
@@ -442,6 +443,10 @@ User research represents their conviction and deep analysis - respect it.
   }
 ]
 \`\`\`
+
+**Field Definitions:**
+- \`confidence\` (1-10): Your overall conviction in this recommendation. 1=speculative, 5=moderate conviction, 10=extremely high conviction. This reflects how strongly you believe the user should act on this.
+- \`technical_score\` (0-100): Pure technical setup quality - RSI positioning, SMA proximity, chart patterns. A stock can have high technical_score but low confidence (great entry but uncertain thesis) or vice versa.
 
 **Citation Types:**
 - \`research\`, \`link\`, \`note\`, \`table\` = User's own content (include \`id\` field)
@@ -519,7 +524,8 @@ Better to do nothing than to make a low-conviction trade.`;
             action: action as "BUY" | "SELL" | "MOVE" | "RAISE_CASH",
             reason: s.rationale || s.reason || "No reason provided",
             rationale: s.rationale || s.reason,
-            confidence: s.technical_score || 80,
+            confidence:
+              s.confidence ?? Math.round((s.technical_score || 80) / 10),
             quantity: s.quantity || 0,
             allocation_amount: s.allocation_amount,
             sell_symbol: s.sell_symbol,

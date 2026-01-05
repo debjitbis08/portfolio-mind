@@ -36,6 +36,7 @@
     "better-sqlite3": "^12.5.0",
     "drizzle-orm": "^0.45.1",
     "fast-xml-parser": "^5.3.3",
+    "lightweight-charts": "^5.1.0",
     "linkedom": "^0.18.12",
     "markdown-it": "^14.1.0",
     "puppeteer": "^24.34.0",

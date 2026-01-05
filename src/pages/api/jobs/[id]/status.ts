@@ -236,6 +236,8 @@ export const GET: APIRoute = async ({ params, request }) => {
                 rationale: s.rationale || s.reason,
                 technicalScore: s.technical_score,
                 confidence: s.confidence,
+                quantity: s.quantity || null,
+                allocationAmount: s.allocation_amount || null,
                 currentPrice: holdings.find((h) => h.symbol === s.symbol)
                   ?.current_price,
               })

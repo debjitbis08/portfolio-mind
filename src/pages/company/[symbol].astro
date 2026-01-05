@@ -147,6 +147,9 @@ if (!symbol) {
             <div id="latest-suggestion" class="text-subtext1">Loading...</div>
           </div>
 
+          <!-- Price Chart -->
+          <div id="price-chart-container" class="mb-6"></div>
+
           <!-- Your Knowledge Summary -->
           <div class="bg-surface0 border border-surface1 rounded-xl p-4">
             <h3 class="text-sm font-medium text-subtext0 mb-3">
@@ -444,6 +447,7 @@ if (!symbol) {
     import CompanyNotes from "../../components/notes/CompanyNotes";
     import LinksList from "../../components/links/LinksList";
     import TablesList from "../../components/tables/TablesList";
+    import PriceChart from "../../components/charts/PriceChart";
 
     const SYMBOL = window.location.pathname.split("/").pop() || "";
 
@@ -451,6 +455,12 @@ if (!symbol) {
     window.notesMounted = false;
     window.linksMounted = false;
     window.tablesMounted = false;
+
+    // Mount PriceChart immediately (it's on the default Overview tab)
+    const chartContainer = document.getElementById("price-chart-container");
+    if (chartContainer) {
+      render(() => PriceChart({ symbol: SYMBOL }), chartContainer);
+    }
 
     window.mountResearch = function () {
       const container = document.getElementById("research-container");

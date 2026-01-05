@@ -112,6 +112,8 @@ export const suggestions = sqliteTable(
       enum: ["pending", "approved", "rejected", "expired", "superseded"],
     }).default("pending"),
     confidence: integer("confidence"), // 1-10 scale
+    quantity: integer("quantity"), // Shares to buy/sell
+    allocationAmount: real("allocation_amount"), // Amount in ₹ to allocate
     supersededBy: text("superseded_by"), // ID of newer suggestion
     supersededReason: text("superseded_reason"),
     citations: text("citations"), // JSON array of citation objects
