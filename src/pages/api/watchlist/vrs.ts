@@ -1,6 +1,7 @@
 /**
- * Manual VRS Research API
- * POST: Save or update manual research metrics for a stock
+ * VRS Research API
+ * GET: Fetch VRS research data for a stock (independent of watchlist)
+ * POST: Save or update research metrics for a stock
  * DELETE: Remove VRS research data for a stock
  */
 
@@ -9,6 +10,45 @@ import { requireAuth } from "../../../lib/middleware/requireAuth";
 import { db, schema } from "../../../lib/db";
 import { eq } from "drizzle-orm";
 import { addSource } from "../../../lib/utils/source-utils";
+
+export const GET: APIRoute = async ({ request }) => {
+  const authError = await requireAuth(request);
+  if (authError) return authError;
+
+  try {
+    const url = new URL(request.url);
+    const symbol = url.searchParams.get("symbol");
+
+    if (!symbol) {
+      return new Response(JSON.stringify({ error: "Symbol is required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const normalizedSymbol = symbol.toUpperCase().trim();
+
+    // Fetch VRS data directly from vrs_research table
+    const vrsData = await db
+      .select()
+      .from(schema.vrsResearch)
+      .where(eq(schema.vrsResearch.symbol, normalizedSymbol))
+      .limit(1);
+
+    return new Response(JSON.stringify({ vrs_research: vrsData[0] || null }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    console.error("Get VRS API error:", error);
+    return new Response(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : "Server error",
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+};
 
 export const POST: APIRoute = async ({ request }) => {
   const authError = await requireAuth(request);

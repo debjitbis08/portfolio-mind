@@ -78,12 +78,12 @@ export default function VRSSection(props: VRSSectionProps) {
   const fetchVrsData = async () => {
     setIsLoading(true);
     try {
+      // Fetch VRS data directly from vrs_research table (works for any stock, not just watchlist)
       const res = await fetch(
-        `/api/watchlist?symbol=${encodeURIComponent(props.symbol)}`
+        `/api/watchlist/vrs?symbol=${encodeURIComponent(props.symbol)}`
       );
       const data = await res.json();
-      const stock = data.stocks?.find((s: any) => s.symbol === props.symbol);
-      setVrsData(stock?.vrs_research || null);
+      setVrsData(data.vrs_research || null);
     } catch (error) {
       console.error("Failed to fetch VRS data:", error);
     } finally {
@@ -502,8 +502,8 @@ export default function VRSSection(props: VRSSectionProps) {
                     REC Price (₹)
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     class="w-full px-3 py-2 bg-surface0 border border-surface1 rounded-lg text-text text-sm"
                     value={formData().recPrice}
                     onInput={(e) =>
@@ -540,8 +540,8 @@ export default function VRSSection(props: VRSSectionProps) {
                       Exit Price (₹)
                     </label>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       class="w-full px-3 py-2 bg-surface0 border border-surface1 rounded-lg text-text text-sm"
                       value={formData().exitPrice}
                       onInput={(e) =>
