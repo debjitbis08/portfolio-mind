@@ -152,10 +152,23 @@ export default function EarningsPanel(props: Props) {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setSyncStatus({
-          type: "success",
-          message: `Processed ${data.processedCount || 0} transcripts`,
-        });
+        const successCount = data.processedCount || 0;
+        const totalCount = data.results?.length || 0;
+        const failedCount = totalCount - successCount;
+
+        if (failedCount > 0) {
+          setSyncStatus({
+            type: "success",
+            message: `Processed ${successCount} of ${totalCount} transcripts. ${failedCount} failed (check logs for details).`,
+          });
+        } else {
+          setSyncStatus({
+            type: "success",
+            message: `Successfully processed ${successCount} transcript${
+              successCount !== 1 ? "s" : ""
+            }`,
+          });
+        }
 
         // Refresh concalls data
         const concallsRes = await fetch(`/api/concalls?symbol=${props.symbol}`);

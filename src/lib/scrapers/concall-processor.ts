@@ -230,6 +230,68 @@ Prioritize detail and accuracy over brevity. Ensure all percentages and currency
 `;
 
 /**
+ * Helper function to download PDF with retry logic
+ */
+async function downloadPDFWithRetry(
+  pdfUrl: string,
+  maxRetries = 3
+): Promise<ArrayBuffer> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(
+        `[ConcallProcessor] Downloading PDF (attempt ${attempt}/${maxRetries})...`
+      );
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
+      const response = await fetch(pdfUrl, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Failed to download PDF: ${response.statusText}`);
+      }
+
+      const pdfBuffer = await response.arrayBuffer();
+      console.log(
+        `[ConcallProcessor] ✓ Downloaded PDF (${(
+          pdfBuffer.byteLength / 1024
+        ).toFixed(2)} KB)`
+      );
+      return pdfBuffer;
+    } catch (error) {
+      lastError = error as Error;
+      console.error(
+        `[ConcallProcessor] Attempt ${attempt} failed:`,
+        error instanceof Error ? error.message : error
+      );
+
+      if (attempt < maxRetries) {
+        // Exponential backoff: 2s, 4s, 8s
+        const delayMs = Math.pow(2, attempt) * 1000;
+        console.log(`[ConcallProcessor] Retrying in ${delayMs / 1000}s...`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  throw new Error(
+    `Failed to download PDF after ${maxRetries} attempts: ${
+      lastError?.message || "Unknown error"
+    }`
+  );
+}
+
+/**
  * Process a PDF using Gemini's multimodal capabilities
  */
 export async function processConcallPDF(
@@ -242,12 +304,8 @@ export async function processConcallPDF(
     throw new Error("GEMINI_API_KEY not configured");
   }
 
-  // Download the PDF
-  const response = await fetch(pdfUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to download PDF: ${response.statusText}`);
-  }
-  const pdfBuffer = await response.arrayBuffer();
+  // Download the PDF with retry logic
+  const pdfBuffer = await downloadPDFWithRetry(pdfUrl);
   const pdfBase64 = Buffer.from(pdfBuffer).toString("base64");
 
   // Initialize Gemini
@@ -303,6 +361,17 @@ export async function saveConcallHighlights(
   symbol: string,
   highlights: ConcallHighlights
 ): Promise<void> {
+  console.log(
+    `[ConcallProcessor] Saving highlights for ${symbol} - ${highlights.quarter}`
+  );
+  console.log(`[ConcallProcessor] Data preview:`, {
+    symbol,
+    quarter: highlights.quarter,
+    callDate: highlights.callDate,
+    hasGuidance: !!highlights.managementGuidance,
+    positivesCount: highlights.positives?.length || 0,
+  });
+
   // Check if we already have this quarter
   const existing = await db
     .select()
@@ -317,6 +386,9 @@ export async function saveConcallHighlights(
 
   if (existing) {
     // Update existing
+    console.log(
+      `[ConcallProcessor] Updating existing record for ${symbol} - ${highlights.quarter}`
+    );
     await db
       .update(schema.concallHighlights)
       .set({
@@ -329,8 +401,14 @@ export async function saveConcallHighlights(
         analystConcerns: JSON.stringify(highlights.analystConcerns),
       })
       .where(eq(schema.concallHighlights.id, existing.id));
+    console.log(
+      `[ConcallProcessor] ✓ Updated record for ${symbol} - ${highlights.quarter}`
+    );
   } else {
     // Insert new
+    console.log(
+      `[ConcallProcessor] Inserting new record for ${symbol} - ${highlights.quarter}`
+    );
     await db.insert(schema.concallHighlights).values({
       symbol,
       quarter: highlights.quarter,
@@ -342,6 +420,9 @@ export async function saveConcallHighlights(
       risksDiscussed: JSON.stringify(highlights.risksDiscussed),
       analystConcerns: JSON.stringify(highlights.analystConcerns),
     });
+    console.log(
+      `[ConcallProcessor] ✓ Inserted new record for ${symbol} - ${highlights.quarter}`
+    );
   }
 }
 

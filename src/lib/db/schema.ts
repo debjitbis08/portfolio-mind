@@ -129,6 +129,35 @@ export const suggestions = sqliteTable(
 );
 
 // ============================================================================
+// Suggestion Transactions - Links suggestions to actual executed transactions
+// ============================================================================
+
+export const suggestionTransactions = sqliteTable(
+  "suggestion_transactions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    suggestionId: text("suggestion_id")
+      .references(() => suggestions.id, { onDelete: "cascade" })
+      .notNull(),
+    transactionId: text("transaction_id")
+      .references(() => transactions.id, { onDelete: "cascade" })
+      .notNull(),
+    matchType: text("match_type", {
+      enum: ["manual", "auto_symbol_date", "auto_price"],
+    }).notNull(),
+    confidence: integer("confidence").default(100), // 0-100
+    notes: text("notes"),
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index("idx_suggestion_transactions_suggestion").on(table.suggestionId),
+    index("idx_suggestion_transactions_transaction").on(table.transactionId),
+  ]
+);
+
+// ============================================================================
 // Settings - User settings (single row)
 // ============================================================================
 

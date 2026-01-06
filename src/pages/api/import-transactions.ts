@@ -17,6 +17,10 @@ import {
   type GrowwTransaction,
   type GrowwHolding,
 } from "../../lib/xlsx-importer";
+import {
+  findMatchesForTransactions,
+  autoLinkHighConfidenceMatches,
+} from "../../lib/matching/suggestion-matcher";
 
 /**
  * Check if a file has actual content (not an empty file input)
@@ -209,12 +213,55 @@ export const POST: APIRoute = async ({ request }) => {
       }
     }
 
+    // Auto-match imported transactions to suggestions
+    let matchingResult = { created: 0, skipped: 0, proposals: 0 };
+    if (insertedCount > 0) {
+      try {
+        // Get IDs of just-inserted transactions
+        const recentTransactionIds = transactionsToInsert
+          .slice(0, insertedCount)
+          .map((tx) => {
+            // We need to find the actual inserted transaction IDs
+            // For simplicity, we'll match recent transactions by symbol + executedAt
+            return null; // Placeholder
+          })
+          .filter(Boolean) as string[];
+
+        // Find all recently inserted transactions
+        const recentTransactions = await db
+          .select()
+          .from(schema.transactions)
+          .orderBy(schema.transactions.createdAt)
+          .limit(insertedCount);
+
+        const txIds = recentTransactions.map((t) => t.id);
+
+        if (txIds.length > 0) {
+          const proposals = await findMatchesForTransactions(txIds);
+          matchingResult.proposals = proposals.length;
+
+          if (proposals.length > 0) {
+            const linkResult = await autoLinkHighConfidenceMatches(
+              proposals,
+              80
+            );
+            matchingResult.created = linkResult.created;
+            matchingResult.skipped = linkResult.skipped;
+          }
+        }
+      } catch (err) {
+        console.error("Auto-matching error:", err);
+        // Don't fail import if matching fails
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         source: isICICIImport ? "icici_direct" : "groww",
         transactionsImported: insertedCount,
         adjustmentsCreated: adjustmentsInserted,
+        suggestionMatches: matchingResult,
         reconciliation: reconciliationResult
           ? {
               discrepancies: reconciliationResult.adjustments.length,

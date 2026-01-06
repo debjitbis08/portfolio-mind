@@ -36,36 +36,40 @@ export async function fetchHistoricalPrices(
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  try {
-    // Try NSE first, then BSE
-    let yahooSymbol = `${symbol}.NS`;
-    let result = await yahooFinance.chart(yahooSymbol, {
+  // Determine if symbol is a BSE numeric code (try BSE first)
+  const isBseCode = /^\d{5,6}$/.test(symbol);
+
+  const tryFetch = async (suffix: string) => {
+    const yahooSymbol = `${symbol}${suffix}`;
+    const result = await yahooFinance.chart(yahooSymbol, {
       period1: startDate,
       period2: endDate,
       interval: "1d",
     });
-
     if (!result.quotes || result.quotes.length < 50) {
-      // Try BSE
-      yahooSymbol = `${symbol}.BO`;
-      result = await yahooFinance.chart(yahooSymbol, {
-        period1: startDate,
-        period2: endDate,
-        interval: "1d",
-      });
+      throw new Error("Insufficient data");
     }
-
-    if (!result.quotes) return [];
-
     return result.quotes
       .filter((q) => q.close !== null && q.close !== undefined)
       .map((q) => ({
         date: new Date(q.date),
         close: q.close as number,
       }));
-  } catch (error) {
-    console.error(`Failed to fetch history for ${symbol}:`, error);
-    return [];
+  };
+
+  // Try primary exchange first, then fallback
+  const [primary, fallback] = isBseCode ? [".BO", ".NS"] : [".NS", ".BO"];
+
+  try {
+    return await tryFetch(primary);
+  } catch {
+    // Primary failed, try fallback
+    try {
+      return await tryFetch(fallback);
+    } catch (error) {
+      console.error(`Failed to fetch history for ${symbol}:`, error);
+      return [];
+    }
   }
 }
 
@@ -160,39 +164,70 @@ export function checkWaitZone(data: {
 
 /**
  * Get full technical data for a symbol
+ * Falls back to Google Finance for current price if Yahoo fails
  */
 export async function getTechnicalData(
   symbol: string
 ): Promise<TechnicalData | null> {
   const prices = await fetchHistoricalPrices(symbol);
 
-  if (prices.length < 50) {
-    return null;
+  // If we have enough historical data from Yahoo, calculate full technicals
+  if (prices.length >= 50) {
+    const indicators = calculateIndicators(prices);
+    const waitCheck = checkWaitZone(indicators);
+
+    const priceVsSma50 =
+      indicators.currentPrice && indicators.sma50
+        ? ((indicators.currentPrice - indicators.sma50) / indicators.sma50) *
+          100
+        : null;
+
+    const priceVsSma200 =
+      indicators.currentPrice && indicators.sma200
+        ? ((indicators.currentPrice - indicators.sma200) / indicators.sma200) *
+          100
+        : null;
+
+    return {
+      symbol,
+      currentPrice: indicators.currentPrice || 0,
+      rsi14: indicators.rsi14,
+      sma50: indicators.sma50,
+      sma200: indicators.sma200,
+      priceVsSma50: priceVsSma50 ? Number(priceVsSma50.toFixed(2)) : null,
+      priceVsSma200: priceVsSma200 ? Number(priceVsSma200.toFixed(2)) : null,
+      isWaitZone: waitCheck.isWaitZone,
+      waitReasons: waitCheck.reasons,
+    };
   }
 
-  const indicators = calculateIndicators(prices);
-  const waitCheck = checkWaitZone(indicators);
+  // Fallback: Try Google Finance for at least current price
+  try {
+    const { getGoogleFinanceQuote } = await import("./scrapers/google-finance");
+    const gfQuote = await getGoogleFinanceQuote(symbol);
 
-  const priceVsSma50 =
-    indicators.currentPrice && indicators.sma50
-      ? ((indicators.currentPrice - indicators.sma50) / indicators.sma50) * 100
-      : null;
+    if (gfQuote) {
+      console.log(
+        `[TechnicalData] Using Google Finance fallback for ${symbol}: ₹${gfQuote.price}`
+      );
+      return {
+        symbol,
+        currentPrice: gfQuote.price,
+        rsi14: null, // No historical data for technicals
+        sma50: null,
+        sma200: null,
+        priceVsSma50: null,
+        priceVsSma200: null,
+        isWaitZone: false,
+        waitReasons: ["Insufficient historical data for technical analysis"],
+      };
+    }
+  } catch (error) {
+    console.error(
+      `[TechnicalData] Google Finance fallback failed for ${symbol}:`,
+      error
+    );
+  }
 
-  const priceVsSma200 =
-    indicators.currentPrice && indicators.sma200
-      ? ((indicators.currentPrice - indicators.sma200) / indicators.sma200) *
-        100
-      : null;
-
-  return {
-    symbol,
-    currentPrice: indicators.currentPrice || 0,
-    rsi14: indicators.rsi14,
-    sma50: indicators.sma50,
-    sma200: indicators.sma200,
-    priceVsSma50: priceVsSma50 ? Number(priceVsSma50.toFixed(2)) : null,
-    priceVsSma200: priceVsSma200 ? Number(priceVsSma200.toFixed(2)) : null,
-    isWaitZone: waitCheck.isWaitZone,
-    waitReasons: waitCheck.reasons,
-  };
+  return null;
 }

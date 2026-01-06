@@ -51,6 +51,51 @@ export const GET: APIRoute = async ({ request, url }) => {
       .where(whereCondition)
       .orderBy(desc(schema.suggestions.createdAt));
 
+    // Fetch linked transactions for all suggestions
+    const suggestionIds = suggestions.map((s) => s.id);
+    const links =
+      suggestionIds.length > 0
+        ? await db
+            .select()
+            .from(schema.suggestionTransactions)
+            .where(
+              inArray(schema.suggestionTransactions.suggestionId, suggestionIds)
+            )
+        : [];
+
+    // Group links by suggestion ID
+    const linksBySuggestion = new Map<
+      string,
+      Array<{
+        transactionId: string;
+        matchType: string;
+        confidence: number | null;
+      }>
+    >();
+
+    for (const link of links) {
+      if (!linksBySuggestion.has(link.suggestionId)) {
+        linksBySuggestion.set(link.suggestionId, []);
+      }
+      linksBySuggestion.get(link.suggestionId)!.push({
+        transactionId: link.transactionId,
+        matchType: link.matchType,
+        confidence: link.confidence,
+      });
+    }
+
+    // Fetch transaction details for all linked transactions
+    const transactionIds = links.map((l) => l.transactionId);
+    const transactions =
+      transactionIds.length > 0
+        ? await db
+            .select()
+            .from(schema.transactions)
+            .where(inArray(schema.transactions.id, transactionIds))
+        : [];
+
+    const transactionsById = new Map(transactions.map((t) => [t.id, t]));
+
     // Convert to snake_case for API response consistency
     const formatted = suggestions.map((s) => {
       // Parse citations JSON if present
@@ -62,6 +107,25 @@ export const GET: APIRoute = async ({ request, url }) => {
           citations = [];
         }
       }
+
+      // Get linked transactions
+      const linkedTxs = linksBySuggestion.get(s.id) || [];
+      const linkedTransactions = linkedTxs
+        .map((link) => {
+          const tx = transactionsById.get(link.transactionId);
+          if (!tx) return null;
+          return {
+            id: tx.id,
+            type: tx.type,
+            quantity: tx.quantity,
+            value: tx.value,
+            price_per_share: tx.quantity > 0 ? tx.value / tx.quantity : 0,
+            executed_at: tx.executedAt,
+            match_type: link.matchType,
+            confidence: link.confidence,
+          };
+        })
+        .filter(Boolean);
 
       return {
         id: s.id,
@@ -83,6 +147,7 @@ export const GET: APIRoute = async ({ request, url }) => {
         expires_at: s.expiresAt,
         reviewed_at: s.reviewedAt,
         citations,
+        linked_transactions: linkedTransactions,
       };
     });
 

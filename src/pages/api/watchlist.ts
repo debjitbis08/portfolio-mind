@@ -131,7 +131,7 @@ export const POST: APIRoute = async ({ request }) => {
 
   try {
     const body = await request.json();
-    const { symbol, notes } = body;
+    const { symbol, name, notes } = body;
 
     if (!symbol || typeof symbol !== "string") {
       return new Response(JSON.stringify({ error: "Symbol is required" }), {
@@ -156,9 +156,10 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    // Insert
+    // Insert with optional name
     await db.insert(schema.watchlist).values({
       symbol: normalizedSymbol,
+      name: name?.trim() || null,
       source: "manual",
       notes: notes || null,
     });

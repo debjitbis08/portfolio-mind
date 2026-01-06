@@ -71,7 +71,13 @@ export default function PriceChart(props: PriceChartProps) {
         throw new Error(errData.error || "Failed to fetch chart data");
       }
 
-      const data: ChartData = await response.json();
+      const data: ChartData & { message?: string } = await response.json();
+
+      // Handle empty data for recent IPOs
+      if (!data.data || data.data.length === 0) {
+        setError(data.message || "No data found, symbol may be delisted.");
+        return;
+      }
 
       if (candlestickSeries && volumeSeries && sma50Series && sma200Series) {
         // Update candlestick data

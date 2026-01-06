@@ -31,10 +31,12 @@ export default function WatchlistPage() {
   // Add modal
   const [showAddModal, setShowAddModal] = createSignal(false);
   const [newSymbol, setNewSymbol] = createSignal("");
+  const [newName, setNewName] = createSignal("");
   const [adding, setAdding] = createSignal(false);
 
   // Sync state
   const [syncing, setSyncing] = createSignal(false);
+  const [techSyncing, setTechSyncing] = createSignal(false);
   const [syncStatus, setSyncStatus] = createSignal<{
     type: "success" | "error" | "info";
     message: string;
@@ -105,11 +107,15 @@ export default function WatchlistPage() {
       const res = await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: newSymbol().trim() }),
+        body: JSON.stringify({
+          symbol: newSymbol().trim(),
+          name: newName().trim() || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to add");
       setNewSymbol("");
+      setNewName("");
       setShowAddModal(false);
       fetchWatchlist();
     } catch (err) {
@@ -147,6 +153,34 @@ export default function WatchlistPage() {
     }
   };
 
+  // Batch sync technicals
+  const syncAllTechnicals = async () => {
+    setTechSyncing(true);
+    setSyncStatus({ type: "info", message: "Updating technical snapshots..." });
+    try {
+      const res = await fetch("/api/watchlist/sync-technicals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Sync failed");
+      setSyncStatus({
+        type: "success",
+        message: `Updated technicals for ${data.synced}/${data.total} stocks. ${data.failed} failed.`,
+      });
+      fetchWatchlist();
+    } catch (err) {
+      setSyncStatus({
+        type: "error",
+        message: err instanceof Error ? err.message : "Sync failed",
+      });
+    } finally {
+      setTechSyncing(false);
+      setTimeout(() => setSyncStatus(null), 10000);
+    }
+  };
+
   // Format date
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString("en-IN", {
@@ -169,12 +203,26 @@ export default function WatchlistPage() {
         <div class="flex items-center gap-3">
           <button
             class={`px-4 py-2 text-sm rounded-lg flex items-center gap-2 transition-colors ${
+              techSyncing()
+                ? "bg-surface1 text-subtext0 cursor-not-allowed"
+                : "bg-yellow/20 text-yellow hover:bg-yellow/30"
+            }`}
+            onClick={syncAllTechnicals}
+            disabled={techSyncing() || syncing()}
+          >
+            <span class={techSyncing() ? "animate-spin" : ""}>
+              {techSyncing() ? "⏳" : "⚡"}
+            </span>
+            {techSyncing() ? "Updating..." : "Refresh Technicals"}
+          </button>
+          <button
+            class={`px-4 py-2 text-sm rounded-lg flex items-center gap-2 transition-colors ${
               syncing()
                 ? "bg-surface1 text-subtext0 cursor-not-allowed"
                 : "bg-blue/20 text-blue hover:bg-blue/30"
             }`}
             onClick={syncAllFinancials}
-            disabled={syncing()}
+            disabled={syncing() || techSyncing()}
           >
             <span class={syncing() ? "animate-spin" : ""}>
               {syncing() ? "⏳" : "📊"}
@@ -410,12 +458,12 @@ export default function WatchlistPage() {
             <div class="space-y-4">
               <div>
                 <label class="block text-sm text-subtext0 mb-1">
-                  Stock Symbol
+                  Stock Symbol *
                 </label>
                 <input
                   type="text"
                   class="w-full px-3 py-2 bg-surface0 border border-surface1 rounded-lg text-text placeholder-subtext0"
-                  placeholder="e.g., INFY, TCS, RELIANCE"
+                  placeholder="e.g., INFY, TCS, 544467"
                   value={newSymbol()}
                   onInput={(e) =>
                     setNewSymbol(e.currentTarget.value.toUpperCase())
@@ -423,7 +471,22 @@ export default function WatchlistPage() {
                   onKeyPress={(e) => e.key === "Enter" && addStock()}
                 />
                 <p class="text-xs text-subtext0 mt-1">
-                  Enter the NSE/BSE symbol without exchange suffix
+                  Enter NSE/BSE symbol or BSE code (e.g., 544467)
+                </p>
+              </div>
+              <div>
+                <label class="block text-sm text-subtext0 mb-1">
+                  Company Name <span class="text-subtext1">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  class="w-full px-3 py-2 bg-surface0 border border-surface1 rounded-lg text-text placeholder-subtext0"
+                  placeholder="e.g., Infosys Limited"
+                  value={newName()}
+                  onInput={(e) => setNewName(e.currentTarget.value)}
+                />
+                <p class="text-xs text-subtext0 mt-1">
+                  Provide for obscure BSE stocks not in Yahoo Finance
                 </p>
               </div>
               <div class="flex justify-end gap-3">

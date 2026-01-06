@@ -23,6 +23,7 @@ interface CompanyDetailsProps {
 export default function CompanyDetails(props: CompanyDetailsProps) {
   const [activeTab, setActiveTab] = createSignal("overview");
   const [isRefreshingTech, setIsRefreshingTech] = createSignal(false);
+  const [isRefreshingVP, setIsRefreshingVP] = createSignal(false);
 
   // Format currency
   const formatCurrency = (value: number) => {
@@ -91,6 +92,23 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
         links: links.links?.length || 0,
         tables: tables.tables?.length || 0,
       };
+    }
+  );
+
+  // Fetch watchlist data for name (for non-holdings)
+  const [watchlistStock] = createResource(
+    () => props.symbol,
+    async (symbol) => {
+      if (isServer) return null;
+      try {
+        const res = await fetch(
+          `/api/watchlist?symbol=${encodeURIComponent(symbol)}`
+        );
+        const data = await res.json();
+        return data.stocks?.find((s: any) => s.symbol === symbol);
+      } catch (e) {
+        return null;
+      }
     }
   );
 
@@ -189,8 +207,10 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
           </a>
           <div>
             <div class="flex items-center gap-2 mb-0.5">
-              <h1 class="text-2xl font-bold text-text uppercase tracking-tight">
-                {props.symbol}
+              <h1 class="text-2xl font-bold text-text tracking-tight">
+                {holdings()?.stock_name ||
+                  watchlistStock()?.name ||
+                  props.symbol}
               </h1>
               <Show when={holdings()}>
                 <span class="px-2 py-0.5 bg-mauve/10 text-mauve text-[10px] rounded uppercase font-bold border border-mauve/20">
@@ -203,9 +223,7 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                 </span>
               </Show>
             </div>
-            <p class="text-sm text-subtext0">
-              {holdings()?.stock_name || "Company Details"}
-            </p>
+            <p class="text-sm text-subtext0">{props.symbol}</p>
           </div>
         </div>
         <div class="text-right">
@@ -344,51 +362,61 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                       >
                         <div class="flex justify-between items-center">
                           <span class="text-subtext1">RSI(14)</span>
-                          <span class={getRsiClass(technical()?.rsi_14 || 50)}>
-                            <Show
-                              when={technical()?.rsi_14 !== undefined}
-                              fallback="..."
-                            >
+                          <Show
+                            when={technical()?.rsi_14 != null}
+                            fallback={<span class="text-subtext1">N/A</span>}
+                          >
+                            <span class={getRsiClass(technical()?.rsi_14!)}>
                               {technical()?.rsi_14?.toFixed(1)} (
-                              {getRsiLabel(technical()?.rsi_14)})
-                            </Show>
-                          </span>
+                              {getRsiLabel(technical()?.rsi_14!)})
+                            </span>
+                          </Show>
                         </div>
                         <div class="flex justify-between items-center text-sm">
                           <span class="text-subtext1">SMA 50</span>
-                          <div class="text-right">
-                            <div class="text-text">
-                              {formatCurrencyDecimal(technical()?.sma_50 || 0)}
+                          <Show
+                            when={technical()?.sma_50 != null}
+                            fallback={<span class="text-subtext1">N/A</span>}
+                          >
+                            <div class="text-right">
+                              <div class="text-text">
+                                {formatCurrencyDecimal(technical()?.sma_50!)}
+                              </div>
+                              <div
+                                class={`text-[10px] ${
+                                  technical()?.price_vs_sma50! >= 0
+                                    ? "text-red"
+                                    : "text-green"
+                                }`}
+                              >
+                                {technical()?.price_vs_sma50! >= 0 ? "+" : ""}
+                                {technical()?.price_vs_sma50?.toFixed(1)}%
+                              </div>
                             </div>
-                            <div
-                              class={`text-[10px] ${
-                                technical()?.price_vs_sma50 >= 0
-                                  ? "text-red"
-                                  : "text-green"
-                              }`}
-                            >
-                              {technical()?.price_vs_sma50 >= 0 ? "+" : ""}
-                              {technical()?.price_vs_sma50?.toFixed(1)}%
-                            </div>
-                          </div>
+                          </Show>
                         </div>
                         <div class="flex justify-between items-center text-sm pt-1">
                           <span class="text-subtext1">SMA 200</span>
-                          <div class="text-right">
-                            <div class="text-text">
-                              {formatCurrencyDecimal(technical()?.sma_200 || 0)}
+                          <Show
+                            when={technical()?.sma_200 != null}
+                            fallback={<span class="text-subtext1">N/A</span>}
+                          >
+                            <div class="text-right">
+                              <div class="text-text">
+                                {formatCurrencyDecimal(technical()?.sma_200!)}
+                              </div>
+                              <div
+                                class={`text-[10px] ${
+                                  technical()?.price_vs_sma200! >= 0
+                                    ? "text-red"
+                                    : "text-green"
+                                }`}
+                              >
+                                {technical()?.price_vs_sma200! >= 0 ? "+" : ""}
+                                {technical()?.price_vs_sma200?.toFixed(1)}%
+                              </div>
                             </div>
-                            <div
-                              class={`text-[10px] ${
-                                technical()?.price_vs_sma200 >= 0
-                                  ? "text-red"
-                                  : "text-green"
-                              }`}
-                            >
-                              {technical()?.price_vs_sma200 >= 0 ? "+" : ""}
-                              {technical()?.price_vs_sma200?.toFixed(1)}%
-                            </div>
-                          </div>
+                          </Show>
                         </div>
 
                         {/* Wait Zone Status */}
@@ -503,10 +531,7 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                       <Show when={intel()?.thesis_summary}>
                         <button
                           onClick={async () => {
-                            const btn = document.getElementById(
-                              "vp-refresh-btn"
-                            ) as HTMLButtonElement;
-                            if (btn) btn.disabled = true;
+                            setIsRefreshingVP(true);
                             try {
                               const res = await fetch(
                                 `/api/intel/${encodeURIComponent(
@@ -526,14 +551,21 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                               );
                               alert("Failed to refresh data");
                             } finally {
-                              if (btn) btn.disabled = false;
+                              setIsRefreshingVP(false);
                             }
                           }}
-                          id="vp-refresh-btn"
-                          class="text-xs material-symbols-outlined text-subtext0 hover:text-text cursor-pointer"
+                          disabled={isRefreshingVP()}
+                          class={`text-xs flex items-center gap-1 px-2 py-1 rounded border border-surface1 transition-colors ${
+                            isRefreshingVP()
+                              ? "bg-surface1 text-subtext1 cursor-not-allowed"
+                              : "bg-surface1/50 text-subtext0 hover:bg-surface1 hover:text-text"
+                          }`}
                           title="Refresh Data"
                         >
-                          <FaSolidArrowsRotate />
+                          <FaSolidArrowsRotate
+                            class={isRefreshingVP() ? "animate-spin" : ""}
+                          />
+                          {isRefreshingVP() ? "Refreshing..." : ""}
                         </button>
 
                         <button

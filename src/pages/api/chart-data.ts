@@ -87,9 +87,14 @@ export const GET: APIRoute = async ({ request }) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - fetchDays);
 
-    // Try NSE first, then BSE
-    let yahooSymbol = `${symbol}.NS`;
+    // Determine exchange order based on symbol format
+    const isBseCode = /^\d{5,6}$/.test(symbol);
+    const [primarySuffix, fallbackSuffix] = isBseCode
+      ? [".BO", ".NS"]
+      : [".NS", ".BO"];
+
     let result;
+    let yahooSymbol = `${symbol}${primarySuffix}`;
 
     try {
       result = await yahooFinance.chart(yahooSymbol, {
@@ -97,19 +102,37 @@ export const GET: APIRoute = async ({ request }) => {
         period2: endDate,
         interval: "1d",
       });
+
+      // If no data, try fallback
+      if (!result.quotes || result.quotes.length === 0) {
+        throw new Error("No quotes in result");
+      }
     } catch {
-      yahooSymbol = `${symbol}.BO`;
-      result = await yahooFinance.chart(yahooSymbol, {
-        period1: startDate,
-        period2: endDate,
-        interval: "1d",
-      });
+      yahooSymbol = `${symbol}${fallbackSuffix}`;
+      try {
+        result = await yahooFinance.chart(yahooSymbol, {
+          period1: startDate,
+          period2: endDate,
+          interval: "1d",
+        });
+      } catch {
+        result = { quotes: [] };
+      }
     }
 
     if (!result.quotes || result.quotes.length === 0) {
+      // Return empty chart with message for recent IPOs
       return new Response(
-        JSON.stringify({ error: "No data available for symbol" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
+        JSON.stringify({
+          symbol,
+          range,
+          data: [],
+          sma50: [],
+          sma200: [],
+          message:
+            "Historical data not yet available for this stock (recent IPO or BSE-only listing)",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
       );
     }
 

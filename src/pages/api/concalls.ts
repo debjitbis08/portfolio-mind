@@ -131,7 +131,15 @@ export const POST: APIRoute = async ({ request }) => {
             doc.url,
             doc.quarter || "Unknown"
           );
+
+          console.log(
+            `[Concalls API] Attempting to save highlights for ${symbol}...`
+          );
           await saveConcallHighlights(symbol, highlights);
+          console.log(
+            `[Concalls API] ✓ Successfully saved highlights for ${symbol} - ${highlights.quarter}`
+          );
+
           results.push({
             quarter: doc.quarter,
             title: doc.title,
@@ -139,11 +147,13 @@ export const POST: APIRoute = async ({ request }) => {
             type: doc.type,
           });
         } catch (error) {
+          console.error(`[Concalls API] Error processing ${doc.title}:`, error);
           results.push({
             quarter: doc.quarter,
             title: doc.title,
             success: false,
             error: error instanceof Error ? error.message : "Unknown error",
+            stack: error instanceof Error ? error.stack : undefined,
           });
         }
       }
