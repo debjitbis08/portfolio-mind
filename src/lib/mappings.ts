@@ -31,6 +31,7 @@ export const BUILT_IN_MAPPINGS: Record<string, string> = {
   UNIPLY: "UNIPLY",
   CDSL: "CDSL",
   HUDCO: "HUDCO",
+  DANISH: "DANISH-SM",
 };
 
 // Cache for merged mappings

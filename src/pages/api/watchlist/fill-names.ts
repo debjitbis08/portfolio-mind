@@ -11,6 +11,9 @@ import YahooFinance from "yahoo-finance2";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 
+// Symbol mapping utility
+import { getSymbolMappings } from "../../../lib/mappings";
+
 interface FillResult {
   symbol: string;
   name: string | null;
@@ -21,13 +24,13 @@ interface FillResult {
 /**
  * Try to get stock name from Yahoo Finance
  */
-async function getStockName(symbol: string): Promise<string | null> {
-  const isBseCode = /^\d{5,6}$/.test(symbol);
+async function getStockName(symbolToFetch: string): Promise<string | null> {
+  const isBseCode = /^\d{5,6}$/.test(symbolToFetch);
   const suffixes = isBseCode ? [".BO", ".NS"] : [".NS", ".BO"];
 
   for (const suffix of suffixes) {
     try {
-      const quote = await yahooFinance.quote(`${symbol}${suffix}`);
+      const quote = await yahooFinance.quote(`${symbolToFetch}${suffix}`);
       // Prefer longName, fall back to shortName
       const name = quote.longName || quote.shortName;
       if (name) {
@@ -63,10 +66,12 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     const results: FillResult[] = [];
+    const mappings = await getSymbolMappings();
 
     for (const stock of stocksNeedingNames) {
       try {
-        const name = await getStockName(stock.symbol);
+        const resolvedSymbol = mappings[stock.symbol] || stock.symbol;
+        const name = await getStockName(resolvedSymbol);
 
         if (name) {
           await db

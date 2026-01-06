@@ -1,0 +1,47 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { validateSession } from "../lib/auth";
+import TransactionLinker from "../components/metrics/TransactionLinker";
+import PerformanceMetrics from "../components/metrics/PerformanceMetrics";
+
+// Check auth on server side
+const session = await validateSession(Astro.request);
+
+// Redirect if not logged in
+if (!session) {
+  return Astro.redirect("/login");
+}
+---
+
+<Layout title="Performance - Portfolio Mind">
+  <div class="min-h-screen p-4 md:p-8">
+    <!-- Header -->
+    <header class="max-w-4xl mx-auto flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-mauve">Performance</h1>
+        <p class="text-sm text-subtext0">Track AI suggestion performance</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <a
+          href="/"
+          class="px-4 py-2 bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
+        >
+          ← Dashboard
+        </a>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-4xl mx-auto space-y-6">
+      <!-- Performance Metrics Section -->
+      <section class="bg-surface0 border border-surface1 rounded-2xl p-6">
+        <PerformanceMetrics client:load />
+      </section>
+
+      <!-- Transaction Linker Section -->
+      <section class="bg-surface0 border border-surface1 rounded-2xl p-6">
+        <TransactionLinker client:load />
+      </section>
+    </main>
+  </div>
+</Layout>

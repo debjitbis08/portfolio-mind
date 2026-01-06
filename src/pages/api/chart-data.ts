@@ -8,6 +8,7 @@
 import type { APIRoute } from "astro";
 import YahooFinance from "yahoo-finance2";
 import { getCached, setCache } from "../../lib/tools/cache";
+import { getSymbolMappings } from "../../lib/mappings";
 
 const yahooFinance = new YahooFinance();
 
@@ -68,7 +69,11 @@ export const GET: APIRoute = async ({ request }) => {
     });
   }
 
-  const cacheKey = { symbol, range };
+  // Resolve mapping
+  const mappings = await getSymbolMappings();
+  const resolvedSymbol = mappings[symbol.toUpperCase()] || symbol;
+
+  const cacheKey = { symbol: resolvedSymbol, range };
 
   // Check cache first
   const cached = await getCached("yahoo_chart", cacheKey);
@@ -88,13 +93,13 @@ export const GET: APIRoute = async ({ request }) => {
     startDate.setDate(startDate.getDate() - fetchDays);
 
     // Determine exchange order based on symbol format
-    const isBseCode = /^\d{5,6}$/.test(symbol);
+    const isBseCode = /^\d{5,6}$/.test(resolvedSymbol);
     const [primarySuffix, fallbackSuffix] = isBseCode
       ? [".BO", ".NS"]
       : [".NS", ".BO"];
 
     let result;
-    let yahooSymbol = `${symbol}${primarySuffix}`;
+    let yahooSymbol = `${resolvedSymbol}${primarySuffix}`;
 
     try {
       result = await yahooFinance.chart(yahooSymbol, {
@@ -167,7 +172,7 @@ export const GET: APIRoute = async ({ request }) => {
     const trimmedSma200 = sma200.filter((p) => p.time >= cutoffDate);
 
     const responseData = {
-      symbol,
+      symbol: resolvedSymbol,
       range,
       data: trimmedData,
       sma50: trimmedSma50,
