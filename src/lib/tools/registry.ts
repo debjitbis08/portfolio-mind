@@ -261,6 +261,33 @@ const getRecentTradesDeclaration: ToolDeclaration = {
   },
 };
 
+const getFinancialsDeclaration: ToolDeclaration = {
+  name: "get_financials",
+  description:
+    "Get financial data (P&L, Cash Flow, Balance Sheet) for a company. Use this to verify EARNINGS QUALITY: Is Cash from Operations positive and roughly equal to Net Profit? If a company shows profit but has negative/low operating cash flow, the earnings may be of poor quality. This is the 'CASH FLOW CHECK' - essential for spotting red flags.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      symbol: {
+        type: Type.STRING,
+        description:
+          "Stock symbol to fetch financials for (e.g., 'RELIANCE', 'TCS'). Do not include exchange suffix.",
+      },
+      period_type: {
+        type: Type.STRING,
+        description:
+          "Type of periods to fetch: 'annual' for yearly data, 'quarterly' for quarterly, 'both' for all available.",
+        enum: ["annual", "quarterly", "both"],
+      },
+      num_periods: {
+        type: Type.NUMBER,
+        description: "Number of periods to fetch. Default is 4. Max is 20.",
+      },
+    },
+    required: ["symbol"],
+  },
+};
+
 // ============================================================================
 // Registry
 // ============================================================================
@@ -376,6 +403,18 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       defaultConfig: {
         enabled: true,
         defaultDaysBack: 30,
+      },
+    },
+  ],
+  [
+    "get_financials",
+    {
+      declaration: getFinancialsDeclaration,
+      execute: notImplemented,
+      source: "internal",
+      defaultConfig: {
+        enabled: true,
+        defaultPeriodType: "annual",
       },
     },
   ],

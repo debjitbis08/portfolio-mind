@@ -419,46 +419,94 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                           </Show>
                         </div>
 
-                        {/* Wait Zone Status */}
+                        {/* Zone Status (replaces old Wait Zone logic) */}
                         <div class="mt-4 pt-4 border-t border-surface1">
                           <div class="flex items-center justify-between mb-2">
-                            <span class="text-xs text-subtext1">Decision</span>
-                            <span
-                              class={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                technical()?.rsi_14 > 40 ||
-                                technical()?.price_vs_sma50 > 15 ||
-                                technical()?.price_vs_sma200 > 15 ||
-                                (technical()?.sma_200 &&
-                                  technical()?.current_price <
-                                    technical()?.sma_200)
-                                  ? "bg-red/10 text-red border border-red/20"
-                                  : "bg-green/10 text-green border border-green/20"
-                              }`}
-                            >
-                              {technical()?.rsi_14 > 40 ||
-                              technical()?.price_vs_sma50 > 15 ||
-                              technical()?.price_vs_sma200 > 15 ||
-                              (technical()?.sma_200 &&
-                                technical()?.current_price <
-                                  technical()?.sma_200)
-                                ? "Wait"
-                                : "Value territory"}
+                            <span class="text-xs text-subtext1">
+                              Zone Status
                             </span>
+                            {(() => {
+                              // Get zone status from holdings (which now includes it) or compute from technical
+                              const zoneStatus = holdings()?.zone_status;
+                              const isDowntrend =
+                                technical()?.sma_200 &&
+                                technical()?.current_price <
+                                  technical()?.sma_200;
+                              const isOverheated =
+                                (technical()?.rsi_14 &&
+                                  technical()?.rsi_14 > 75) ||
+                                (technical()?.price_vs_sma50 &&
+                                  technical()?.price_vs_sma50 > 20) ||
+                                (technical()?.price_vs_sma200 &&
+                                  technical()?.price_vs_sma200 > 40);
+
+                              // Determine status - priority: zone_status from API, else compute
+                              const computedStatus = isDowntrend
+                                ? "WAIT_TOO_COLD"
+                                : isOverheated
+                                ? "WAIT_TOO_HOT"
+                                : "BUY";
+                              const finalStatus = zoneStatus || computedStatus;
+
+                              if (finalStatus === "WAIT_TOO_COLD") {
+                                return (
+                                  <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue/10 text-blue border border-blue/20">
+                                    🧊 Downtrend
+                                  </span>
+                                );
+                              } else if (finalStatus === "WAIT_TOO_HOT") {
+                                return (
+                                  <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red/10 text-red border border-red/20">
+                                    🔥 Too Hot
+                                  </span>
+                                );
+                              } else {
+                                return (
+                                  <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-green/10 text-green border border-green/20">
+                                    ✅ Buy Zone
+                                  </span>
+                                );
+                              }
+                            })()}
                           </div>
                           <div class="flex flex-wrap gap-1">
-                            <Show when={technical()?.rsi_14 > 40}>
-                              <span class="px-1.5 py-0.5 bg-surface1 text-subtext1 text-[10px] rounded">
-                                RSI &gt; 40
+                            <Show
+                              when={
+                                technical()?.rsi_14 && technical()?.rsi_14 > 75
+                              }
+                            >
+                              <span class="px-1.5 py-0.5 bg-red/10 text-red text-[10px] rounded">
+                                RSI {technical()?.rsi_14?.toFixed(0)} &gt; 75
                               </span>
                             </Show>
-                            <Show when={technical()?.price_vs_sma50 > 15}>
-                              <span class="px-1.5 py-0.5 bg-surface1 text-subtext1 text-[10px] rounded">
+                            <Show
+                              when={
+                                technical()?.rsi_14 && technical()?.rsi_14 < 30
+                              }
+                            >
+                              <span class="px-1.5 py-0.5 bg-green/10 text-green text-[10px] rounded">
+                                RSI {technical()?.rsi_14?.toFixed(0)} &lt; 30
+                                (Oversold)
+                              </span>
+                            </Show>
+                            <Show
+                              when={
+                                technical()?.price_vs_sma50 &&
+                                technical()?.price_vs_sma50 > 20
+                              }
+                            >
+                              <span class="px-1.5 py-0.5 bg-red/10 text-red text-[10px] rounded">
                                 +{technical()?.price_vs_sma50?.toFixed(0)}%
                                 SMA50
                               </span>
                             </Show>
-                            <Show when={technical()?.price_vs_sma200 > 15}>
-                              <span class="px-1.5 py-0.5 bg-surface1 text-subtext1 text-[10px] rounded">
+                            <Show
+                              when={
+                                technical()?.price_vs_sma200 &&
+                                technical()?.price_vs_sma200 > 40
+                              }
+                            >
+                              <span class="px-1.5 py-0.5 bg-red/10 text-red text-[10px] rounded">
                                 +{technical()?.price_vs_sma200?.toFixed(0)}%
                                 SMA200
                               </span>
@@ -470,7 +518,7 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                                   technical()?.sma_200
                               }
                             >
-                              <span class="px-1.5 py-0.5 bg-surface1 text-subtext1 text-[10px] rounded">
+                              <span class="px-1.5 py-0.5 bg-blue/10 text-blue text-[10px] rounded">
                                 Below SMA200
                               </span>
                             </Show>
