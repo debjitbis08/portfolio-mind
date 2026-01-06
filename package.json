@@ -42,6 +42,8 @@
     "linkedom": "^0.18.12",
     "markdown-it": "^14.1.0",
     "puppeteer": "^24.34.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "solid-icons": "^1.1.0",
     "solid-js": "^1.9.10",
     "tailwindcss": "^4.1.18",

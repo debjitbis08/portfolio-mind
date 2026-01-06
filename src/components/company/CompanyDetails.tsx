@@ -14,6 +14,7 @@ import LinksList from "../links/LinksList";
 import TablesList from "../tables/TablesList";
 import PriceChart from "../charts/PriceChart";
 import EarningsPanel from "../earnings/EarningsPanel";
+import VRSSection from "./VRSSection";
 import { FaSolidArrowsRotate, FaSolidTrashCan } from "solid-icons/fa";
 
 interface CompanyDetailsProps {
@@ -796,6 +797,9 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                     </Show>
                   </Show>
                 </div>
+
+                {/* VRS Research Section */}
+                <VRSSection symbol={props.symbol} />
 
                 {/* Price Chart */}
                 <div id="price-chart-container" class="mb-6">

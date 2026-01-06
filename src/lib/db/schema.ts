@@ -177,8 +177,33 @@ export const settings = sqliteTable("settings", {
   symbolMappings: text("symbol_mappings"), // JSON object stored as text
   toolConfig: text("tool_config"), // JSON: { toolName: { enabled: boolean, ...options } }
   aiEnabled: integer("ai_enabled", { mode: "boolean" }).default(true),
+
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
+
+// ============================================================================
+// Value Research Stocks - Scraped research data
+// ============================================================================
+
+export const vrsResearch = sqliteTable(
+  "vrs_research",
+  {
+    symbol: text("symbol").primaryKey(),
+    recPrice: real("rec_price"), // Recommended price at time of recommendation
+    recDate: text("rec_date"), // Date of recommendation (ISO string)
+    exitPrice: real("exit_price"), // Price at exit (for Exited status)
+    exitDate: text("exit_date"), // Date of exit (ISO string, for Exited status)
+    status: text("status", { enum: ["Buy", "Exited"] }).default("Buy"),
+    rationale: text("rationale"), // Markdown content - investment thesis
+    risks: text("risks"), // Markdown content - key risks
+    analystNote: text("analyst_note"), // Additional notes
+    researchContent: text("research_content"), // Additional markdown research content
+
+    fetchedAt: text("fetched_at").$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("idx_vrs_research_status").on(table.status)]
+);
 
 // ============================================================================
 // Tool Cache - Caches responses from external tools

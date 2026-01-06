@@ -4,6 +4,7 @@
  */
 
 import { createSignal, createEffect, For, Show } from "solid-js";
+import { getSourceBadges } from "../../lib/utils/source-utils";
 
 interface WatchlistStock {
   symbol: string;
@@ -17,6 +18,16 @@ interface WatchlistStock {
   rsi_14: number | null;
   has_thesis: boolean;
   has_financials: boolean;
+  vrs_research: {
+    recPrice: number | null;
+    recDate: string | null;
+    exitPrice: number | null;
+    exitDate: string | null;
+    status: "Buy" | "Exited" | null;
+    rationale: string | null;
+    risks: string | null;
+    analystNote: string | null;
+  } | null;
 }
 
 export default function WatchlistPage() {
@@ -37,6 +48,11 @@ export default function WatchlistPage() {
   // Sync state
   const [syncing, setSyncing] = createSignal(false);
   const [techSyncing, setTechSyncing] = createSignal(false);
+  // VRS redirect handler
+  const redirectToVrsEntry = (stock: WatchlistStock) => {
+    window.location.href = `/company/${stock.symbol}?openVrs=true`;
+  };
+
   const [syncStatus, setSyncStatus] = createSignal<{
     type: "success" | "error" | "info";
     message: string;
@@ -92,10 +108,16 @@ export default function WatchlistPage() {
   const deleteStock = async (symbol: string) => {
     if (!confirm(`Remove ${symbol} from watchlist?`)) return;
     try {
-      await fetch(`/api/watchlist?symbol=${symbol}`, { method: "DELETE" });
+      const res = await fetch(
+        `/api/watchlist?symbol=${encodeURIComponent(symbol)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) throw new Error("Failed to delete stock from server");
+
       setStocks((prev) => prev.filter((s) => s.symbol !== symbol));
     } catch (err) {
       console.error("Failed to delete:", err);
+      alert(err instanceof Error ? err.message : "Failed to delete stock");
     }
   };
 
@@ -263,6 +285,7 @@ export default function WatchlistPage() {
           <option value="">All Sources</option>
           <option value="screener">Screener</option>
           <option value="manual">Manual</option>
+          <option value="vrs">Value Research</option>
         </select>
         <label class="flex items-center gap-2 text-sm text-subtext0">
           <input
@@ -370,15 +393,18 @@ export default function WatchlistPage() {
                       </Show>
                     </td>
                     <td class="py-3 px-4">
-                      <span
-                        class={`text-xs px-2 py-0.5 rounded ${
-                          stock.source === "screener"
-                            ? "bg-blue/10 text-blue"
-                            : "bg-surface2 text-subtext0"
-                        }`}
-                      >
-                        {stock.source}
-                      </span>
+                      <div class="flex flex-wrap gap-1">
+                        <For each={getSourceBadges(stock.source)}>
+                          {(badge) => (
+                            <span
+                              class={`text-xs px-2 py-0.5 rounded border ${badge.color}`}
+                              title={badge.label}
+                            >
+                              {badge.icon} {badge.label}
+                            </span>
+                          )}
+                        </For>
+                      </div>
                     </td>
                     <td class="py-3 px-4 text-right text-text">
                       {stock.current_price

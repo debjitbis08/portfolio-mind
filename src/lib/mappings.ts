@@ -82,3 +82,23 @@ export function clearMappingsCache() {
   mappingsCache = null;
   lastFetchTime = 0;
 }
+// ... existing code ...
+
+/**
+ * Helper to get the best trading symbol for a given stock name/symbol pair
+ * Checks mappings first, then falls back to the provided symbol.
+ */
+export async function getSymbolForStock(
+  name: string,
+  symbol: string
+): Promise<string> {
+  const mappings = await getSymbolMappings();
+
+  // Check if symbol is mapped
+  if (mappings[symbol]) {
+    return mappings[symbol];
+  }
+
+  // Returns the original symbol if no mapping found
+  return symbol;
+}

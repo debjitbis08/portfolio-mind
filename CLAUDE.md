@@ -1,1 +1,2 @@
 @AGENTS.md
+@.agent/AGENT_INSTRUCTIONS.md

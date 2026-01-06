@@ -39,31 +39,39 @@ export const GET: APIRoute = async ({ request, url }) => {
     const symbols = watchlistStocks.map((s) => s.symbol);
 
     // Fetch enrichment data
-    const [stockIntelData, technicalData, financialsCount] = await Promise.all([
-      symbols.length > 0
-        ? db
-            .select()
-            .from(schema.stockIntel)
-            .where(inArray(schema.stockIntel.symbol, symbols))
-        : [],
-      symbols.length > 0
-        ? db
-            .select()
-            .from(schema.technicalData)
-            .where(inArray(schema.technicalData.symbol, symbols))
-        : [],
-      symbols.length > 0
-        ? db
-            .select({ symbol: schema.companyFinancials.symbol })
-            .from(schema.companyFinancials)
-            .where(inArray(schema.companyFinancials.symbol, symbols))
-        : [],
-    ]);
+    const [stockIntelData, technicalData, financialsCount, vrsResearchData] =
+      await Promise.all([
+        symbols.length > 0
+          ? db
+              .select()
+              .from(schema.stockIntel)
+              .where(inArray(schema.stockIntel.symbol, symbols))
+          : [],
+        symbols.length > 0
+          ? db
+              .select()
+              .from(schema.technicalData)
+              .where(inArray(schema.technicalData.symbol, symbols))
+          : [],
+        symbols.length > 0
+          ? db
+              .select({ symbol: schema.companyFinancials.symbol })
+              .from(schema.companyFinancials)
+              .where(inArray(schema.companyFinancials.symbol, symbols))
+          : [],
+        symbols.length > 0
+          ? db
+              .select()
+              .from(schema.vrsResearch)
+              .where(inArray(schema.vrsResearch.symbol, symbols))
+          : [],
+      ]);
 
     // Build lookup maps
     const intelMap = new Map(stockIntelData.map((i) => [i.symbol, i]));
     const techMap = new Map(technicalData.map((t) => [t.symbol, t]));
     const financialSymbols = new Set(financialsCount.map((f) => f.symbol));
+    const vrsMap = new Map(vrsResearchData.map((v) => [v.symbol, v]));
 
     // Enrich stocks
     const enrichedStocks = watchlistStocks.map((stock) => {
@@ -103,6 +111,7 @@ export const GET: APIRoute = async ({ request, url }) => {
         rsi_14: tech?.rsi14 ? Math.round(tech.rsi14) : null,
         has_thesis: hasThesis,
         has_financials: financialSymbols.has(stock.symbol),
+        vrs_research: vrsMap.get(stock.symbol) || null,
       };
     });
 
@@ -253,9 +262,16 @@ export const DELETE: APIRoute = async ({ request }) => {
       );
     }
 
-    await db
-      .delete(schema.watchlist)
-      .where(eq(schema.watchlist.symbol, symbol.toUpperCase()));
+    const normalizedSymbol = symbol.trim().toUpperCase();
+
+    await Promise.all([
+      db
+        .delete(schema.watchlist)
+        .where(eq(schema.watchlist.symbol, normalizedSymbol)),
+      db
+        .delete(schema.vrsResearch)
+        .where(eq(schema.vrsResearch.symbol, normalizedSymbol)),
+    ]);
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
