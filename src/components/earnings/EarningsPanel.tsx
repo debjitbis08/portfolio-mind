@@ -119,6 +119,19 @@ export default function EarningsPanel(props: Props) {
 
       setFinancials(financialsData.financials || []);
       setConcalls(concallsData.highlights || []);
+
+      // Smart default: if quarterly is empty but annual has data, switch to annual view
+      const loadedFinancials = financialsData.financials || [];
+      const hasQuarterly = loadedFinancials.some(
+        (f: FinancialPeriod) => f.periodType === "quarterly"
+      );
+      const hasAnnual = loadedFinancials.some(
+        (f: FinancialPeriod) => f.periodType === "annual"
+      );
+
+      if (!hasQuarterly && hasAnnual) {
+        setPeriodType("annual");
+      }
     } catch (err) {
       console.error("Failed to load earnings:", err);
       setLoadError("Failed to load earnings data. Please try again.");
@@ -333,7 +346,9 @@ export default function EarningsPanel(props: Props) {
             when={filteredFinancials().length > 0}
             fallback={
               <p class="text-subtext1 text-sm py-4 text-center">
-                No {periodType()} data available. Sync earnings first.
+                No {periodType()} data available. Try switching to{" "}
+                {periodType() === "quarterly" ? "Annual" : "Quarterly"} view or
+                sync earnings first.
               </p>
             }
           >

@@ -65,7 +65,8 @@ async function getTechnicals(
         sma_200: data.sma200,
         price_vs_sma50_pct: data.priceVsSma50,
         price_vs_sma200_pct: data.priceVsSma200,
-        is_wait_zone: data.isWaitZone,
+        zone_status: data.zoneStatus, // New: BUY, WAIT_TOO_HOT, or WAIT_TOO_COLD
+        is_wait_zone: data.isWaitZone, // Backward compatibility
         wait_reasons: data.waitReasons,
       },
       meta: {
@@ -131,7 +132,8 @@ async function checkWaitZone(
       success: true,
       data: {
         symbol: cleanSymbol,
-        is_wait_zone: data.isWaitZone,
+        zone_status: data.zoneStatus, // New: BUY, WAIT_TOO_HOT, or WAIT_TOO_COLD
+        is_wait_zone: data.isWaitZone, // Backward compatibility
         reasons: data.waitReasons,
         current_price: data.currentPrice,
         rsi_14: data.rsi14,

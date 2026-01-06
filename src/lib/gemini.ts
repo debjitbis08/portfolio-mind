@@ -16,6 +16,7 @@ import {
   type Citation,
 } from "./tools";
 import { getSuggestionsContext } from "./tools/suggestions";
+import { PortfolioRole } from "./zone-status";
 
 // ============================================================================
 // Types
@@ -55,6 +56,7 @@ export interface Suggestion {
   technical_score?: number;
   cash_deployment_notes?: string; // For RAISE_CASH: when/why to deploy this cash
   citations?: Citation[]; // Sources used by agent for transparency
+  portfolio_role?: PortfolioRole; // Investment strategy context
 }
 
 export interface ToolCallProgress {
@@ -473,6 +475,7 @@ User research represents their conviction and deep analysis - respect it.
     "confidence": 8,
     "technical_score": 85,
     "allocation_amount": 50000,
+    "portfolio_role": "VALUE" | "MOMENTUM" | "CORE" | "SPECULATIVE" | "INCOME",
     "cash_deployment_notes": "Optional: when/why to deploy this cash later",
     "citations": [
       { "type": "research", "id": "uuid", "title": "Investment Thesis", "excerpt": "Key insight used..." },
@@ -487,6 +490,12 @@ User research represents their conviction and deep analysis - respect it.
 **Field Definitions:**
 - \`confidence\` (1-10): Your overall conviction in this recommendation. 1=speculative, 5=moderate conviction, 10=extremely high conviction. This reflects how strongly you believe the user should act on this.
 - \`technical_score\` (0-100): Pure technical setup quality - RSI positioning, SMA proximity, chart patterns. A stock can have high technical_score but low confidence (great entry but uncertain thesis) or vice versa.
+- \`portfolio_role\`: The investment strategy this stock serves:
+  - **VALUE**: Deep value play with margin of safety. Buy when beaten down, be patient.
+  - **MOMENTUM**: Trend-following, riding strength. Trim when overheated, cut when trend breaks.
+  - **CORE**: Long-term compounder, buy-and-hold. Never sell just because of technicals.
+  - **SPECULATIVE**: High-risk/reward bet. Small position, defined exit.
+  - **INCOME**: Dividend/distribution focused. Hold for yield, less sensitive to price swings.
 
 **Citation Types:**
 - \`research\`, \`link\`, \`note\`, \`table\` = User's own content (include \`id\` field)
@@ -572,6 +581,15 @@ Better to do nothing than to make a low-conviction trade.`;
             sell_quantity: s.sell_quantity,
             technical_score: s.technical_score,
             citations,
+            portfolio_role: [
+              "VALUE",
+              "MOMENTUM",
+              "CORE",
+              "SPECULATIVE",
+              "INCOME",
+            ].includes(s.portfolio_role)
+              ? (s.portfolio_role as PortfolioRole)
+              : undefined,
           };
         });
     } catch (error) {

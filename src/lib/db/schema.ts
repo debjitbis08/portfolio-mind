@@ -124,6 +124,9 @@ export const suggestions = sqliteTable(
       return d.toISOString();
     }),
     reviewedAt: text("reviewed_at"),
+    portfolioRole: text("portfolio_role", {
+      enum: ["VALUE", "MOMENTUM", "CORE", "SPECULATIVE", "INCOME"],
+    }),
   },
   (table) => [index("idx_suggestions_pending").on(table.status)]
 );

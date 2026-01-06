@@ -146,6 +146,7 @@ export const GET: APIRoute = async ({ request, url }) => {
         created_at: s.createdAt,
         expires_at: s.expiresAt,
         reviewed_at: s.reviewedAt,
+        portfolio_role: s.portfolioRole,
         citations,
         linked_transactions: linkedTransactions,
       };

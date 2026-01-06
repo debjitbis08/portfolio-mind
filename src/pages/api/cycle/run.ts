@@ -117,6 +117,13 @@ export const POST: APIRoute = async ({ request }) => {
           currentPrice: holdings.find((h) => h.symbol === s.symbol)
             ?.current_price,
           citations: s.citations ? JSON.stringify(s.citations) : null,
+          portfolioRole: s.portfolio_role as
+            | "VALUE"
+            | "MOMENTUM"
+            | "CORE"
+            | "SPECULATIVE"
+            | "INCOME"
+            | undefined,
         });
       }
 

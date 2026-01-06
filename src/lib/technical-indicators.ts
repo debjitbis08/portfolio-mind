@@ -5,6 +5,7 @@
 
 import { RSI, SMA } from "trading-signals";
 import YahooFinance from "yahoo-finance2";
+import { ZoneStatus, getZoneStatus, getZoneReasons } from "./zone-status";
 
 const yahooFinance = new YahooFinance();
 
@@ -16,7 +17,8 @@ export interface TechnicalData {
   sma200: number | null;
   priceVsSma50: number | null; // % difference
   priceVsSma200: number | null; // % difference
-  isWaitZone: boolean;
+  zoneStatus: ZoneStatus;
+  isWaitZone: boolean; // Backward compatibility
   waitReasons: string[];
 }
 
@@ -118,46 +120,38 @@ export function calculateIndicators(prices: HistoricalPrice[]): {
 
 /**
  * Determine if stock is in "wait zone" (don't buy)
- * Stricter thresholds for value investing:
- * - RSI > 40 = getting expensive
- * - > 15% above SMA = extended
- * - Below SMA200 = downtrend
+ * Uses the new ZoneStatus for richer context.
  */
 export function checkWaitZone(data: {
   currentPrice: number | null;
   rsi14: number | null;
   sma50: number | null;
   sma200: number | null;
-}): { isWaitZone: boolean; reasons: string[] } {
-  const reasons: string[] = [];
+}): { zoneStatus: ZoneStatus; isWaitZone: boolean; reasons: string[] } {
+  // Calculate price vs SMA percentages for zone status calculation
+  const priceVsSma50 =
+    data.currentPrice && data.sma50
+      ? ((data.currentPrice - data.sma50) / data.sma50) * 100
+      : null;
+  const priceVsSma200 =
+    data.currentPrice && data.sma200
+      ? ((data.currentPrice - data.sma200) / data.sma200) * 100
+      : null;
 
-  // RSI > 40 = stock is not in value territory
-  if (data.rsi14 && data.rsi14 > 40) {
-    reasons.push(`RSI ${data.rsi14.toFixed(0)} > 40 (not value)`);
-  }
+  const techData = {
+    rsi14: data.rsi14,
+    priceVsSma50,
+    priceVsSma200,
+    currentPrice: data.currentPrice,
+    sma200: data.sma200,
+  };
 
-  // > 15% above SMA50 = short-term extended
-  if (data.currentPrice && data.sma50) {
-    const pctAbove = ((data.currentPrice - data.sma50) / data.sma50) * 100;
-    if (pctAbove > 15) {
-      reasons.push(`${pctAbove.toFixed(0)}% above SMA50 (extended)`);
-    }
-  }
-
-  // > 15% above SMA200 = long-term extended
-  if (data.currentPrice && data.sma200) {
-    const pctAbove = ((data.currentPrice - data.sma200) / data.sma200) * 100;
-    if (pctAbove > 15) {
-      reasons.push(`${pctAbove.toFixed(0)}% above SMA200 (extended)`);
-    }
-    // Below SMA200 = downtrend (still a wait condition)
-    if (data.currentPrice < data.sma200) {
-      reasons.push("Below SMA200 (downtrend)");
-    }
-  }
+  const zoneStatus = getZoneStatus(techData);
+  const reasons = getZoneReasons(techData);
 
   return {
-    isWaitZone: reasons.length > 0,
+    zoneStatus,
+    isWaitZone: zoneStatus !== ZoneStatus.BUY_ZONE,
     reasons,
   };
 }
@@ -196,6 +190,7 @@ export async function getTechnicalData(
       sma200: indicators.sma200,
       priceVsSma50: priceVsSma50 ? Number(priceVsSma50.toFixed(2)) : null,
       priceVsSma200: priceVsSma200 ? Number(priceVsSma200.toFixed(2)) : null,
+      zoneStatus: waitCheck.zoneStatus,
       isWaitZone: waitCheck.isWaitZone,
       waitReasons: waitCheck.reasons,
     };
@@ -218,6 +213,7 @@ export async function getTechnicalData(
         sma200: null,
         priceVsSma50: null,
         priceVsSma200: null,
+        zoneStatus: ZoneStatus.BUY_ZONE, // Default when no data
         isWaitZone: false,
         waitReasons: ["Insufficient historical data for technical analysis"],
       };

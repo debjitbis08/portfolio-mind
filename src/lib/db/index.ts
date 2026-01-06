@@ -265,6 +265,7 @@ export function isPriceStale(updatedAt: string | null): boolean {
 /**
  * Check if a stock is in the "wait zone" (overextended).
  * Replaces is_wait_zone() PostgreSQL function.
+ * @deprecated Use getZoneStatus() from zone-status.ts for richer context
  */
 export function isWaitZone(tech: {
   rsi14: number | null;
@@ -273,19 +274,18 @@ export function isWaitZone(tech: {
   currentPrice: number | null;
   sma200: number | null;
 }): boolean {
-  if (!tech.rsi14 && !tech.priceVsSma50 && !tech.priceVsSma200) {
-    return false;
-  }
-
-  return (
-    (tech.rsi14 !== null && tech.rsi14 > 70) || // Overbought
-    (tech.priceVsSma50 !== null && tech.priceVsSma50 > 20) || // Extended
-    (tech.priceVsSma200 !== null && tech.priceVsSma200 > 40) || // Very extended
-    (tech.currentPrice !== null &&
-      tech.sma200 !== null &&
-      tech.currentPrice < tech.sma200) // Downtrend
-  );
+  // Import and use the new zone status logic
+  const { getZoneStatus, ZoneStatus } = require("../zone-status");
+  return getZoneStatus(tech) !== ZoneStatus.BUY_ZONE;
 }
+
+// Re-export zone status utilities for convenience
+export {
+  getZoneStatus,
+  getZoneReasons,
+  ZoneStatus,
+  PortfolioRole,
+} from "../zone-status";
 
 // ============================================================================
 

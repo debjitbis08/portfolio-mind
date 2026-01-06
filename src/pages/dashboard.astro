@@ -450,12 +450,25 @@ if (!session) {
                 techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-surface2 ${sma200Color}">${isAbove ? "+" : ""}${h.price_vs_sma200.toFixed(0)}% 200D</span>`;
               }
 
-              // Wait zone badge
-              if (h.is_wait_zone) {
+              // Zone status badge (replaces old wait zone)
+              if (h.zone_status) {
+                if (h.zone_status === "WAIT_TOO_HOT") {
+                  techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-red/20 text-red">🔥 Too Hot</span>`;
+                } else if (h.zone_status === "WAIT_TOO_COLD") {
+                  techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-blue/20 text-blue">🧊 Downtrend</span>`;
+                }
+                // BUY zone - no badge needed, it's the default good state
+              } else if (h.is_wait_zone) {
+                // Fallback for backward compatibility
                 techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-yellow/20 text-yellow">⚠️ Wait</span>`;
               }
 
-              if (!h.rsi_14 && !h.price_vs_sma50 && !h.is_wait_zone) {
+              if (
+                !h.rsi_14 &&
+                !h.price_vs_sma50 &&
+                !h.zone_status &&
+                !h.is_wait_zone
+              ) {
                 techBadges = '<span class="text-xs text-subtext0">—</span>';
               }
 

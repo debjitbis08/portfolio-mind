@@ -9,6 +9,7 @@ import { requireAuth } from "../../lib/middleware/requireAuth";
 import { db, getHoldings, isPriceStale, schema } from "../../lib/db";
 import { eq, inArray } from "drizzle-orm";
 import YahooFinance from "yahoo-finance2";
+import { getZoneStatus, getZoneReasons } from "../../lib/zone-status";
 
 const yahooFinance = new YahooFinance();
 
@@ -207,26 +208,16 @@ export const GET: APIRoute = async ({ request }) => {
       const yahooSymbol = mapSymbol(h.symbol);
       const tech = techMap.get(yahooSymbol) || techMap.get(h.symbol);
 
-      // Determine wait zone reasons
-      const waitReasons: string[] = [];
-      if (tech) {
-        if (tech.rsi14 && tech.rsi14 > 40) {
-          waitReasons.push(`RSI ${tech.rsi14.toFixed(0)}`);
-        }
-        if (tech.priceVsSma50 && tech.priceVsSma50 > 15) {
-          waitReasons.push(`+${tech.priceVsSma50.toFixed(0)}% SMA50`);
-        }
-        if (tech.priceVsSma200 && tech.priceVsSma200 > 15) {
-          waitReasons.push(`+${tech.priceVsSma200.toFixed(0)}% SMA200`);
-        }
-        if (
-          tech.sma200 &&
-          tech.currentPrice &&
-          tech.currentPrice < tech.sma200
-        ) {
-          waitReasons.push("Below SMA200");
-        }
-      }
+      // Compute zone status using new logic
+      const techData = {
+        rsi14: tech?.rsi14 ?? null,
+        priceVsSma50: tech?.priceVsSma50 ?? null,
+        priceVsSma200: tech?.priceVsSma200 ?? null,
+        currentPrice: tech?.currentPrice ?? null,
+        sma200: tech?.sma200 ?? null,
+      };
+      const zoneStatus = getZoneStatus(techData);
+      const waitReasons = getZoneReasons(techData);
 
       // Detect commodity exposure from ETF mappings
       const commodityExposure =
@@ -239,7 +230,8 @@ export const GET: APIRoute = async ({ request }) => {
         sma_200: tech?.sma200 ?? null,
         price_vs_sma50: tech?.priceVsSma50 ?? null,
         price_vs_sma200: tech?.priceVsSma200 ?? null,
-        is_wait_zone: waitReasons.length > 0,
+        zone_status: zoneStatus, // New: BUY, WAIT_TOO_HOT, WAIT_TOO_COLD
+        is_wait_zone: zoneStatus !== "BUY", // Backward compatibility
         wait_reasons: waitReasons,
         commodity_exposure: commodityExposure,
       };
