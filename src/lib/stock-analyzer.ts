@@ -622,11 +622,13 @@ export async function analyzeStock(
 }
 
 /**
- * Analyze all holdings + stocks marked as "interesting" in the watchlist
+ * Analyze all holdings + stocks marked as "interesting" in the watchlist.
+ * Skips stocks analyzed within the last 6 hours (batch mode only).
  */
 export async function analyzeInterestingStocks(
   onProgress?: (progress: AnalysisJobProgress) => void,
-  delayBetweenStocks: number = 2000 // 2 seconds between stocks to avoid rate limits
+  delayBetweenStocks: number = 2000, // 2 seconds between stocks to avoid rate limits
+  skipFreshAnalysis: boolean = true // Skip stocks analyzed within 6 hours
 ): Promise<AnalysisJobProgress> {
   // Get all interesting stocks from watchlist (excluding delisted)
   const interestingStocks = await db
@@ -654,10 +656,46 @@ export async function analyzeInterestingStocks(
     holdings.map((h) => h.symbol).filter((s) => !delistedSymbols.has(s))
   );
   const allSymbols = new Set([...interestingSymbols, ...holdingSymbols]);
-  const symbols = Array.from(allSymbols);
+  let symbols = Array.from(allSymbols);
+
+  // Filter out recently analyzed stocks (if skipFreshAnalysis is true)
+  const FRESHNESS_THRESHOLD_HOURS = 6;
+  let skippedFresh = 0;
+
+  if (skipFreshAnalysis) {
+    const cachedAnalysis = await db
+      .select({
+        symbol: schema.stockAnalysisCache.symbol,
+        analyzedAt: schema.stockAnalysisCache.analyzedAt,
+      })
+      .from(schema.stockAnalysisCache);
+
+    const freshSymbols = new Set<string>();
+    const now = Date.now();
+
+    for (const cached of cachedAnalysis) {
+      if (cached.analyzedAt) {
+        const analysisAge = now - new Date(cached.analyzedAt).getTime();
+        const freshThreshold = FRESHNESS_THRESHOLD_HOURS * 60 * 60 * 1000;
+        if (analysisAge < freshThreshold) {
+          freshSymbols.add(cached.symbol);
+        }
+      }
+    }
+
+    const originalCount = symbols.length;
+    symbols = symbols.filter((s) => !freshSymbols.has(s));
+    skippedFresh = originalCount - symbols.length;
+
+    if (skippedFresh > 0) {
+      console.log(
+        `[StockAnalyzer] Skipping ${skippedFresh} stocks analyzed within last ${FRESHNESS_THRESHOLD_HOURS}h`
+      );
+    }
+  }
 
   console.log(
-    `[StockAnalyzer] Starting batch analysis for ${symbols.length} stocks (${interestingSymbols.size} interesting + ${holdingSymbols.size} holdings)`
+    `[StockAnalyzer] Starting batch analysis for ${symbols.length} stocks (${interestingSymbols.size} interesting + ${holdingSymbols.size} holdings, ${skippedFresh} skipped as fresh)`
   );
 
   const progress: AnalysisJobProgress = {

@@ -380,6 +380,13 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
       .where(eq(schema.watchlist.delisted, true));
     const delistedSymbols = new Set(delistedStocks.map((s) => s.symbol));
 
+    // Get "interesting" symbols from watchlist (for filtering opportunities)
+    const interestingStocks = await db
+      .select({ symbol: schema.watchlist.symbol })
+      .from(schema.watchlist)
+      .where(eq(schema.watchlist.interesting, true));
+    const interestingSymbols = new Set(interestingStocks.map((s) => s.symbol));
+
     // Get all cached analysis (both holdings and opportunities), excluding delisted
     const allCached = await db
       .select()
@@ -393,8 +400,11 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
     const holdingsCached = validCached.filter((c) =>
       holdingSymbols.includes(c.symbol)
     );
+    // Only include opportunities that are STILL marked as "interesting"
+    // This prevents stale cached analyses from appearing after unmarking
     const opportunitiesCached = validCached.filter(
-      (c) => !holdingSymbols.includes(c.symbol)
+      (c) =>
+        !holdingSymbols.includes(c.symbol) && interestingSymbols.has(c.symbol)
     );
 
     // Group opportunities by timing signal

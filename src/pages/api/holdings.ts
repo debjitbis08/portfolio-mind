@@ -16,6 +16,45 @@ const yahooFinance = new YahooFinance();
 // Symbol mapping utility
 import { getSymbolMappings } from "../../lib/mappings";
 
+/**
+ * Retry helper for Yahoo Finance with timeout
+ */
+async function fetchQuoteWithRetry(
+  symbols: string[],
+  maxRetries = 2,
+  timeoutMs = 8000
+): Promise<any> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+      // Note: yahoo-finance2 doesn't support AbortSignal directly,
+      // but we can catch the timeout error and retry
+      const promise = yahooFinance.quote(symbols);
+      const result = await Promise.race([
+        promise,
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Timeout after ${timeoutMs}ms`)),
+            timeoutMs
+          )
+        ),
+      ]);
+
+      clearTimeout(timeoutId);
+      return result;
+    } catch (error) {
+      const isLastAttempt = attempt === maxRetries - 1;
+      if (isLastAttempt) {
+        throw error;
+      }
+      // Wait before retry (exponential backoff)
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+    }
+  }
+}
+
 export const GET: APIRoute = async ({ request }) => {
   // Auth check
   const authError = await requireAuth(request);
@@ -79,9 +118,9 @@ export const GET: APIRoute = async ({ request }) => {
     // Step 2: Fetch stale/missing from Yahoo
     if (staleSymbols.length > 0) {
       try {
-        // Try NSE first
+        // Try NSE first with retry
         const nseSymbols = staleSymbols.map((s) => `${s}.NS`);
-        const nseResults = await yahooFinance.quote(nseSymbols);
+        const nseResults = await fetchQuoteWithRetry(nseSymbols);
         const nseArray = Array.isArray(nseResults) ? nseResults : [nseResults];
 
         const pricesToCache: Array<{ symbol: string; price: number }> = [];
@@ -102,7 +141,7 @@ export const GET: APIRoute = async ({ request }) => {
         if (stillMissing.length > 0) {
           try {
             const bseSymbols = stillMissing.map((s) => `${s}.BO`);
-            const bseResults = await yahooFinance.quote(bseSymbols);
+            const bseResults = await fetchQuoteWithRetry(bseSymbols);
             const bseArray = Array.isArray(bseResults)
               ? bseResults
               : [bseResults];

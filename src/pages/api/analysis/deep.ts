@@ -6,7 +6,7 @@
  */
 
 import type { APIRoute } from "astro";
-import { db, schema } from "../../../lib/db";
+import { db, schema, getHoldings } from "../../../lib/db";
 import { eq } from "drizzle-orm";
 import {
   analyzeInterestingStocks,
@@ -113,19 +113,27 @@ export const POST: APIRoute = async ({ request }) => {
     if (symbols && symbols.length > 0) {
       estimatedStocks = symbols.length;
     } else {
-      // Count includes both interesting stocks and holdings
+      // Count must match analyzeInterestingStocks() logic exactly
       const interesting = await db
         .select({ symbol: schema.watchlist.symbol })
         .from(schema.watchlist)
         .where(eq(schema.watchlist.interesting, true));
 
-      const holdings = await db
-        .select({ symbol: schema.transactions.symbol })
-        .from(schema.transactions)
-        .groupBy(schema.transactions.symbol);
+      const delistedStocks = await db
+        .select({ symbol: schema.watchlist.symbol })
+        .from(schema.watchlist)
+        .where(eq(schema.watchlist.delisted, true));
+      const delistedSymbols = new Set(delistedStocks.map((s) => s.symbol));
 
-      const interestingSymbols = new Set(interesting.map((s) => s.symbol));
-      const holdingSymbols = new Set(holdings.map((h) => h.symbol));
+      // Use getHoldings() to get actual holdings with qty > 0
+      const holdings = await getHoldings();
+
+      const interestingSymbols = new Set(
+        interesting.map((s) => s.symbol).filter((s) => !delistedSymbols.has(s))
+      );
+      const holdingSymbols = new Set(
+        holdings.map((h) => h.symbol).filter((s) => !delistedSymbols.has(s))
+      );
       const allSymbols = new Set([...interestingSymbols, ...holdingSymbols]);
       estimatedStocks = allSymbols.size;
     }

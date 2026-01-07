@@ -1,7 +1,7 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import { validateSession } from "../lib/auth";
-import WatchlistPage from "../components/watchlist/WatchlistPage";
+import AnalysisOverview from "../components/analysis/AnalysisOverview";
 
 // Check auth on server side
 const session = await validateSession(Astro.request);
@@ -12,7 +12,7 @@ if (!session) {
 }
 ---
 
-<Layout title="Watchlist - Portfolio Mind">
+<Layout title="Analysis - Portfolio Mind">
   <div class="min-h-screen">
     <!-- Header -->
     <header
@@ -35,13 +35,13 @@ if (!session) {
             >
               Dashboard
             </a>
-            <a href="/watchlist" class="text-sm text-mauve font-medium">
-              Watchlist
-            </a>
             <a
-              href="/analysis"
+              href="/watchlist"
               class="text-sm text-subtext0 hover:text-text transition-colors"
             >
+              Watchlist
+            </a>
+            <a href="/analysis" class="text-sm text-mauve font-medium">
               Analysis
             </a>
           </nav>
@@ -58,6 +58,6 @@ if (!session) {
     </header>
 
     <!-- Content -->
-    <WatchlistPage client:load />
+    <AnalysisOverview client:load />
   </div>
 </Layout>

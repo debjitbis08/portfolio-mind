@@ -11,7 +11,7 @@
 import type { APIRoute } from "astro";
 import { requireAuth } from "../../../lib/middleware/requireAuth";
 import { db, getHoldings, schema } from "../../../lib/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { GeminiService, type HoldingForAnalysis } from "../../../lib/gemini";
 
 export const POST: APIRoute = async ({ request, url }) => {
@@ -124,26 +124,62 @@ export const POST: APIRoute = async ({ request, url }) => {
         ? await GeminiService.analyzeWithCachedData(holdings, availableFunds)
         : await GeminiService.analyzePortfolio(holdings, availableFunds);
 
-      // Store suggestions
+      // Store suggestions with superseding logic
       for (const s of suggestions) {
-        await db.insert(schema.suggestions).values({
-          cycleId: cycleRun.id,
-          symbol: s.symbol,
-          stockName: s.stock_name,
-          action: s.action as "BUY" | "SELL" | "HOLD" | "WATCH" | "RAISE_CASH",
-          rationale: s.rationale || s.reason,
-          technicalScore: s.technical_score,
-          currentPrice: holdings.find((h) => h.symbol === s.symbol)
-            ?.current_price,
-          citations: s.citations ? JSON.stringify(s.citations) : null,
-          portfolioRole: s.portfolio_role as
-            | "VALUE"
-            | "MOMENTUM"
-            | "CORE"
-            | "SPECULATIVE"
-            | "INCOME"
-            | undefined,
-        });
+        // Check for existing pending suggestions for this symbol
+        const existingSuggestion = await db
+          .select({ id: schema.suggestions.id })
+          .from(schema.suggestions)
+          .where(
+            and(
+              eq(schema.suggestions.symbol, s.symbol),
+              eq(schema.suggestions.status, "pending")
+            )
+          )
+          .limit(1);
+
+        // Insert new suggestion
+        const [newSuggestion] = await db
+          .insert(schema.suggestions)
+          .values({
+            cycleId: cycleRun.id,
+            symbol: s.symbol,
+            stockName: s.stock_name,
+            action: s.action as "BUY" | "SELL" | "HOLD" | "WATCH" | "RAISE_CASH",
+            rationale: s.rationale || s.reason,
+            confidence: s.confidence,
+            quantity: s.quantity,
+            allocationAmount: s.allocation_amount,
+            technicalScore: s.technical_score,
+            currentPrice: holdings.find((h) => h.symbol === s.symbol)
+              ?.current_price,
+            citations: s.citations ? JSON.stringify(s.citations) : null,
+            portfolioRole: s.portfolio_role as
+              | "VALUE"
+              | "MOMENTUM"
+              | "CORE"
+              | "SPECULATIVE"
+              | "INCOME"
+              | undefined,
+          })
+          .returning();
+
+        // If there was a previous pending suggestion, supersede it
+        if (existingSuggestion.length > 0) {
+          await db
+            .update(schema.suggestions)
+            .set({
+              status: "superseded",
+              supersededBy: newSuggestion.id,
+              supersededReason: "Updated recommendation from new analysis cycle",
+              reviewedAt: new Date().toISOString(),
+            })
+            .where(eq(schema.suggestions.id, existingSuggestion[0].id));
+
+          console.log(
+            `[Cycle] Superseded previous suggestion ${existingSuggestion[0].id} with ${newSuggestion.id} for ${s.symbol}`
+          );
+        }
       }
 
       // Update cycle as completed
