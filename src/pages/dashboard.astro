@@ -501,11 +501,27 @@ if (!session) {
                   techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-red/20 text-red">🔥 Too Hot</span>`;
                 } else if (h.zone_status === "WAIT_TOO_COLD") {
                   techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-blue/20 text-blue">🧊 Downtrend</span>`;
+                } else {
+                  techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-green/20 text-green">✅ Buy Zone</span>`;
                 }
-                // BUY zone - no badge needed, it's the default good state
               } else if (h.is_wait_zone) {
                 // Fallback for backward compatibility
                 techBadges += `<span class="px-2 py-0.5 text-xs rounded bg-yellow/20 text-yellow">⚠️ Wait</span>`;
+              }
+
+              // Portfolio Role badge
+              if (h.portfolio_role) {
+                const roleConfig = {
+                  VALUE: { emoji: "💎", label: "Value", color: "bg-blue/20 text-blue" },
+                  MOMENTUM: { emoji: "🚀", label: "Momentum", color: "bg-purple/20 text-purple" },
+                  CORE: { emoji: "🏛️", label: "Core", color: "bg-mauve/20 text-mauve" },
+                  SPECULATIVE: { emoji: "🎲", label: "Speculative", color: "bg-peach/20 text-peach" },
+                  INCOME: { emoji: "💰", label: "Income", color: "bg-green/20 text-green" }
+                };
+                const role = roleConfig[h.portfolio_role];
+                if (role) {
+                  techBadges += `<span class="px-2 py-0.5 text-xs rounded ${role.color}">${role.emoji} ${role.label}</span>`;
+                }
               }
 
               if (

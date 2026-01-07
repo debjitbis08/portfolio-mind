@@ -7,9 +7,13 @@
 import type { APIRoute } from "astro";
 import { requireAuth } from "../../lib/middleware/requireAuth";
 import { db, getHoldings, isPriceStale, schema } from "../../lib/db";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import YahooFinance from "yahoo-finance2";
-import { getZoneStatus, getZoneReasons } from "../../lib/zone-status";
+import {
+  getZoneStatus,
+  getZoneReasons,
+  PortfolioRole,
+} from "../../lib/zone-status";
 
 const yahooFinance = new YahooFinance();
 
@@ -334,12 +338,33 @@ export const GET: APIRoute = async ({ request }) => {
       commodityMap.set(m.symbol.toUpperCase(), m.commodityType);
     }
 
+    // Fetch portfolio roles for holdings symbols
+    const portfolioRolesData = await db
+      .select()
+      .from(schema.portfolioRoles)
+      .where(inArray(schema.portfolioRoles.symbol, symbols));
+
+    // Create map of symbol to portfolio role
+    const portfolioRoleMap = new Map<string, string>();
+    for (const pr of portfolioRolesData) {
+      portfolioRoleMap.set(pr.symbol, pr.role);
+    }
+
     // Merge technical data into holdings
     const holdingsWithTech = enrichedHoldings.map((h) => {
       const yahooSymbol = mapSymbol(h.symbol);
       const tech = techMap.get(yahooSymbol) || techMap.get(h.symbol);
 
-      // Compute zone status using new logic
+      // Get portfolio role from portfolio_roles table
+      const portfolioRole = portfolioRoleMap.get(h.symbol) || null;
+
+      // Parse portfolio role to enum (defaults to CORE if not set)
+      const roleEnum =
+        portfolioRole && portfolioRole in PortfolioRole
+          ? (PortfolioRole as any)[portfolioRole]
+          : PortfolioRole.CORE;
+
+      // Compute zone status using role-aware logic
       const techData = {
         rsi14: tech?.rsi14 ?? null,
         priceVsSma50: tech?.priceVsSma50 ?? null,
@@ -347,7 +372,7 @@ export const GET: APIRoute = async ({ request }) => {
         currentPrice: tech?.currentPrice ?? null,
         sma200: tech?.sma200 ?? null,
       };
-      const zoneStatus = getZoneStatus(techData);
+      const zoneStatus = getZoneStatus(techData, roleEnum);
       const waitReasons = getZoneReasons(techData);
 
       // Detect commodity exposure from ETF mappings
@@ -365,6 +390,7 @@ export const GET: APIRoute = async ({ request }) => {
         is_wait_zone: zoneStatus !== "BUY", // Backward compatibility
         wait_reasons: waitReasons,
         commodity_exposure: commodityExposure,
+        portfolio_role: portfolioRole, // Investment strategy context
         technical_updated_at: tech?.updatedAt ?? null, // Include timestamp
       };
     });

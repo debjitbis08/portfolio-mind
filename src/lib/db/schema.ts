@@ -579,3 +579,17 @@ export const stockAnalysisCache = sqliteTable(
     index("idx_analysis_cache_alert").on(table.newsAlert),
   ]
 );
+
+// ============================================================================
+// Portfolio Roles - Strategic classification of holdings
+// ============================================================================
+
+export const portfolioRoles = sqliteTable("portfolio_roles", {
+  symbol: text("symbol").primaryKey(),
+  role: text("role", {
+    enum: ["VALUE", "MOMENTUM", "CORE", "SPECULATIVE", "INCOME"],
+  }).notNull(),
+  notes: text("notes"), // Optional user notes about why this role
+  setAt: text("set_at").$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+});
