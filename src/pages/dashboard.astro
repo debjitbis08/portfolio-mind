@@ -6,6 +6,7 @@ import ResearchList from "../components/research/ResearchList";
 import GlobalSearch from "../components/common/GlobalSearch";
 import AIDiscovery from "../components/discovery/AIDiscovery";
 import PortfolioFreshnessCard from "../components/freshness/PortfolioFreshnessCard";
+import SuggestionUploadPrompt from "../components/suggestions/SuggestionUploadPrompt";
 
 // Check auth on server side
 const session = await validateSession(Astro.request);
@@ -74,6 +75,9 @@ if (!session) {
 
     <!-- Main Content -->
     <main class="max-w-6xl mx-auto space-y-6">
+      <!-- Suggestion Upload Prompt -->
+      <SuggestionUploadPrompt client:load />
+
       <!-- Data Freshness Card -->
       <PortfolioFreshnessCard client:load />
 
