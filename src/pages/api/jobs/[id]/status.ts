@@ -173,13 +173,13 @@ export const GET: APIRoute = async ({ params, request }) => {
           };
         });
 
-        // Step 5: Run Gemini analysis
+        // Step 5: Run Gemini analysis (Tier 3 - uses cached stock analysis)
         await updateProgress(
           50,
-          `Analyzing with Gemini AI (Cash: ₹${availableFunds.toLocaleString()})...`
+          `Analyzing with Gemini AI Tier 3 (Cash: ₹${availableFunds.toLocaleString()})...`
         );
 
-        const suggestions = await GeminiService.analyzePortfolio(
+        const suggestions = await GeminiService.analyzeWithCachedData(
           holdings,
           availableFunds,
           (progress, message, toolCall) => {

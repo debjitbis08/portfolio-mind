@@ -277,6 +277,7 @@ export const watchlist = sqliteTable("watchlist", {
   source: text("source").default("manual"), // 'screener', 'manual', 'ai_discovery'
   notes: text("notes"),
   interesting: integer("interesting", { mode: "boolean" }).default(false), // Mark as priority/interesting
+  delisted: integer("delisted", { mode: "boolean" }).default(false), // Mark as delisted/removed from exchange
 });
 
 // ============================================================================
@@ -532,4 +533,49 @@ export const concallHighlights = sqliteTable(
     createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
   },
   (table) => [index("idx_concall_highlights_symbol").on(table.symbol)]
+);
+
+// ============================================================================
+// Stock Analysis Cache - Tier 2 per-stock analysis results
+// ============================================================================
+
+/**
+ * Caches deep analysis results for stocks marked as "interesting" in watchlist.
+ * Used by Tier 2 (Deep Analysis) to store LLM-generated evaluations.
+ * Tier 3 (Discovery) reads these cached summaries instead of re-analyzing.
+ */
+export const stockAnalysisCache = sqliteTable(
+  "stock_analysis_cache",
+  {
+    symbol: text("symbol").primaryKey(),
+
+    // Analysis results
+    opportunityScore: integer("opportunity_score"), // 0-100
+    thesisSummary: text("thesis_summary"), // 200-500 chars
+    risksSummary: text("risks_summary"), // 100-300 chars
+    timingSignal: text("timing_signal", {
+      enum: ["accumulate", "wait", "avoid"],
+    }),
+
+    // News alert system
+    newsAlert: integer("news_alert", { mode: "boolean" }).default(false),
+    newsAlertReason: text("news_alert_reason"),
+
+    // Full analysis for debugging/transparency
+    analysisJson: text("analysis_json"), // Full LLM output
+
+    // Data freshness tracking (when source data was last used)
+    vrsDataAt: text("vrs_data_at"),
+    financialsAt: text("financials_at"),
+    valuepickrAt: text("valuepickr_at"),
+    newsAt: text("news_at"),
+
+    // Timestamps
+    analyzedAt: text("analyzed_at").$defaultFn(() => new Date().toISOString()),
+    expiresAt: text("expires_at"), // When this analysis should be refreshed
+  },
+  (table) => [
+    index("idx_analysis_cache_score").on(table.opportunityScore),
+    index("idx_analysis_cache_alert").on(table.newsAlert),
+  ]
 );

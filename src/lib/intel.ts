@@ -72,14 +72,37 @@ export class IntelService {
         // Qualitative Intel (ValuePickr Query by Name)
         let socialSentiment = null;
         try {
-          const rawName =
-            quote.price?.longName || quote.price?.shortName || symbol;
-          const cleanName = rawName
-            .replace(/ limited| ltd\.?| inc\.?| corp\.?| corporation/gi, "")
-            .trim();
+          // Check for existing fresh qualitative intel first
+          const existing = await db
+            .select()
+            .from(schema.stockIntel)
+            .where(eq(schema.stockIntel.symbol, symbol))
+            .limit(1);
 
-          const { ValuePickrService } = await import("./scrapers/valuepickr");
-          socialSentiment = await ValuePickrService.getResearch(cleanName);
+          const now = new Date();
+          const threeDaysAgo = new Date(
+            now.getTime() - 3 * 24 * 60 * 60 * 1000
+          );
+
+          if (
+            existing.length > 0 &&
+            existing[0].socialSentiment &&
+            existing[0].updatedAt &&
+            new Date(existing[0].updatedAt) > threeDaysAgo
+          ) {
+            console.log(`[Intel] Using cached ValuePickr data for ${symbol}`);
+            socialSentiment = JSON.parse(existing[0].socialSentiment);
+          } else {
+            // Fetch fresh if missing or stale
+            const rawName =
+              quote.price?.longName || quote.price?.shortName || symbol;
+            const cleanName = rawName
+              .replace(/ limited| ltd\.?| inc\.?| corp\.?| corporation/gi, "")
+              .trim();
+
+            const { ValuePickrService } = await import("./scrapers/valuepickr");
+            socialSentiment = await ValuePickrService.getResearch(cleanName);
+          }
         } catch (err) {
           console.warn(`ValuePickr skip for ${symbol}:`, err);
         }

@@ -57,6 +57,20 @@
       "when": 1767716172784,
       "tag": "0007_dear_captain_flint",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1767726334447,
+      "tag": "0008_dizzy_jamie_braddock",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1767751383320,
+      "tag": "0009_dry_wrecker",
+      "breakpoints": true
     }
   ]
 }

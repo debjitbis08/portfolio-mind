@@ -1,0 +1,1 @@
+ALTER TABLE `watchlist` ADD `delisted` integer DEFAULT false;

@@ -2,6 +2,10 @@
  * Discovery Cycle API
  * POST: Run a discovery cycle to analyze holdings and generate suggestions
  * GET: Get cycle history
+ *
+ * Query params:
+ * - useCachedAnalysis=true (default): Uses Tier 3 with pre-analyzed stock summaries
+ * - useCachedAnalysis=false: Uses original Tier 2 with agentic tool calling
  */
 
 import type { APIRoute } from "astro";
@@ -10,10 +14,14 @@ import { db, getHoldings, schema } from "../../../lib/db";
 import { eq, desc } from "drizzle-orm";
 import { GeminiService, type HoldingForAnalysis } from "../../../lib/gemini";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, url }) => {
   // Auth check
   const authError = await requireAuth(request);
   if (authError) return authError;
+
+  // Check if using Tier 3 (cached analysis) - default is true
+  const useCachedAnalysis =
+    url.searchParams.get("useCachedAnalysis") !== "false";
 
   let cycleId: string | null = null;
   try {
@@ -57,6 +65,9 @@ export const POST: APIRoute = async ({ request }) => {
       for (const t of technicalData) {
         techMap.set(t.symbol, t);
       }
+
+      // Get available funds from settings
+      const availableFunds = settings[0]?.availableFunds ?? 0;
 
       // Build holdings with tech data for Gemini
       const holdings: HoldingForAnalysis[] = dbHoldings.map((h) => {
@@ -102,8 +113,16 @@ export const POST: APIRoute = async ({ request }) => {
         };
       });
 
-      // Run Gemini analysis
-      const suggestions = await GeminiService.analyzePortfolio(holdings);
+      // Run Gemini analysis - Tier 3 (cached) or original agentic
+      console.log(
+        `[Cycle] Running ${
+          useCachedAnalysis ? "Tier 3 (cached)" : "Tier 2 (agentic)"
+        } analysis...`
+      );
+
+      const suggestions = useCachedAnalysis
+        ? await GeminiService.analyzeWithCachedData(holdings, availableFunds)
+        : await GeminiService.analyzePortfolio(holdings, availableFunds);
 
       // Store suggestions
       for (const s of suggestions) {

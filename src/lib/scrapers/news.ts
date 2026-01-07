@@ -76,6 +76,194 @@ const FREE_SOURCES = [
 ];
 
 /**
+ * Extract base64 string from Google News URL
+ */
+function extractBase64FromGoogleNewsUrl(
+  sourceUrl: string
+): { status: true; base64Str: string } | { status: false; message: string } {
+  try {
+    const url = new URL(sourceUrl);
+    const pathParts = url.pathname.split("/");
+
+    if (
+      url.hostname === "news.google.com" &&
+      pathParts.length > 1 &&
+      (pathParts[pathParts.length - 2] === "articles" ||
+        pathParts[pathParts.length - 2] === "read" ||
+        pathParts[pathParts.length - 2] === "rss")
+    ) {
+      // Handle /rss/articles/ case
+      const base64Part = pathParts[pathParts.length - 1];
+      // Clean up query params if any
+      const cleanBase64 = base64Part.split("?")[0];
+      return { status: true, base64Str: cleanBase64 };
+    }
+
+    return { status: false, message: "Invalid Google News URL format" };
+  } catch (e) {
+    return {
+      status: false,
+      message: `Error extracting base64: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    };
+  }
+}
+
+/**
+ * Get signature and timestamp from Google News page for decoding
+ */
+async function getDecodingParams(
+  base64Str: string
+): Promise<
+  | { status: true; signature: string; timestamp: string; base64Str: string }
+  | { status: false; message: string }
+> {
+  const urls = [
+    `https://news.google.com/articles/${base64Str}`,
+    `https://news.google.com/rss/articles/${base64Str}`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!response.ok) continue;
+
+      const html = await response.text();
+
+      // Extract data-n-a-sg (signature) and data-n-a-ts (timestamp) from c-wiz > div[jscontroller]
+      const signatureMatch = html.match(/data-n-a-sg="([^"]+)"/);
+      const timestampMatch = html.match(/data-n-a-ts="([^"]+)"/);
+
+      if (signatureMatch && timestampMatch) {
+        return {
+          status: true,
+          signature: signatureMatch[1],
+          timestamp: timestampMatch[1],
+          base64Str,
+        };
+      }
+    } catch (e) {
+      // Try next URL
+      continue;
+    }
+  }
+
+  return {
+    status: false,
+    message: "Failed to fetch decoding params from Google News",
+  };
+}
+
+/**
+ * Decode Google News URL using batchexecute API
+ */
+async function decodeGoogleNewsUrl(
+  signature: string,
+  timestamp: string,
+  base64Str: string
+): Promise<
+  { status: true; decodedUrl: string } | { status: false; message: string }
+> {
+  try {
+    const url = "https://news.google.com/_/DotsSplashUi/data/batchexecute";
+
+    const payload = [
+      "Fbv4je",
+      `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${base64Str}",${timestamp},"${signature}"]`,
+    ];
+
+    const body = `f.req=${encodeURIComponent(JSON.stringify([[payload]]))}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+      },
+      body,
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      return { status: false, message: `HTTP ${response.status}` };
+    }
+
+    const text = await response.text();
+
+    // Response format: first line is length, second line onwards is the data
+    const lines = text.split("\n\n");
+    if (lines.length < 2) {
+      return { status: false, message: "Invalid response format" };
+    }
+
+    // Parse the JSON response
+    const parsedData = JSON.parse(lines[1]);
+    // The structure is [[["wrb.fr","Fbv4je","[...]",...]]]
+    const dataStr = parsedData[0][2];
+    const decodedData = JSON.parse(dataStr);
+    const decodedUrl = decodedData[1];
+
+    if (!decodedUrl || typeof decodedUrl !== "string") {
+      return { status: false, message: "No decoded URL found in response" };
+    }
+
+    return { status: true, decodedUrl };
+  } catch (e) {
+    return {
+      status: false,
+      message: `Decode error: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+}
+
+/**
+ * Resolve Google News URL to actual article URL
+ */
+async function resolveGoogleNewsUrl(sourceUrl: string): Promise<string | null> {
+  // Step 1: Extract base64 string
+  const base64Result = extractBase64FromGoogleNewsUrl(sourceUrl);
+  if (!base64Result.status) {
+    console.warn(
+      `[News] ${(base64Result as { status: false; message: string }).message}`
+    );
+    return null;
+  }
+
+  // Step 2: Get signature and timestamp
+  const paramsResult = await getDecodingParams(base64Result.base64Str);
+  if (!paramsResult.status) {
+    console.warn(
+      `[News] ${(paramsResult as { status: false; message: string }).message}`
+    );
+    return null;
+  }
+
+  // Step 3: Decode URL
+  const decodeResult = await decodeGoogleNewsUrl(
+    paramsResult.signature,
+    paramsResult.timestamp,
+    paramsResult.base64Str
+  );
+  if (!decodeResult.status) {
+    console.warn(
+      `[News] ${(decodeResult as { status: false; message: string }).message}`
+    );
+    return null;
+  }
+
+  return decodeResult.decodedUrl;
+}
+
+/**
  * Fetch article content from a URL
  * Returns null if paywalled or inaccessible
  */
@@ -84,23 +272,34 @@ async function fetchArticleContent(
   source: string
 ): Promise<string | null> {
   try {
-    // Skip known problematic domains
-    if (url.includes("news.google.com/articles")) {
-      // Google News redirect - skip for now
-      return null;
+    let targetUrl = url;
+
+    // Google News uses encoded URLs - decode them to get the actual article
+    if (
+      url.includes("news.google.com/rss/articles/") ||
+      url.includes("news.google.com/articles/")
+    ) {
+      console.log(`[News] Decoding Google News URL for ${source}...`);
+      const resolvedUrl = await resolveGoogleNewsUrl(url);
+      if (!resolvedUrl) {
+        console.warn(`[News] Failed to decode Google News URL for ${source}`);
+        return null;
+      }
+      targetUrl = resolvedUrl;
+      console.log(`[News] Resolved to: ${targetUrl.substring(0, 80)}...`);
     }
 
-    const response = await fetch(url, {
+    const response = await fetch(targetUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml",
       },
-      signal: AbortSignal.timeout(5000), // 5 second timeout
+      signal: AbortSignal.timeout(10000), // 10 second timeout
     });
 
     if (!response.ok) {
-      console.warn(`[News] Failed to fetch ${url}: ${response.status}`);
+      console.warn(`[News] Failed to fetch ${targetUrl}: ${response.status}`);
       return null;
     }
 
@@ -334,9 +533,11 @@ KEY_EVENTS:
  */
 export async function getNewsIntel(
   query: string,
-  maxArticles: number = 5
+  targetReadableArticles: number = 5
 ): Promise<NewsIntel> {
-  const news = await fetchGoogleNews(query, maxArticles);
+  // Fetch more articles than needed so we have buffer for failures (404, 403, paywalls)
+  const fetchLimit = Math.min(targetReadableArticles * 3, 15);
+  const news = await fetchGoogleNews(query, fetchLimit);
 
   if (news.items.length === 0) {
     return {
@@ -350,7 +551,7 @@ export async function getNewsIntel(
     };
   }
 
-  // Try to fetch content for each article
+  // Try to fetch content for articles until we hit target or exhaust sources
   const articlesWithContent: {
     title: string;
     source: string;
@@ -358,19 +559,19 @@ export async function getNewsIntel(
   }[] = [];
 
   for (const item of news.items) {
-    // Check if source is likely free
-    const sourceLower = item.source.toLowerCase();
-    const isLikelyFree = FREE_SOURCES.some((s) => sourceLower.includes(s));
+    // Stop once we have enough readable articles
+    if (articlesWithContent.length >= targetReadableArticles) {
+      break;
+    }
 
-    if (isLikelyFree) {
-      const content = await fetchArticleContent(item.link, item.source);
-      if (content) {
-        articlesWithContent.push({
-          title: item.title,
-          source: item.source,
-          content,
-        });
-      }
+    // Try to fetch content from all sources - paywall detection happens after fetch
+    const content = await fetchArticleContent(item.link, item.source);
+    if (content) {
+      articlesWithContent.push({
+        title: item.title,
+        source: item.source,
+        content,
+      });
     }
 
     // Small delay between fetches
@@ -378,7 +579,7 @@ export async function getNewsIntel(
   }
 
   console.log(
-    `[News] Fetched content for ${articlesWithContent.length}/${news.items.length} articles`
+    `[News] Fetched content for ${articlesWithContent.length}/${news.items.length} articles (target: ${targetReadableArticles})`
   );
 
   // Summarize with LLM (even if we only have headlines)

@@ -2,6 +2,7 @@
  * Gemini AI Service
  *
  * Provides agentic portfolio analysis with tool calling support.
+ * Tier 3 support: analyzeWithCachedData uses pre-analyzed Tier 2 summaries.
  */
 
 import { GEMINI_API_KEY } from "astro:env/server";
@@ -17,6 +18,9 @@ import {
 } from "./tools";
 import { getSuggestionsContext } from "./tools/suggestions";
 import { PortfolioRole } from "./zone-status";
+import { getCachedAnalysis } from "./stock-analyzer";
+import { db, schema } from "./db";
+import { desc, eq, inArray } from "drizzle-orm";
 
 // ============================================================================
 // Types
@@ -339,6 +343,357 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
     }
   }
 
+  // ============================================================================
+  // TIER 3: Portfolio Discovery with Cached Analysis
+  // ============================================================================
+
+  /**
+   * Analyze portfolio using pre-cached Tier 2 stock analysis.
+   * This is MUCH faster as it doesn't need to call tools for each stock.
+   * Tool calling is still available for deep-dives if needed.
+   */
+  static async analyzeWithCachedData(
+    holdings: HoldingForAnalysis[],
+    availableFunds: number = 0,
+    onProgress?: ProgressCallback,
+    toolConfig?: ToolConfig | null
+  ): Promise<Suggestion[]> {
+    if (holdings.length === 0) return [];
+
+    // Clear request cache at start of cycle
+    clearRequestCache();
+
+    const progress = (pct: number, msg: string, tc?: ToolCallProgress) => {
+      console.log(`[Gemini Tier 3] ${pct}% - ${msg}`);
+      onProgress?.(pct, msg, tc);
+    };
+
+    progress(5, "Loading cached stock analysis...");
+
+    // Load cached Tier 2 analysis for all stocks
+    const holdingSymbols = holdings.map((h) => h.symbol);
+
+    // Get delisted symbols to exclude
+    const delistedStocks = await db
+      .select({ symbol: schema.watchlist.symbol })
+      .from(schema.watchlist)
+      .where(eq(schema.watchlist.delisted, true));
+    const delistedSymbols = new Set(delistedStocks.map((s) => s.symbol));
+
+    // Get all cached analysis (both holdings and opportunities), excluding delisted
+    const allCached = await db
+      .select()
+      .from(schema.stockAnalysisCache)
+      .orderBy(desc(schema.stockAnalysisCache.opportunityScore));
+
+    // Filter out delisted stocks
+    const validCached = allCached.filter((c) => !delistedSymbols.has(c.symbol));
+
+    // Separate holdings analysis from opportunities
+    const holdingsCached = validCached.filter((c) =>
+      holdingSymbols.includes(c.symbol)
+    );
+    const opportunitiesCached = validCached.filter(
+      (c) => !holdingSymbols.includes(c.symbol)
+    );
+
+    // Group opportunities by timing signal
+    const accumulate = opportunitiesCached.filter(
+      (c) => c.timingSignal === "accumulate" && (c.opportunityScore ?? 0) >= 70
+    );
+    const wait = opportunitiesCached.filter(
+      (c) => c.timingSignal === "wait" && (c.opportunityScore ?? 0) >= 60
+    );
+    const avoid = opportunitiesCached.filter(
+      (c) => c.timingSignal === "avoid" || (c.opportunityScore ?? 0) < 60
+    );
+
+    // Check for urgent news alerts in holdings
+    const holdingsWithAlerts = holdingsCached.filter((c) => c.newsAlert);
+
+    progress(
+      10,
+      `Found ${accumulate.length} accumulate, ${wait.length} wait, ${holdingsWithAlerts.length} alerts`
+    );
+
+    // Dynamic import for SDK
+    let GoogleGenAI: any;
+    let ThinkingLevel: any;
+    try {
+      const module = await import("@google/genai");
+      GoogleGenAI = module.GoogleGenAI;
+      ThinkingLevel = module.ThinkingLevel;
+    } catch (e) {
+      console.error("Failed to load @google/genai SDK:", e);
+      return [];
+    }
+
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+
+    // Fetch previous suggestions context
+    progress(15, "Fetching suggestion history...");
+    const suggestionsContext = await getSuggestionsContext();
+    const pendingSuggestions = suggestionsContext.filter(
+      (s) => s.status === "pending"
+    );
+    console.log(
+      `[Gemini Tier 3] Found ${pendingSuggestions.length} pending suggestions, ${suggestionsContext.length} total in history`
+    );
+
+    // Build holdings context with any cached analysis
+    const holdingsWithAnalysis = holdings.map((h) => {
+      const cached = holdingsCached.find((c) => c.symbol === h.symbol);
+      return {
+        symbol: h.symbol,
+        name: h.stock_name,
+        quantity: h.quantity,
+        avg_cost: h.avg_buy_price,
+        current_price: h.current_price,
+        returns_pct: h.returns_percent?.toFixed(1),
+        // Add cached Tier 2 data if available
+        opportunity_score: cached?.opportunityScore ?? null,
+        timing_signal: cached?.timingSignal ?? null,
+        thesis: cached?.thesisSummary ?? null,
+        risks: cached?.risksSummary ?? null,
+        news_alert: cached?.newsAlert ?? false,
+        news_alert_reason: cached?.newsAlertReason ?? null,
+      };
+    });
+
+    // Build the Tier 3 system prompt
+    const systemPrompt = this.buildTier3SystemPrompt(availableFunds);
+
+    // Build user message with pre-analyzed data
+    let userMessage = `## Current Portfolio
+
+| Symbol | Name | Qty | Avg | Current | Return | Score | Signal |
+|--------|------|-----|-----|---------|--------|-------|--------|
+${holdingsWithAnalysis
+  .map(
+    (h) =>
+      `| ${h.symbol} | ${h.name || "-"} | ${
+        h.quantity
+      } | ₹${h.avg_cost?.toFixed(0)} | ₹${h.current_price?.toFixed(0)} | ${
+        h.returns_pct
+      }% | ${h.opportunity_score ?? "-"} | ${h.timing_signal ?? "-"} |`
+  )
+  .join("\n")}
+
+**Total Holdings:** ${holdings.length}
+**Available Cash:** ₹${availableFunds.toLocaleString("en-IN")}
+
+`;
+
+    // Add alerts section if any
+    if (holdingsWithAlerts.length > 0) {
+      userMessage += `## ⚠️ HOLDINGS WITH NEWS ALERTS (Review First!)
+
+${holdingsWithAlerts
+  .map(
+    (h) =>
+      `**${h.symbol}** (Score: ${h.opportunityScore}, Signal: ${h.timingSignal})
+- Alert: ${h.newsAlertReason}
+- Thesis: ${h.thesisSummary}`
+  )
+  .join("\n\n")}
+
+`;
+    }
+
+    // Add pending suggestions
+    if (pendingSuggestions.length > 0) {
+      userMessage += `## Pending Suggestions (Review These)
+
+${pendingSuggestions
+  .map(
+    (s) =>
+      `- **${s.symbol}**: ${s.action} (${new Date(
+        s.createdAt || ""
+      ).toLocaleDateString()}) - ${s.rationale}`
+  )
+  .join("\n")}
+
+`;
+    }
+
+    // Add top opportunities (accumulate)
+    if (accumulate.length > 0) {
+      userMessage += `## 🟢 Top Opportunities (Accumulate Zone)
+
+These stocks have STRONG fundamentals AND favorable timing:
+
+${accumulate
+  .slice(0, 10)
+  .map(
+    (o) =>
+      `**${o.symbol}** — Score: ${o.opportunityScore}/100
+_${o.thesisSummary}_
+Risks: ${o.risksSummary}
+${o.newsAlert ? `⚠️ NEWS: ${o.newsAlertReason}` : ""}`
+  )
+  .join("\n\n")}
+
+`;
+    }
+
+    // Add wait zone stocks (could be good for watchlist awareness)
+    if (wait.length > 0) {
+      userMessage += `## 🟡 Good Stocks to Monitor (Wait Zone)
+
+These have good fundamentals but timing says wait:
+
+${wait
+  .slice(0, 5)
+  .map(
+    (o) =>
+      `- **${o.symbol}** (${o.opportunityScore}): ${o.thesisSummary?.slice(
+        0,
+        100
+      )}...`
+  )
+  .join("\n")}
+
+`;
+    }
+
+    userMessage += `## Your Task
+
+1. **ALERTS FIRST**: If any holdings have news alerts, evaluate if action needed
+2. **PENDING SUGGESTIONS**: Confirm, update, or invalidate previous recommendations
+3. **NEW OPPORTUNITIES**: From the 🟢 Accumulate list, pick 1-2 that fit the portfolio
+4. **PORTFOLIO BALANCE**: Consider sector overlap, position sizing, cash levels
+
+You have all the pre-analyzed data you need. Focus on PORTFOLIO-LEVEL decisions.
+
+Output 1-3 actionable recommendations.`;
+
+    // Tier 3 does NOT use tools - it has all the pre-analyzed data it needs
+    // This prevents expensive external scraper calls (ValuePickr, News, etc.)
+    const config: any = {
+      // NO TOOLS - Tier 3 uses cached summaries only
+      thinkingConfig: {
+        thinkingLevel: ThinkingLevel.HIGH, // Deep reasoning for portfolio decisions
+      },
+    };
+
+    progress(20, "Sending to Gemini Tier 3...");
+
+    // Initial conversation
+    let contents: any[] = [
+      {
+        role: "user",
+        parts: [{ text: systemPrompt + "\n\n" + userMessage }],
+      },
+    ];
+
+    try {
+      // Single LLM call - no tools, no iterations
+      const response = await ai.models.generateContent({
+        model: "gemini-3-pro-preview", // Pro for portfolio decisions
+        contents,
+        config,
+      });
+
+      // Got final response
+      const text = response.text || "";
+      console.log(
+        "[Gemini Tier 3] Final response received, length:",
+        text.length
+      );
+
+      const suggestions = this.parseResponse(text, holdings);
+      progress(100, `Found ${suggestions.length} recommendations`);
+
+      return suggestions;
+    } catch (error) {
+      console.error("Gemini Tier 3 failed:", error);
+      progress(
+        100,
+        `Error: ${error instanceof Error ? error.message : "Unknown"}`
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Build Tier 3 system prompt (focused on portfolio decisions)
+   */
+  private static buildTier3SystemPrompt(availableFunds: number): string {
+    return `You are a Portfolio Copilot making PORTFOLIO-LEVEL investment decisions.
+
+## CRITICAL: LONG-TERM VALUE INVESTOR (3-5 Year Horizon)
+You are NOT a short-term trader. You are building wealth through patient accumulation.
+"Be fearful when others are greedy, and greedy when others are fearful."
+
+The stocks shown have ALREADY been deeply analyzed by Tier 2.
+You have summaries, scores, and timing signals - DO NOT re-analyze from scratch.
+Your job is to make PORTFOLIO decisions based on these pre-analyzed insights.
+
+## Investment Philosophy
+Available Cash: ₹${availableFunds.toLocaleString("en-IN")}
+
+- Long-term value investing (3-5 year horizon)
+- Quality over quantity (prefer 15-20 concentrated positions)
+- No single stock > 10% of portfolio
+- Sector diversification (no sector > 25%)
+- Cash reserve of 5-15% for opportunities
+- **"Blood on the streets" = buying opportunity, not sell signal**
+
+## Decision Framework
+
+### SELL Signals (ONLY for THESIS-BREAKING issues!)
+Sell ONLY when:
+- THESIS IS BROKEN: Fraud, governance failure, business model obsolete
+- Position > 10% of portfolio AND thesis weakening
+- Much better opportunity exists AND current position fully valued
+
+**DO NOT SELL for:**
+- Temporary regulatory headwinds (taxes, duties)
+- Cyclical downturns
+- Short-term earnings miss
+- News alerts that are THESIS-TESTING, not THESIS-BREAKING
+
+### BUY Signals (Embrace Fear!)
+- Score >= 75 with timing = "accumulate"
+- **Panic selling + intact thesis = OPPORTUNITY**
+- News alerts that are THESIS-TESTING with RSI < 30 = contrarian BUY
+- Fills sector gaps in portfolio
+- Underweight in high-conviction names
+
+### HOLD (Default)
+- Good thesis but timing = "wait" (overbought)
+- Already at target position size
+- Cash reserves below minimum
+
+## Output Format (STRICT JSON)
+
+Return valid JSON with this structure:
+
+\`\`\`json
+{
+  "suggestions": [
+    {
+      "symbol": "SYMBOL",
+      "stock_name": "Full Name",
+      "action": "BUY",
+      "confidence": 8,
+      "quantity": 10,
+      "allocation_amount": 25000,
+      "reason": "Brief headline reason",
+      "rationale": "2-3 sentences with full reasoning",
+      "urgency": "this_week",
+      "portfolio_role": "growth"
+    }
+  ],
+  "portfolio_notes": "Optional overall observations"
+}
+\`\`\`
+
+Actions: BUY, SELL, RAISE_CASH, ADD, REDUCE
+Urgency: now, this_week, when_convenient
+Portfolio Role: core, growth, speculative, income, hedge`;
+  }
+
   /**
    * Build the system prompt
    */
@@ -522,17 +877,35 @@ Better to do nothing than to make a low-conviction trade.`;
       if (jsonMatch) {
         jsonStr = jsonMatch[1].trim();
       } else {
-        // Try to find array directly
+        // Try to find object or array directly
+        const objectMatch = text.match(/\{[\s\S]*\}/);
         const arrayMatch = text.match(/\[[\s\S]*\]/);
-        if (arrayMatch) {
+        if (objectMatch) {
+          jsonStr = objectMatch[0];
+        } else if (arrayMatch) {
           jsonStr = arrayMatch[0];
         }
       }
 
-      const rawSuggestions = JSON.parse(jsonStr) as any[];
+      const parsed = JSON.parse(jsonStr);
 
-      if (!Array.isArray(rawSuggestions)) {
-        console.warn("[Gemini] Response is not an array");
+      // Handle both formats:
+      // 1. Array: [{symbol, action, ...}, ...]
+      // 2. Object: {suggestions: [...], portfolio_notes: "..."}
+      let rawSuggestions: any[];
+      if (Array.isArray(parsed)) {
+        rawSuggestions = parsed;
+      } else if (parsed.suggestions && Array.isArray(parsed.suggestions)) {
+        rawSuggestions = parsed.suggestions;
+        // Log portfolio notes if present
+        if (parsed.portfolio_notes) {
+          console.log("[Gemini] Portfolio notes:", parsed.portfolio_notes);
+        }
+      } else {
+        console.warn(
+          "[Gemini] Response format not recognized:",
+          Object.keys(parsed)
+        );
         return [];
       }
 

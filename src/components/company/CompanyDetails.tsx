@@ -143,6 +143,22 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
     }
   );
 
+  // Tier 2 Deep Analysis cache
+  const [tier2Analysis, { refetch: refetchTier2 }] = createResource(
+    () => props.symbol,
+    async (symbol) => {
+      if (isServer) return null;
+      try {
+        const res = await fetch(
+          `/api/analysis/cache?symbol=${encodeURIComponent(symbol)}`
+        );
+        return await res.json();
+      } catch (e) {
+        return { found: false, analysis: null };
+      }
+    }
+  );
+
   const getRsiLabel = (rsi: number) => {
     if (rsi > 70) return "Overbought";
     if (rsi < 30) return "Oversold";
@@ -563,6 +579,185 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                                 : ""}
                               {new Date(s().created_at).toLocaleDateString()}
                             </p>
+                          </div>
+                        </div>
+                      )}
+                    </Show>
+                  </Show>
+                </div>
+
+                {/* Tier 2 Deep Analysis */}
+                <div class="bg-surface0 border border-surface1 rounded-xl p-4 mb-6">
+                  <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-medium text-subtext0">
+                      🧠 Deep Analysis (Tier 2)
+                    </h3>
+                    <button
+                      onClick={async () => {
+                        const btn = document.getElementById(
+                          "run-tier2-btn"
+                        ) as HTMLButtonElement;
+                        if (btn) {
+                          btn.disabled = true;
+                          btn.innerText = "Analyzing...";
+                        }
+                        try {
+                          const res = await fetch("/api/analysis/deep", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ symbols: [props.symbol] }),
+                          });
+                          if (res.ok) {
+                            const data = await res.json();
+                            // Poll for completion
+                            const pollInterval = setInterval(async () => {
+                              try {
+                                const statusRes = await fetch(
+                                  `/api/analysis/deep/${data.jobId}`
+                                );
+                                const status = await statusRes.json();
+                                if (
+                                  status.status === "completed" ||
+                                  status.status === "failed"
+                                ) {
+                                  clearInterval(pollInterval);
+                                  window.location.reload();
+                                }
+                              } catch {
+                                clearInterval(pollInterval);
+                              }
+                            }, 2000);
+                          } else {
+                            alert("Failed to start analysis");
+                            if (btn) {
+                              btn.disabled = false;
+                              btn.innerText = "Run Analysis";
+                            }
+                          }
+                        } catch (e) {
+                          console.error("Failed to run analysis", e);
+                          alert("Failed to start analysis");
+                          if (btn) {
+                            btn.disabled = false;
+                            btn.innerText = "Run Analysis";
+                          }
+                        }
+                      }}
+                      id="run-tier2-btn"
+                      class="text-[10px] px-2 py-1 rounded border border-surface1 bg-surface1/50 text-subtext0 hover:bg-surface1 hover:text-text transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Run Analysis
+                    </button>
+                  </div>
+                  <Show
+                    when={!tier2Analysis.loading}
+                    fallback={<div class="text-subtext1">Loading...</div>}
+                  >
+                    <Show
+                      when={tier2Analysis()?.found}
+                      fallback={
+                        <p class="text-subtext1 text-sm">
+                          No deep analysis yet. Click "Run Analysis" to analyze
+                          this stock.
+                        </p>
+                      }
+                    >
+                      {(a) => (
+                        <div class="space-y-3">
+                          {/* Score and Signal Row */}
+                          <div class="flex items-center gap-3">
+                            <div
+                              class={`text-2xl font-bold ${
+                                (tier2Analysis()?.analysis?.opportunityScore ??
+                                  0) >= 70
+                                  ? "text-green"
+                                  : (tier2Analysis()?.analysis
+                                      ?.opportunityScore ?? 0) >= 50
+                                  ? "text-yellow"
+                                  : "text-red"
+                              }`}
+                            >
+                              {tier2Analysis()?.analysis?.opportunityScore ??
+                                "?"}
+                              <span class="text-sm text-subtext1">/100</span>
+                            </div>
+                            <span
+                              class={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                tier2Analysis()?.analysis?.timingSignal ===
+                                "accumulate"
+                                  ? "bg-green/10 text-green border border-green/20"
+                                  : tier2Analysis()?.analysis?.timingSignal ===
+                                    "wait"
+                                  ? "bg-yellow/10 text-yellow border border-yellow/20"
+                                  : "bg-red/10 text-red border border-red/20"
+                              }`}
+                            >
+                              {tier2Analysis()?.analysis?.timingSignal ===
+                              "accumulate"
+                                ? "🟢 Accumulate"
+                                : tier2Analysis()?.analysis?.timingSignal ===
+                                  "wait"
+                                ? "🟡 Wait"
+                                : "🔴 Avoid"}
+                            </span>
+                            <Show when={tier2Analysis()?.analysis?.newsAlert}>
+                              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-peach/10 text-peach border border-peach/20">
+                                ⚠️ News Alert
+                              </span>
+                            </Show>
+                          </div>
+
+                          {/* Thesis Summary */}
+                          <div>
+                            <p class="text-sm text-text">
+                              {tier2Analysis()?.analysis?.thesisSummary}
+                            </p>
+                          </div>
+
+                          {/* Risks */}
+                          <Show when={tier2Analysis()?.analysis?.risksSummary}>
+                            <div class="text-sm">
+                              <span class="text-subtext0 font-medium">
+                                Risks:{" "}
+                              </span>
+                              <span class="text-subtext1">
+                                {tier2Analysis()?.analysis?.risksSummary}
+                              </span>
+                            </div>
+                          </Show>
+
+                          {/* News Alert Reason */}
+                          <Show
+                            when={tier2Analysis()?.analysis?.newsAlertReason}
+                          >
+                            <div class="p-2 bg-peach/5 border border-peach/20 rounded text-sm">
+                              <span class="text-peach font-medium">
+                                ⚠️ News:{" "}
+                              </span>
+                              <span class="text-text">
+                                {tier2Analysis()?.analysis?.newsAlertReason}
+                              </span>
+                            </div>
+                          </Show>
+
+                          {/* Analyzed At + Data Freshness */}
+                          <div class="text-xs text-subtext1 pt-2 border-t border-surface1 space-y-1">
+                            <div>
+                              Analyzed:{" "}
+                              {tier2Analysis()?.analysis?.analyzedAt
+                                ? new Date(
+                                    tier2Analysis()?.analysis?.analyzedAt
+                                  ).toLocaleString()
+                                : "Unknown"}
+                            </div>
+                            <Show when={tier2Analysis()?.analysis?.newsAt}>
+                              <div>
+                                News as of:{" "}
+                                {new Date(
+                                  tier2Analysis()?.analysis?.newsAt
+                                ).toLocaleString()}
+                              </div>
+                            </Show>
                           </div>
                         </div>
                       )}
