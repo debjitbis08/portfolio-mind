@@ -115,6 +115,24 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
     }
   );
 
+  // Fetch portfolio role for watchlist stocks (holdings already have it)
+  const [portfolioRole, { refetch: refetchPortfolioRole }] = createResource(
+    () => props.symbol,
+    async (symbol) => {
+      if (isServer) return null;
+      try {
+        const res = await fetch(
+          `/api/portfolio-roles?symbol=${encodeURIComponent(symbol)}`
+        );
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.role; // Returns the role string or null
+      } catch (e) {
+        return null;
+      }
+    }
+  );
+
   const [intel] = createResource(
     () => props.symbol,
     async (symbol) => {
@@ -548,7 +566,9 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                         <div class="mt-4 pt-4 border-t border-surface1">
                           <PortfolioRoleEditor
                             symbol={props.symbol}
-                            currentRole={holdings()?.portfolio_role}
+                            currentRole={
+                              holdings()?.portfolio_role || portfolioRole()
+                            }
                           />
                         </div>
                       </Show>
@@ -589,7 +609,6 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                                 : ""}
                               {new Date(s().created_at).toLocaleDateString()}
                             </p>
-
                           </div>
                         </div>
                       )}
