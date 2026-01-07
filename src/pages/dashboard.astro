@@ -123,6 +123,7 @@ if (!session) {
               <th class="p-4 text-right">Market price</th>
               <th class="p-4 text-right">Returns (%)</th>
               <th class="p-4 text-right">Current (Invested)</th>
+              <th class="p-4 text-center">Last Updated</th>
               <th class="p-4 text-center">Actions</th>
             </tr>
           </thead>
@@ -378,6 +379,36 @@ if (!session) {
       }).format(value);
     }
 
+    // Format relative time with staleness detection
+    function formatRelativeTime(timestamp: string | null): { text: string; isStale: boolean } {
+      if (!timestamp) {
+        return { text: "Never", isStale: true };
+      }
+
+      const now = Date.now();
+      const updatedAt = new Date(timestamp).getTime();
+      const ageMs = now - updatedAt;
+      const ageMinutes = Math.floor(ageMs / 60000);
+
+      // Consider data stale if older than 5 minutes
+      const STALENESS_THRESHOLD_MINUTES = 5;
+      const isStale = ageMinutes > STALENESS_THRESHOLD_MINUTES;
+
+      if (ageMinutes < 1) {
+        return { text: "Just now", isStale: false };
+      } else if (ageMinutes < 60) {
+        return { text: `${ageMinutes}m ago`, isStale };
+      } else {
+        const ageHours = Math.floor(ageMinutes / 60);
+        if (ageHours < 24) {
+          return { text: `${ageHours}h ago`, isStale: true };
+        } else {
+          const ageDays = Math.floor(ageHours / 24);
+          return { text: `${ageDays}d ago`, isStale: true };
+        }
+      }
+    }
+
     // Load holdings data
     async function loadHoldings() {
       const loadingEl = document.getElementById("holdings-loading")!;
@@ -478,6 +509,11 @@ if (!session) {
                 techBadges = '<span class="text-xs text-subtext0">—</span>';
               }
 
+              // Format timestamp with staleness check
+              const timeInfo = formatRelativeTime(h.technical_updated_at);
+              const timestampClass = timeInfo.isStale ? "text-red font-semibold" : "text-subtext0";
+              const warningIcon = timeInfo.isStale ? "⚠️ " : "";
+
               return `
             <tr class="hover:bg-surface1/50 transition-colors">
               <td class="p-4">
@@ -498,6 +534,9 @@ if (!session) {
               <td class="p-4 text-right">
                 <div class="text-text font-medium">${formatCurrency(h.current_value)}</div>
                 <div class="text-sm text-subtext0">${formatCurrency(h.invested_value)}</div>
+              </td>
+              <td class="p-4 text-center">
+                <div class="text-sm ${timestampClass}">${warningIcon}${timeInfo.text}</div>
               </td>
               <td class="p-4 text-center">
                 <div class="flex items-center gap-2 justify-center">

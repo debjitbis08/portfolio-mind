@@ -181,8 +181,100 @@ export const GET: APIRoute = async ({ request }) => {
       } catch (err) {
         console.error("Yahoo Finance error:", err);
 
-        // GRACEFUL DEGRADATION: Use stale cache as fallback
-        // When Yahoo Finance is rate-limited or unavailable, use cached data even if stale
+        // Try Google Finance as fallback before using stale cache
+        console.log(
+          `[Holdings] Yahoo Finance failed, trying Google Finance for ${staleSymbols.length} symbols...`
+        );
+
+        try {
+          const { getGoogleFinanceQuote } = await import(
+            "../../lib/scrapers/google-finance"
+          );
+
+          const pricesToCache: Array<{ symbol: string; price: number }> = [];
+
+          for (const yahoo of staleSymbols) {
+            if (freshPrices[yahoo]) continue; // Already have price
+
+            try {
+              const gfQuote = await getGoogleFinanceQuote(yahoo);
+              if (gfQuote) {
+                freshPrices[yahoo] = gfQuote.price;
+                pricesToCache.push({
+                  symbol: yahoo,
+                  price: gfQuote.price,
+                });
+                console.log(
+                  `[Holdings] ✓ Google Finance: ${yahoo} = ₹${gfQuote.price.toFixed(2)}`
+                );
+              }
+              // Small delay to avoid rate limiting
+              await new Promise((r) => setTimeout(r, 200));
+            } catch (gfErr) {
+              console.warn(
+                `[Holdings] Google Finance failed for ${yahoo}:`,
+                gfErr instanceof Error ? gfErr.message : "Unknown error"
+              );
+            }
+          }
+
+          // Update cache with Google Finance prices
+          for (const p of pricesToCache) {
+            await db
+              .insert(schema.priceCache)
+              .values({
+                symbol: p.symbol,
+                price: p.price,
+                updatedAt: new Date().toISOString(),
+              })
+              .onConflictDoUpdate({
+                target: schema.priceCache.symbol,
+                set: {
+                  price: p.price,
+                  updatedAt: new Date().toISOString(),
+                },
+              });
+          }
+        } catch (gfError) {
+          console.error("[Holdings] Google Finance fallback failed:", gfError);
+        }
+
+        // TRY TECHNICAL DATA TABLE: Use recently refreshed technical data
+        console.log(
+          `[Holdings] Checking technical_data table for ${staleSymbols.filter((s) => !freshPrices[s]).length} remaining symbols...`
+        );
+        const technicalData = await db
+          .select()
+          .from(schema.technicalData)
+          .where(inArray(schema.technicalData.symbol, staleSymbols));
+
+        for (const tech of technicalData) {
+          if (tech.currentPrice && !freshPrices[tech.symbol]) {
+            freshPrices[tech.symbol] = tech.currentPrice;
+            console.log(
+              `[Holdings] ✓ Using technical_data for ${tech.symbol}: ₹${tech.currentPrice.toFixed(2)} (updated: ${tech.updatedAt})`
+            );
+
+            // Also update price cache with this data
+            await db
+              .insert(schema.priceCache)
+              .values({
+                symbol: tech.symbol,
+                price: tech.currentPrice,
+                updatedAt: tech.updatedAt || new Date().toISOString(),
+              })
+              .onConflictDoUpdate({
+                target: schema.priceCache.symbol,
+                set: {
+                  price: tech.currentPrice,
+                  updatedAt: tech.updatedAt || new Date().toISOString(),
+                },
+              });
+          }
+        }
+
+        // LAST RESORT: Use stale cache for any still missing
+        // When all sources fail, use old cached data
         for (const yahoo of staleSymbols) {
           const cached = cachedPrices.find((c) => c.symbol === yahoo);
           if (cached && !freshPrices[yahoo]) {
@@ -273,6 +365,7 @@ export const GET: APIRoute = async ({ request }) => {
         is_wait_zone: zoneStatus !== "BUY", // Backward compatibility
         wait_reasons: waitReasons,
         commodity_exposure: commodityExposure,
+        technical_updated_at: tech?.updatedAt ?? null, // Include timestamp
       };
     });
 

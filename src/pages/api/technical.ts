@@ -93,8 +93,29 @@ export const POST: APIRoute = async ({ request }) => {
           headers: { "Content-Type": "application/json" },
         });
       }
+
+      // Get delisted stocks to skip
+      const delistedStocks = await db
+        .select({ symbol: schema.watchlist.symbol })
+        .from(schema.watchlist)
+        .where(eq(schema.watchlist.delisted, true));
+      const delistedSymbols = new Set(delistedStocks.map((s) => s.symbol));
+
+      // Filter out delisted holdings
+      const activeHoldings = holdings.filter(
+        (h) => !delistedSymbols.has(h.symbol)
+      );
+
+      console.log(
+        `[Technical] Skipping ${
+          holdings.length - activeHoldings.length
+        } delisted stock(s), refreshing ${activeHoldings.length}`
+      );
+
       // Get unique symbols with Yahoo mapping
-      symbolsToRefresh = [...new Set(holdings.map((h) => mapSymbol(h.symbol)))];
+      symbolsToRefresh = [
+        ...new Set(activeHoldings.map((h) => mapSymbol(h.symbol))),
+      ];
     }
 
     const results: TechnicalData[] = [];

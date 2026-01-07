@@ -28,7 +28,7 @@ export interface HistoricalPrice {
 }
 
 /**
- * Fetch historical prices from Yahoo Finance
+ * Fetch historical prices from Yahoo Finance with timeout
  */
 export async function fetchHistoricalPrices(
   symbol: string,
@@ -41,13 +41,22 @@ export async function fetchHistoricalPrices(
   // Determine if symbol is a BSE numeric code (try BSE first)
   const isBseCode = /^\d{5,6}$/.test(symbol);
 
-  const tryFetch = async (suffix: string) => {
+  const tryFetch = async (suffix: string, timeoutMs: number = 8000) => {
     const yahooSymbol = `${symbol}${suffix}`;
-    const result = await yahooFinance.chart(yahooSymbol, {
+
+    // Wrap in timeout promise
+    const fetchPromise = yahooFinance.chart(yahooSymbol, {
       period1: startDate,
       period2: endDate,
       interval: "1d",
     });
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Yahoo Finance timeout")), timeoutMs)
+    );
+
+    const result = await Promise.race([fetchPromise, timeoutPromise]);
+
     if (!result.quotes || result.quotes.length < 50) {
       throw new Error("Insufficient data");
     }
@@ -64,12 +73,21 @@ export async function fetchHistoricalPrices(
 
   try {
     return await tryFetch(primary);
-  } catch {
+  } catch (primaryError) {
     // Primary failed, try fallback
     try {
       return await tryFetch(fallback);
     } catch (error) {
-      console.error(`Failed to fetch history for ${symbol}:`, error);
+      // Log the actual error type for debugging
+      const errorMsg =
+        error instanceof Error ? error.message : "Unknown error";
+      if (errorMsg.includes("timeout") || errorMsg.includes("ETIMEDOUT")) {
+        console.warn(
+          `[Yahoo Finance] Timeout for ${symbol}, will try Google Finance`
+        );
+      } else {
+        console.error(`Failed to fetch history for ${symbol}:`, error);
+      }
       return [];
     }
   }
@@ -163,47 +181,60 @@ export function checkWaitZone(data: {
 export async function getTechnicalData(
   symbol: string
 ): Promise<TechnicalData | null> {
-  const prices = await fetchHistoricalPrices(symbol);
+  try {
+    const prices = await fetchHistoricalPrices(symbol);
 
-  // If we have enough historical data from Yahoo, calculate full technicals
-  if (prices.length >= 50) {
-    const indicators = calculateIndicators(prices);
-    const waitCheck = checkWaitZone(indicators);
+    // If we have enough historical data from Yahoo, calculate full technicals
+    if (prices.length >= 50) {
+      const indicators = calculateIndicators(prices);
+      const waitCheck = checkWaitZone(indicators);
 
-    const priceVsSma50 =
-      indicators.currentPrice && indicators.sma50
-        ? ((indicators.currentPrice - indicators.sma50) / indicators.sma50) *
-          100
-        : null;
+      const priceVsSma50 =
+        indicators.currentPrice && indicators.sma50
+          ? ((indicators.currentPrice - indicators.sma50) / indicators.sma50) *
+            100
+          : null;
 
-    const priceVsSma200 =
-      indicators.currentPrice && indicators.sma200
-        ? ((indicators.currentPrice - indicators.sma200) / indicators.sma200) *
-          100
-        : null;
+      const priceVsSma200 =
+        indicators.currentPrice && indicators.sma200
+          ? ((indicators.currentPrice - indicators.sma200) / indicators.sma200) *
+            100
+          : null;
 
-    return {
-      symbol,
-      currentPrice: indicators.currentPrice || 0,
-      rsi14: indicators.rsi14,
-      sma50: indicators.sma50,
-      sma200: indicators.sma200,
-      priceVsSma50: priceVsSma50 ? Number(priceVsSma50.toFixed(2)) : null,
-      priceVsSma200: priceVsSma200 ? Number(priceVsSma200.toFixed(2)) : null,
-      zoneStatus: waitCheck.zoneStatus,
-      isWaitZone: waitCheck.isWaitZone,
-      waitReasons: waitCheck.reasons,
-    };
+      return {
+        symbol,
+        currentPrice: indicators.currentPrice || 0,
+        rsi14: indicators.rsi14,
+        sma50: indicators.sma50,
+        sma200: indicators.sma200,
+        priceVsSma50: priceVsSma50 ? Number(priceVsSma50.toFixed(2)) : null,
+        priceVsSma200: priceVsSma200 ? Number(priceVsSma200.toFixed(2)) : null,
+        zoneStatus: waitCheck.zoneStatus,
+        isWaitZone: waitCheck.isWaitZone,
+        waitReasons: waitCheck.reasons,
+      };
+    }
+
+    // Fallback: Try Google Finance for at least current price
+    console.log(
+      `[TechnicalData] Yahoo Finance returned insufficient data for ${symbol}, trying Google Finance...`
+    );
+  } catch (error) {
+    // Yahoo Finance completely failed (timeout, network error, etc.)
+    console.warn(
+      `[TechnicalData] Yahoo Finance error for ${symbol}, trying Google Finance:`,
+      error instanceof Error ? error.message : "Unknown error"
+    );
   }
 
-  // Fallback: Try Google Finance for at least current price
+  // Google Finance fallback for price only (no technicals)
   try {
     const { getGoogleFinanceQuote } = await import("./scrapers/google-finance");
     const gfQuote = await getGoogleFinanceQuote(symbol);
 
     if (gfQuote) {
       console.log(
-        `[TechnicalData] Using Google Finance fallback for ${symbol}: ₹${gfQuote.price}`
+        `[TechnicalData] ✓ Using Google Finance for ${symbol}: ₹${gfQuote.price.toFixed(2)}`
       );
       return {
         symbol,
@@ -215,13 +246,13 @@ export async function getTechnicalData(
         priceVsSma200: null,
         zoneStatus: ZoneStatus.BUY_ZONE, // Default when no data
         isWaitZone: false,
-        waitReasons: ["Insufficient historical data for technical analysis"],
+        waitReasons: ["Using Google Finance (no technical indicators)"],
       };
     }
   } catch (error) {
     console.error(
-      `[TechnicalData] Google Finance fallback failed for ${symbol}:`,
-      error
+      `[TechnicalData] Google Finance fallback also failed for ${symbol}:`,
+      error instanceof Error ? error.message : "Unknown error"
     );
   }
 

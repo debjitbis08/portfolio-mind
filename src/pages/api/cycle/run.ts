@@ -13,6 +13,8 @@ import { requireAuth } from "../../../lib/middleware/requireAuth";
 import { db, getHoldings, schema } from "../../../lib/db";
 import { eq, desc, and } from "drizzle-orm";
 import { GeminiService, type HoldingForAnalysis } from "../../../lib/gemini";
+import { getTechnicalData } from "../../../lib/technical-indicators";
+import { getSymbolMappings } from "../../../lib/mappings";
 
 export const POST: APIRoute = async ({ request, url }) => {
   // Auth check
@@ -58,7 +60,122 @@ export const POST: APIRoute = async ({ request, url }) => {
         throw new Error("No holdings found");
       }
 
-      // Fetch technical data
+      // Get delisted stocks to skip
+      const delistedStocks = await db
+        .select({ symbol: schema.watchlist.symbol })
+        .from(schema.watchlist)
+        .where(eq(schema.watchlist.delisted, true));
+      const delistedSymbols = new Set(delistedStocks.map((s) => s.symbol));
+
+      // Filter out delisted holdings
+      const activeHoldings = dbHoldings.filter(
+        (h) => !delistedSymbols.has(h.symbol)
+      );
+
+      if (delistedSymbols.size > 0) {
+        const skipped = dbHoldings.length - activeHoldings.length;
+        console.log(`[Cycle] Skipping ${skipped} delisted stock(s)`);
+      }
+
+      // Check if existing technical data is fresh enough (within 5 minutes)
+      const FRESHNESS_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+      const now = Date.now();
+
+      const existingTechData = await db.select().from(schema.technicalData);
+      const staleTechCount = existingTechData.filter((t) => {
+        if (!t.updatedAt) return true;
+        const age = now - new Date(t.updatedAt).getTime();
+        return age > FRESHNESS_THRESHOLD_MS;
+      }).length;
+
+      if (staleTechCount > 0 || existingTechData.length < activeHoldings.length) {
+        console.log(
+          `[Cycle] Technical data is stale or incomplete (${staleTechCount} stale, ${existingTechData.length}/${activeHoldings.length} stocks). Refreshing...`
+        );
+      } else {
+        console.log(
+          `[Cycle] Technical data is fresh (updated within 5 minutes). Skipping refresh.`
+        );
+      }
+
+      // Refresh technical data for all active holdings before analysis
+      const shouldRefresh = staleTechCount > 0 || existingTechData.length < activeHoldings.length;
+
+      if (shouldRefresh) {
+        console.log(
+          `[Cycle] Refreshing technical data for ${activeHoldings.length} holdings...`
+        );
+      }
+
+      const mappings = await getSymbolMappings();
+      const mapSymbol = (s: string) => mappings[s] || s;
+
+      let refreshed = 0;
+      let failed = 0;
+
+      for (const holding of activeHoldings) {
+        if (!shouldRefresh) {
+          // Skip refresh if data is fresh
+          continue;
+        }
+
+        try {
+          const yahooSymbol = mapSymbol(holding.symbol);
+          const data = await getTechnicalData(yahooSymbol);
+
+          if (data) {
+            // Update or insert technical data
+            await db
+              .insert(schema.technicalData)
+              .values({
+                symbol: yahooSymbol,
+                currentPrice: data.currentPrice,
+                rsi14: data.rsi14,
+                sma50: data.sma50,
+                sma200: data.sma200,
+                priceVsSma50: data.priceVsSma50,
+                priceVsSma200: data.priceVsSma200,
+                updatedAt: new Date().toISOString(),
+              })
+              .onConflictDoUpdate({
+                target: schema.technicalData.symbol,
+                set: {
+                  currentPrice: data.currentPrice,
+                  rsi14: data.rsi14,
+                  sma50: data.sma50,
+                  sma200: data.sma200,
+                  priceVsSma50: data.priceVsSma50,
+                  priceVsSma200: data.priceVsSma200,
+                  updatedAt: new Date().toISOString(),
+                },
+              });
+
+            refreshed++;
+          } else {
+            console.warn(
+              `[Cycle] No technical data available for ${holding.symbol}`
+            );
+            failed++;
+          }
+
+          // Small delay to avoid rate limiting
+          await new Promise((r) => setTimeout(r, 500));
+        } catch (err) {
+          console.error(
+            `[Cycle] Error refreshing technical data for ${holding.symbol}:`,
+            err
+          );
+          failed++;
+        }
+      }
+
+      if (shouldRefresh) {
+        console.log(
+          `[Cycle] Technical refresh complete: ${refreshed} succeeded, ${failed} failed`
+        );
+      }
+
+      // Fetch technical data (now fresh or already fresh)
       const technicalData = await db.select().from(schema.technicalData);
 
       const techMap = new Map<string, (typeof technicalData)[0]>();

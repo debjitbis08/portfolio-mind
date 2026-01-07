@@ -33,8 +33,11 @@ export const POST: APIRoute = async ({ request }) => {
     if (requestedSymbols && Array.isArray(requestedSymbols)) {
       symbolsToSync = requestedSymbols;
     } else {
-      // Get all watchlist stocks
-      const watchlistStocks = await db.select().from(schema.watchlist);
+      // Get all watchlist stocks (excluding delisted)
+      const watchlistStocks = await db
+        .select()
+        .from(schema.watchlist)
+        .where(eq(schema.watchlist.delisted, false));
       symbolsToSync = watchlistStocks.map((s) => s.symbol);
     }
 
