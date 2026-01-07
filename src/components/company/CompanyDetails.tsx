@@ -544,68 +544,6 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                           </div>
                         </div>
 
-                        {/* Portfolio Role */}
-                        <Show when={holdings()?.portfolio_role}>
-                          <div class="mt-4 pt-4 border-t border-surface1">
-                            <div class="flex items-center justify-between">
-                              <span class="text-xs text-subtext1">
-                                Portfolio Role
-                              </span>
-                              {(() => {
-                                const role = holdings()?.portfolio_role;
-                                const roleConfig: Record<
-                                  string,
-                                  { emoji: string; label: string; color: string; description: string }
-                                > = {
-                                  VALUE: {
-                                    emoji: "💎",
-                                    label: "Value",
-                                    color: "bg-blue/10 text-blue border-blue/20",
-                                    description: "Deep value play with margin of safety"
-                                  },
-                                  MOMENTUM: {
-                                    emoji: "🚀",
-                                    label: "Momentum",
-                                    color: "bg-purple/10 text-purple border-purple/20",
-                                    description: "Trend-following, riding strength"
-                                  },
-                                  CORE: {
-                                    emoji: "🏛️",
-                                    label: "Core",
-                                    color: "bg-mauve/10 text-mauve border-mauve/20",
-                                    description: "Long-term compounder, buy-and-hold"
-                                  },
-                                  SPECULATIVE: {
-                                    emoji: "🎲",
-                                    label: "Speculative",
-                                    color: "bg-peach/10 text-peach border-peach/20",
-                                    description: "High-risk/reward bet"
-                                  },
-                                  INCOME: {
-                                    emoji: "💰",
-                                    label: "Income",
-                                    color: "bg-green/10 text-green border-green/20",
-                                    description: "Dividend/distribution focused"
-                                  }
-                                };
-                                const config = role ? roleConfig[role] : null;
-                                if (!config) return null;
-
-                                return (
-                                  <div class="flex flex-col items-end gap-1">
-                                    <span class={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${config.color}`}>
-                                      {config.emoji} {config.label}
-                                    </span>
-                                    <span class="text-[9px] text-subtext0 text-right">
-                                      {config.description}
-                                    </span>
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        </Show>
-
                         {/* Portfolio Role Editor */}
                         <div class="mt-4 pt-4 border-t border-surface1">
                           <PortfolioRoleEditor
