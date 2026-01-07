@@ -5,6 +5,7 @@ import CompanyNotes from "../components/notes/CompanyNotes";
 import ResearchList from "../components/research/ResearchList";
 import GlobalSearch from "../components/common/GlobalSearch";
 import AIDiscovery from "../components/discovery/AIDiscovery";
+import PortfolioFreshnessCard from "../components/freshness/PortfolioFreshnessCard";
 
 // Check auth on server side
 const session = await validateSession(Astro.request);
@@ -73,8 +74,11 @@ if (!session) {
 
     <!-- Main Content -->
     <main class="max-w-6xl mx-auto space-y-6">
+      <!-- Data Freshness Card -->
+      <PortfolioFreshnessCard client:load />
+
       <!-- Summary Card -->
-      <section id="summary-card" class="border border-surface1 rounded-2xl p-6">
+      <section id="summary-card" class="border border-surface1 rounded-2xl p-6 mt-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg text-subtext0">
             Holdings <span id="holdings-count" class="text-text">(0)</span>

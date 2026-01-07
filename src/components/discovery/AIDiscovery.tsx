@@ -121,10 +121,50 @@ export default function AIDiscovery(props: AIDiscoveryProps) {
   const runDiscoveryCycle = async () => {
     setIsRunning(true);
     setProgress(0);
-    setProgressMessage("Starting...");
+    setProgressMessage("Checking data freshness...");
     setStatusMessage("");
 
     try {
+      // Pre-flight check: Verify data freshness
+      const freshnessRes = await fetch("/api/analysis/freshness");
+      if (freshnessRes.ok) {
+        const freshness = await freshnessRes.json();
+
+        if (!freshness.can_run_tier3) {
+          // Block run with clear message
+          const stocksList = freshness.stocks_needing_refresh
+            .map((s: any) => `  • ${s.symbol}: ${s.reason}`)
+            .join("\n");
+
+          alert(
+            `❌ Cannot Run Discovery Cycle\n\n` +
+            `${freshness.recommendation}\n\n` +
+            `Stocks needing refresh:\n${stocksList}\n\n` +
+            `Please run Tier 2 analysis for these stocks first, or use the "Refresh" button on the Data Freshness card above.`
+          );
+          setIsRunning(false);
+          setProgressMessage("");
+          return;
+        }
+
+        // Show warning if data is aging but can proceed
+        if (freshness.overall_status === "aging" || freshness.overall_status === "stale") {
+          const proceed = confirm(
+            `⚠️ Data Freshness Warning\n\n` +
+            `${freshness.recommendation}\n\n` +
+            `Some data is aging. Do you want to proceed anyway?`
+          );
+
+          if (!proceed) {
+            setIsRunning(false);
+            setProgressMessage("");
+            return;
+          }
+        }
+      }
+
+      setProgressMessage("Starting discovery cycle...");
+
       // Step 1: Create the job
       const createRes = await fetch("/api/jobs", {
         method: "POST",

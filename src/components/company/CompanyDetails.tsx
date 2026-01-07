@@ -15,6 +15,7 @@ import TablesList from "../tables/TablesList";
 import PriceChart from "../charts/PriceChart";
 import EarningsPanel from "../earnings/EarningsPanel";
 import VRSSection from "./VRSSection";
+import DataAgeBadge from "../freshness/DataAgeBadge";
 import { FaSolidArrowsRotate, FaSolidTrashCan } from "solid-icons/fa";
 
 interface CompanyDetailsProps {
@@ -589,9 +590,15 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
                 {/* Tier 2 Deep Analysis */}
                 <div class="bg-surface0 border border-surface1 rounded-xl p-4 mb-6">
                   <div class="flex items-center justify-between mb-3">
-                    <h3 class="text-sm font-medium text-subtext0">
-                      🧠 Deep Analysis (Tier 2)
-                    </h3>
+                    <div class="flex items-center gap-2">
+                      <h3 class="text-sm font-medium text-subtext0">
+                        🧠 Deep Analysis (Tier 2)
+                      </h3>
+                      <DataAgeBadge
+                        symbol={props.symbol}
+                        source="Cached Analysis (Tier 2)"
+                      />
+                    </div>
                     <button
                       onClick={async () => {
                         const btn = document.getElementById(

@@ -232,6 +232,24 @@ export default function AnalysisOverview() {
     return "text-red";
   };
 
+  const getFreshnessColor = (dateStr: string | null) => {
+    if (!dateStr) return "text-subtext1";
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffHours = Math.floor(
+      (now.getTime() - date.getTime()) / (1000 * 60 * 60)
+    );
+
+    // TTL for cached analysis is 7 days (168 hours)
+    // Fresh: < 120 hours (5 days)
+    // Aging: 120-168 hours (5-7 days)
+    // Stale: > 168 hours (7 days)
+
+    if (diffHours < 120) return "text-green"; // Fresh
+    if (diffHours < 168) return "text-yellow"; // Aging
+    return "text-red"; // Stale
+  };
+
   return (
     <div class="max-w-7xl mx-auto p-4 md:p-8">
       {/* Header */}
@@ -407,7 +425,7 @@ export default function AnalysisOverview() {
                             {stock.analysis?.thesisSummary || "-"}
                           </p>
                         </td>
-                        <td class="px-4 py-3 text-xs text-subtext1">
+                        <td class={`px-4 py-3 text-xs font-medium ${getFreshnessColor(stock.analysis?.analyzedAt ?? null)}`}>
                           {formatDate(stock.analysis?.analyzedAt ?? null)}
                         </td>
                         <td class="px-4 py-3">
@@ -506,7 +524,7 @@ export default function AnalysisOverview() {
                             {stock.analysis?.thesisSummary || "-"}
                           </p>
                         </td>
-                        <td class="px-4 py-3 text-xs text-subtext1">
+                        <td class={`px-4 py-3 text-xs font-medium ${getFreshnessColor(stock.analysis?.analyzedAt ?? null)}`}>
                           {formatDate(stock.analysis?.analyzedAt ?? null)}
                         </td>
                         <td class="px-4 py-3">

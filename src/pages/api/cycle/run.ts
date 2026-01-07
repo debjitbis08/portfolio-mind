@@ -15,6 +15,7 @@ import { eq, desc, and } from "drizzle-orm";
 import { GeminiService, type HoldingForAnalysis } from "../../../lib/gemini";
 import { getTechnicalData } from "../../../lib/technical-indicators";
 import { getSymbolMappings } from "../../../lib/mappings";
+import { checkPortfolioDataFreshness } from "../../../lib/data-freshness";
 
 export const POST: APIRoute = async ({ request, url }) => {
   // Auth check
@@ -24,6 +25,9 @@ export const POST: APIRoute = async ({ request, url }) => {
   // Check if using Tier 3 (cached analysis) - default is true
   const useCachedAnalysis =
     url.searchParams.get("useCachedAnalysis") !== "false";
+
+  // Allow forcing stale data (with warning)
+  const forceStale = url.searchParams.get("force") === "true";
 
   let cycleId: string | null = null;
   try {
@@ -181,6 +185,82 @@ export const POST: APIRoute = async ({ request, url }) => {
       const techMap = new Map<string, (typeof technicalData)[0]>();
       for (const t of technicalData) {
         techMap.set(t.symbol, t);
+      }
+
+      // For Tier 3: Validate cached analysis freshness
+      if (useCachedAnalysis) {
+        console.log(
+          `[Cycle] Validating data freshness for Tier 3 analysis...`
+        );
+
+        const holdingSymbols = activeHoldings.map((h) => h.symbol);
+        const freshnessReport = await checkPortfolioDataFreshness(
+          holdingSymbols
+        );
+
+        console.log(
+          `[Cycle] Freshness check: ${freshnessReport.summary.fresh} fresh, ${freshnessReport.summary.aging} aging, ${freshnessReport.summary.stale} stale, ${freshnessReport.summary.missing_analysis} missing`
+        );
+
+        if (!freshnessReport.can_proceed && !forceStale) {
+          // Block run if critical data is missing
+          return new Response(
+            JSON.stringify({
+              error: "Data freshness check failed",
+              recommendation: freshnessReport.recommendation,
+              warnings: freshnessReport.warnings,
+              summary: freshnessReport.summary,
+              stock_reports: freshnessReport.stock_reports.map((r) => ({
+                symbol: r.symbol,
+                status: r.overall_status,
+                recommendation: r.recommendation,
+              })),
+              hint: "Run Tier 2 analysis for missing stocks or use ?force=true to proceed anyway",
+            }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        if (freshnessReport.overall_status === "stale" && !forceStale) {
+          // Warn about stale data but allow proceeding with force
+          return new Response(
+            JSON.stringify({
+              error: "Some cached analysis is stale",
+              recommendation: freshnessReport.recommendation,
+              warnings: freshnessReport.warnings,
+              summary: freshnessReport.summary,
+              stock_reports: freshnessReport.stock_reports
+                .filter((r) => r.overall_status === "stale")
+                .map((r) => ({
+                  symbol: r.symbol,
+                  status: r.overall_status,
+                  recommendation: r.recommendation,
+                  checks: r.checks,
+                })),
+              hint: "Re-run Tier 2 for stale stocks or use ?force=true to proceed with stale data",
+            }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        if (freshnessReport.warnings.length > 0) {
+          console.warn(
+            `[Cycle] Data freshness warnings:`,
+            freshnessReport.warnings
+          );
+        }
+
+        if (forceStale) {
+          console.warn(
+            `[Cycle] Proceeding with stale data due to force=true flag`
+          );
+        }
       }
 
       // Get available funds from settings

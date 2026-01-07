@@ -13,6 +13,7 @@ import {
   analyzeStock,
   type AnalysisJobProgress,
 } from "../../../lib/stock-analyzer";
+import { checkBatchDataFreshness } from "../../../lib/data-freshness";
 
 // In-memory job store (for single-user, single-instance deployment)
 const activeJobs = new Map<
@@ -23,6 +24,7 @@ const activeJobs = new Map<
     startedAt: string;
     completedAt?: string;
     error?: string;
+    freshnessWarnings?: string[];
   }
 >();
 
@@ -58,6 +60,23 @@ export const POST: APIRoute = async ({ request }) => {
 
       try {
         if (symbols && symbols.length > 0) {
+          // Check data freshness for requested symbols
+          const freshnessReports = await checkBatchDataFreshness(symbols);
+          const allWarnings: string[] = [];
+
+          for (const report of freshnessReports) {
+            if (report.warnings.length > 0) {
+              allWarnings.push(
+                `${report.symbol}: ${report.warnings.join("; ")}`
+              );
+            }
+          }
+
+          if (allWarnings.length > 0) {
+            job.freshnessWarnings = allWarnings;
+            console.warn(`[Deep Analysis] Data freshness warnings:`, allWarnings);
+          }
+
           // Analyze specific symbols
           job.progress.total = symbols.length;
 
