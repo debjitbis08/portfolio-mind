@@ -593,3 +593,58 @@ export const portfolioRoles = sqliteTable("portfolio_roles", {
   setAt: text("set_at").$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
 });
+
+// ============================================================================
+// Intraday Transactions - Temporary trades before broker import
+// ============================================================================
+
+/**
+ * Temporary storage for manual trades entered between broker CSV/XLSX imports.
+ * These are merged into holdings calculations at read-time.
+ * Cleared automatically when next transaction import occurs.
+ */
+export const intradayTransactions = sqliteTable(
+  "intraday_transactions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    symbol: text("symbol").notNull(),
+    stockName: text("stock_name"),
+    type: text("type", { enum: ["BUY", "SELL"] }).notNull(),
+    quantity: integer("quantity").notNull(),
+    pricePerShare: real("price_per_share").notNull(),
+    executedAt: text("executed_at").$defaultFn(() => new Date().toISOString()),
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("idx_intraday_transactions_symbol").on(table.symbol)]
+);
+
+// ============================================================================
+// Intraday Suggestion Links - Links intraday transactions to AI suggestions
+// ============================================================================
+
+/**
+ * Links intraday transactions to the suggestions they were executed against.
+ * Separate from suggestionTransactions to keep permanent links clean.
+ * Cleared along with intraday transactions on import.
+ */
+export const intradaySuggestionLinks = sqliteTable(
+  "intraday_suggestion_links",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    intradayTransactionId: text("intraday_transaction_id")
+      .references(() => intradayTransactions.id, { onDelete: "cascade" })
+      .notNull(),
+    suggestionId: text("suggestion_id")
+      .references(() => suggestions.id, { onDelete: "cascade" })
+      .notNull(),
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index("idx_intraday_suggestion_links_suggestion").on(table.suggestionId),
+    index("idx_intraday_suggestion_links_tx").on(table.intradayTransactionId),
+  ]
+);

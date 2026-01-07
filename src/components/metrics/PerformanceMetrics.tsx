@@ -2,17 +2,30 @@ import { createSignal, Show, For, onMount } from "solid-js";
 
 interface MetricsResponse {
   summary: {
-    total_approved: number;
-    total_linked: number;
-    hit_rate: number;
-    avg_response_days: number | null;
-    avg_gain_percent: number | null;
-    total_realized_gain: number;
+    total_pnl: number;
+    total_pnl_percent: number;
+    unrealized_pnl: number;
+    realized_pnl: number;
+    total_invested: number;
+    win_rate: number;
+    total_trades: number;
+    winning_trades: number;
   };
+  best_performer: {
+    symbol: string;
+    gain_percent: number;
+    gain_amount: number;
+  } | null;
+  worst_performer: {
+    symbol: string;
+    gain_percent: number;
+    gain_amount: number;
+  } | null;
   by_action: {
     action: string;
     count: number;
     linked: number;
+    total_pnl: number;
     avg_gain_percent: number | null;
   }[];
   recent_links: {
@@ -20,8 +33,11 @@ interface MetricsResponse {
     symbol: string;
     action: string;
     transaction_value: number;
-    gain_percent: number | null;
-    days_to_act: number;
+    current_value: number;
+    gain_amount: number;
+    gain_percent: number;
+    days_held: number;
+    status: "holding" | "closed";
     linked_at: string;
   }[];
 }
@@ -35,7 +51,7 @@ export default function PerformanceMetrics() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/metrics?days=90");
+      const res = await fetch("/api/metrics?days=365");
       if (!res.ok) throw new Error("Failed to fetch metrics");
       const result = await res.json();
       setData(result);
@@ -51,6 +67,10 @@ export default function PerformanceMetrics() {
   });
 
   const formatCurrency = (value: number) => {
+    const absValue = Math.abs(value);
+    if (absValue >= 100000) {
+      return `₹${(value / 100000).toFixed(2)}L`;
+    }
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
       currency: "INR",
@@ -65,9 +85,10 @@ export default function PerformanceMetrics() {
   };
 
   return (
-    <div class="space-y-4">
+    <div class="space-y-6">
+      {/* Header */}
       <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-text">📊 Performance Metrics</h2>
+        <h2 class="text-lg font-semibold text-text">📊 Bot Performance</h2>
         <button
           onClick={() => fetchMetrics()}
           class="px-3 py-1 text-sm bg-surface1 hover:bg-surface2 text-subtext0 rounded transition-colors"
@@ -90,72 +111,137 @@ export default function PerformanceMetrics() {
       </Show>
 
       <Show when={!loading() && data()}>
-        {/* Summary Cards */}
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {/* Hero P&L Section */}
+        <div
+          class={`relative overflow-hidden rounded-2xl p-6 ${
+            data()!.summary.total_pnl >= 0
+              ? "bg-gradient-to-br from-green/10 to-green/5 border border-green/20"
+              : "bg-gradient-to-br from-red/10 to-red/5 border border-red/20"
+          }`}
+        >
+          <div class="text-center">
+            <p class="text-sm text-subtext0 uppercase tracking-wide mb-2">
+              Total Bot P&L Impact
+            </p>
+            <p
+              class={`text-4xl font-bold ${
+                data()!.summary.total_pnl >= 0 ? "text-green" : "text-red"
+              }`}
+            >
+              {formatCurrency(data()!.summary.total_pnl)}
+            </p>
+            <p
+              class={`text-xl mt-1 ${
+                data()!.summary.total_pnl_percent >= 0
+                  ? "text-green/80"
+                  : "text-red/80"
+              }`}
+            >
+              {formatPercent(data()!.summary.total_pnl_percent)}
+            </p>
+            <p class="text-xs text-subtext0 mt-2">
+              on {formatCurrency(data()!.summary.total_invested)} invested via{" "}
+              {data()!.summary.total_trades} trades
+            </p>
+          </div>
+
+          {/* Unrealized / Realized Breakdown */}
+          <div class="flex justify-center gap-8 mt-4 pt-4 border-t border-surface2/50">
+            <div class="text-center">
+              <p class="text-xs text-subtext0 uppercase">Unrealized</p>
+              <p
+                class={`text-lg font-semibold ${
+                  data()!.summary.unrealized_pnl >= 0
+                    ? "text-green/80"
+                    : "text-red/80"
+                }`}
+              >
+                {formatCurrency(data()!.summary.unrealized_pnl)}
+              </p>
+              <p class="text-xs text-subtext0">paper gain</p>
+            </div>
+            <div class="text-center">
+              <p class="text-xs text-subtext0 uppercase">Realized</p>
+              <p
+                class={`text-lg font-semibold ${
+                  data()!.summary.realized_pnl >= 0
+                    ? "text-green/80"
+                    : "text-red/80"
+                }`}
+              >
+                {formatCurrency(data()!.summary.realized_pnl)}
+              </p>
+              <p class="text-xs text-subtext0">locked in</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Secondary Stats Grid */}
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/* Win Rate */}
           <div class="bg-surface1 rounded-lg p-4">
             <p class="text-xs text-subtext0 uppercase tracking-wide">
-              Hit Rate
+              Win Rate
             </p>
             <p class="text-2xl font-bold text-text mt-1">
-              {data()!.summary.hit_rate}%
+              {data()!.summary.win_rate}%
             </p>
             <p class="text-xs text-subtext0 mt-1">
-              {data()!.summary.total_linked} / {data()!.summary.total_approved}{" "}
-              approved
+              {data()!.summary.winning_trades}/{data()!.summary.total_trades}{" "}
+              profitable
             </p>
           </div>
 
-          <div class="bg-surface1 rounded-lg p-4">
-            <p class="text-xs text-subtext0 uppercase tracking-wide">
-              Avg Gain
-            </p>
-            <p
-              class={`text-2xl font-bold mt-1 ${
-                data()!.summary.avg_gain_percent !== null &&
-                data()!.summary.avg_gain_percent! >= 0
-                  ? "text-green"
-                  : "text-red"
-              }`}
-            >
-              {formatPercent(data()!.summary.avg_gain_percent)}
-            </p>
-            <p class="text-xs text-subtext0 mt-1">On linked BUY suggestions</p>
-          </div>
+          {/* Best Performer */}
+          <Show when={data()!.best_performer}>
+            <div class="bg-surface1 rounded-lg p-4">
+              <p class="text-xs text-subtext0 uppercase tracking-wide">
+                Best Trade
+              </p>
+              <p class="text-lg font-bold text-green mt-1">
+                {data()!.best_performer!.symbol}
+              </p>
+              <p class="text-sm text-green">
+                {formatPercent(data()!.best_performer!.gain_percent)}
+              </p>
+            </div>
+          </Show>
 
-          <div class="bg-surface1 rounded-lg p-4">
-            <p class="text-xs text-subtext0 uppercase tracking-wide">
-              Response Time
-            </p>
-            <p class="text-2xl font-bold text-text mt-1">
-              {data()!.summary.avg_response_days !== null
-                ? `${data()!.summary.avg_response_days} days`
-                : "—"}
-            </p>
-            <p class="text-xs text-subtext0 mt-1">Avg days to act</p>
-          </div>
+          {/* Worst Performer */}
+          <Show when={data()!.worst_performer}>
+            <div class="bg-surface1 rounded-lg p-4">
+              <p class="text-xs text-subtext0 uppercase tracking-wide">
+                Worst Trade
+              </p>
+              <p class="text-lg font-bold text-red mt-1">
+                {data()!.worst_performer!.symbol}
+              </p>
+              <p class="text-sm text-red">
+                {formatPercent(data()!.worst_performer!.gain_percent)}
+              </p>
+            </div>
+          </Show>
 
-          <div class="bg-surface1 rounded-lg p-4">
-            <p class="text-xs text-subtext0 uppercase tracking-wide">
-              Total Gain
-            </p>
-            <p
-              class={`text-2xl font-bold mt-1 ${
-                data()!.summary.total_realized_gain >= 0
-                  ? "text-green"
-                  : "text-red"
-              }`}
-            >
-              {formatCurrency(data()!.summary.total_realized_gain)}
-            </p>
-            <p class="text-xs text-subtext0 mt-1">Realized on linked trades</p>
-          </div>
+          {/* By Action Summary */}
+          <Show when={data()!.by_action.length > 0}>
+            <div class="bg-surface1 rounded-lg p-4">
+              <p class="text-xs text-subtext0 uppercase tracking-wide">
+                Follow Rate
+              </p>
+              <p class="text-2xl font-bold text-text mt-1">
+                {data()!.by_action.reduce((sum, a) => sum + a.linked, 0)}/
+                {data()!.by_action.reduce((sum, a) => sum + a.count, 0)}
+              </p>
+              <p class="text-xs text-subtext0 mt-1">suggestions acted on</p>
+            </div>
+          </Show>
         </div>
 
         {/* By Action Breakdown */}
         <Show when={data()!.by_action.length > 0}>
           <div class="bg-surface1 rounded-lg p-4">
             <h3 class="text-sm font-medium text-subtext1 mb-3">
-              By Action Type
+              P&L by Action Type
             </h3>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
               <For each={data()!.by_action}>
@@ -172,23 +258,30 @@ export default function PerformanceMetrics() {
                     >
                       {action.action}
                     </span>
-                    <div class="mt-2 flex items-baseline gap-2">
-                      <span class="text-lg font-bold text-text">
-                        {action.linked}/{action.count}
-                      </span>
-                      <span class="text-xs text-subtext0">linked</span>
-                    </div>
-                    <Show when={action.avg_gain_percent !== null}>
-                      <p
-                        class={`text-sm mt-1 ${
-                          action.avg_gain_percent! >= 0
-                            ? "text-green"
-                            : "text-red"
+                    <div class="mt-2">
+                      <span
+                        class={`text-lg font-bold ${
+                          action.total_pnl >= 0 ? "text-green" : "text-red"
                         }`}
                       >
-                        {formatPercent(action.avg_gain_percent)} avg
-                      </p>
-                    </Show>
+                        {formatCurrency(action.total_pnl)}
+                      </span>
+                    </div>
+                    <p class="text-xs text-subtext0 mt-1">
+                      {action.linked}/{action.count} linked
+                      {action.avg_gain_percent !== null && (
+                        <span
+                          class={
+                            action.avg_gain_percent >= 0
+                              ? "text-green"
+                              : "text-red"
+                          }
+                        >
+                          {" "}
+                          • {formatPercent(action.avg_gain_percent)} avg
+                        </span>
+                      )}
+                    </p>
                   </div>
                 )}
               </For>
@@ -199,12 +292,17 @@ export default function PerformanceMetrics() {
         {/* Recent Links */}
         <Show when={data()!.recent_links.length > 0}>
           <div class="bg-surface1 rounded-lg p-4">
-            <h3 class="text-sm font-medium text-subtext1 mb-3">Recent Links</h3>
+            <h3 class="text-sm font-medium text-subtext1 mb-3">
+              Recent Bot Trades
+            </h3>
             <div class="space-y-2">
               <For each={data()!.recent_links}>
                 {(link) => (
-                  <div class="flex items-center justify-between bg-surface0 rounded p-3">
-                    <div class="flex items-center gap-2">
+                  <a
+                    href={`/company/${link.symbol}`}
+                    class="flex items-center justify-between bg-surface0 hover:bg-surface2 rounded p-3 transition-colors cursor-pointer"
+                  >
+                    <div class="flex items-center gap-3">
                       <span
                         class={`px-2 py-0.5 text-xs font-bold rounded ${
                           link.action === "BUY"
@@ -216,26 +314,51 @@ export default function PerformanceMetrics() {
                       >
                         {link.action}
                       </span>
-                      <span class="font-medium text-text">{link.symbol}</span>
-                      <span class="text-xs text-subtext0">
-                        {formatCurrency(link.transaction_value)}
-                      </span>
+                      <div>
+                        <span class="font-medium text-text">{link.symbol}</span>
+                        <span class="text-xs text-subtext0 ml-2">
+                          {formatCurrency(link.transaction_value)}
+                        </span>
+                      </div>
                     </div>
                     <div class="flex items-center gap-4">
-                      <Show when={link.gain_percent !== null}>
+                      <div class="text-right">
                         <span
                           class={`text-sm font-medium ${
-                            link.gain_percent! >= 0 ? "text-green" : "text-red"
+                            link.gain_percent >= 0 ? "text-green" : "text-red"
                           }`}
                         >
                           {formatPercent(link.gain_percent)}
                         </span>
-                      </Show>
-                      <span class="text-xs text-subtext0">
-                        {link.days_to_act}d to act
-                      </span>
+                        <span
+                          class={`text-xs ml-1 ${
+                            link.gain_amount >= 0
+                              ? "text-green/70"
+                              : "text-red/70"
+                          }`}
+                        >
+                          ({link.gain_amount >= 0 ? "+" : ""}
+                          {formatCurrency(link.gain_amount)})
+                        </span>
+                      </div>
+                      <div class="text-right">
+                        <span
+                          class={`text-xs px-2 py-0.5 rounded ${
+                            link.status === "holding"
+                              ? "bg-blue/20 text-blue"
+                              : "bg-surface2 text-subtext0"
+                          }`}
+                        >
+                          {link.status === "holding"
+                            ? "📈 Holding"
+                            : "✓ Closed"}
+                        </span>
+                        <p class="text-xs text-subtext0 mt-0.5">
+                          {link.days_held}d held
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  </a>
                 )}
               </For>
             </div>
@@ -243,11 +366,11 @@ export default function PerformanceMetrics() {
         </Show>
 
         {/* Empty State */}
-        <Show when={data()!.summary.total_linked === 0}>
+        <Show when={data()!.summary.total_trades === 0}>
           <div class="p-6 bg-surface1 rounded-lg text-center">
             <p class="text-subtext0">
-              No linked suggestions yet. Link some transactions below to see
-              performance metrics.
+              No linked suggestions yet. Link transactions to suggestions in the
+              section below to track bot performance.
             </p>
           </div>
         </Show>

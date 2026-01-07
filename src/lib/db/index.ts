@@ -179,8 +179,10 @@ export interface Holding {
 /**
  * Get current holdings computed from transactions.
  * Replaces the PostgreSQL "holdings" view.
+ * Also merges intraday transactions (temporary manual trades) at read-time.
  */
 export async function getHoldings(): Promise<Holding[]> {
+  // Get regular transactions
   const result = await db
     .select({
       isin: schema.transactions.isin,
@@ -203,21 +205,49 @@ export async function getHoldings(): Promise<Holding[]> {
     .where(eq(schema.transactions.status, "Executed"))
     .groupBy(schema.transactions.isin, schema.transactions.symbol);
 
-  return result
-    .map((row) => {
-      const quantity = Number(row.buyQty || 0) - Number(row.sellQty || 0);
-      const investedValue =
-        Number(row.buyValue || 0) - Number(row.sellValue || 0);
-      return {
-        isin: row.isin,
-        symbol: row.symbol,
-        stockName: row.stockName || row.symbol,
-        quantity,
-        investedValue,
-        avgBuyPrice: quantity > 0 ? investedValue / quantity : 0,
-      };
-    })
-    .filter((h) => h.quantity > 0);
+  const holdings: Holding[] = result.map((row) => {
+    const quantity = Number(row.buyQty || 0) - Number(row.sellQty || 0);
+    const investedValue =
+      Number(row.buyValue || 0) - Number(row.sellValue || 0);
+    return {
+      isin: row.isin,
+      symbol: row.symbol,
+      stockName: row.stockName || row.symbol,
+      quantity,
+      investedValue,
+      avgBuyPrice: quantity > 0 ? investedValue / quantity : 0,
+    };
+  });
+
+  // Merge intraday transactions (temporary manual trades)
+  const intradayTxs = await db.select().from(schema.intradayTransactions);
+
+  for (const tx of intradayTxs) {
+    const value = tx.quantity * tx.pricePerShare;
+    const qtyDelta = tx.type === "BUY" ? tx.quantity : -tx.quantity;
+    const valDelta = tx.type === "BUY" ? value : -value;
+
+    const existing = holdings.find((h) => h.symbol === tx.symbol);
+
+    if (existing) {
+      existing.quantity += qtyDelta;
+      existing.investedValue += valDelta;
+      existing.avgBuyPrice =
+        existing.quantity > 0 ? existing.investedValue / existing.quantity : 0;
+    } else if (tx.type === "BUY") {
+      // Only create new holding entry for BUY (can't sell what you don't have)
+      holdings.push({
+        isin: "", // Intraday transactions don't have ISIN
+        symbol: tx.symbol,
+        stockName: tx.stockName || tx.symbol,
+        quantity: tx.quantity,
+        investedValue: value,
+        avgBuyPrice: tx.pricePerShare,
+      });
+    }
+  }
+
+  return holdings.filter((h) => h.quantity > 0);
 }
 
 // ============================================================================

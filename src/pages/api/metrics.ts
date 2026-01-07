@@ -1,26 +1,39 @@
 /**
- * Performance Metrics API
- * Calculate and return metrics based on suggestion-transaction links
+ * Performance Metrics API - P&L Focused
+ * Calculate actual portfolio gains from AI suggestions
  */
 
 import type { APIRoute } from "astro";
 import { requireAuth } from "../../lib/middleware/requireAuth";
 import { db, schema } from "../../lib/db";
-import { eq, and, gte, sql, inArray } from "drizzle-orm";
+import { eq, and, gte, inArray } from "drizzle-orm";
 
 interface MetricsResponse {
   summary: {
-    total_approved: number;
-    total_linked: number;
-    hit_rate: number; // % of approved suggestions that have linked transactions
-    avg_response_days: number | null;
-    avg_gain_percent: number | null;
-    total_realized_gain: number;
+    total_pnl: number; // Total P&L in ₹
+    total_pnl_percent: number; // Weighted average gain %
+    unrealized_pnl: number;
+    realized_pnl: number;
+    total_invested: number; // Total capital deployed via bot suggestions
+    win_rate: number; // % of trades that are profitable
+    total_trades: number;
+    winning_trades: number;
   };
+  best_performer: {
+    symbol: string;
+    gain_percent: number;
+    gain_amount: number;
+  } | null;
+  worst_performer: {
+    symbol: string;
+    gain_percent: number;
+    gain_amount: number;
+  } | null;
   by_action: {
     action: string;
     count: number;
     linked: number;
+    total_pnl: number;
     avg_gain_percent: number | null;
   }[];
   recent_links: {
@@ -28,8 +41,11 @@ interface MetricsResponse {
     symbol: string;
     action: string;
     transaction_value: number;
-    gain_percent: number | null;
-    days_to_act: number;
+    current_value: number;
+    gain_amount: number;
+    gain_percent: number;
+    days_held: number;
+    status: "holding" | "closed";
     linked_at: string;
   }[];
 }
@@ -39,11 +55,11 @@ export const GET: APIRoute = async ({ request, url }) => {
   if (authError) return authError;
 
   try {
-    const daysBack = parseInt(url.searchParams.get("days") || "90", 10);
+    const daysBack = parseInt(url.searchParams.get("days") || "365", 10);
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysBack);
 
-    // Get approved/rejected suggestions from the lookback period
+    // Get approved suggestions from the lookback period
     const approvedSuggestions = await db
       .select()
       .from(schema.suggestions)
@@ -72,20 +88,63 @@ export const GET: APIRoute = async ({ request, url }) => {
 
     const transactionsById = new Map(transactions.map((t) => [t.id, t]));
 
-    // Calculate hit rate
-    const approvedCount = approvedSuggestions.filter(
-      (s) => s.status === "approved"
-    ).length;
-    const linkedApprovedCount = approvedSuggestions.filter(
-      (s) => s.status === "approved" && linkedSuggestionIds.has(s.id)
-    ).length;
-    const hitRate =
-      approvedCount > 0 ? (linkedApprovedCount / approvedCount) * 100 : 0;
+    // Get current prices for all linked symbols
+    const linkedSymbols = [
+      ...new Set(
+        allLinks
+          .map((l) => {
+            const suggestion = approvedSuggestions.find(
+              (s) => s.id === l.suggestionId
+            );
+            return suggestion?.symbol;
+          })
+          .filter(Boolean) as string[]
+      ),
+    ];
 
-    // Calculate response time (days between approval and transaction)
-    const responseTimes: number[] = [];
-    const gains: number[] = [];
-    const recentLinks: MetricsResponse["recent_links"] = [];
+    const priceData =
+      linkedSymbols.length > 0
+        ? await db
+            .select()
+            .from(schema.priceCache)
+            .where(inArray(schema.priceCache.symbol, linkedSymbols))
+        : [];
+
+    const priceBySymbol = new Map(priceData.map((p) => [p.symbol, p.price]));
+
+    // Get all transactions for the linked symbols to find SELL matches
+    const allSymbolTransactions =
+      linkedSymbols.length > 0
+        ? await db
+            .select()
+            .from(schema.transactions)
+            .where(inArray(schema.transactions.symbol, linkedSymbols))
+        : [];
+
+    // Group transactions by symbol for finding matching SELLs
+    const transactionsBySymbol = new Map<
+      string,
+      (typeof allSymbolTransactions)[0][]
+    >();
+    for (const tx of allSymbolTransactions) {
+      const existing = transactionsBySymbol.get(tx.symbol) || [];
+      existing.push(tx);
+      transactionsBySymbol.set(tx.symbol, existing);
+    }
+
+    // Calculate P&L for each linked trade
+    const tradePnL: {
+      suggestionId: string;
+      symbol: string;
+      action: string;
+      buyValue: number;
+      currentValue: number;
+      gainAmount: number;
+      gainPercent: number;
+      daysHeld: number;
+      status: "holding" | "closed";
+      linkedAt: string;
+    }[] = [];
 
     for (const link of allLinks) {
       const suggestion = approvedSuggestions.find(
@@ -93,106 +152,227 @@ export const GET: APIRoute = async ({ request, url }) => {
       );
       const transaction = transactionsById.get(link.transactionId);
 
-      if (suggestion && transaction && suggestion.reviewedAt) {
-        const approvalDate = new Date(suggestion.reviewedAt);
-        const txDate = new Date(transaction.executedAt);
-        const daysDiff = Math.max(
-          0,
-          Math.floor(
-            (txDate.getTime() - approvalDate.getTime()) / (1000 * 60 * 60 * 24)
-          )
+      if (!suggestion || !transaction) continue;
+
+      const symbol = suggestion.symbol;
+      const currentPrice = priceBySymbol.get(symbol);
+
+      if (suggestion.action === "BUY") {
+        const buyValue = transaction.value;
+        const quantity = transaction.quantity;
+        const pricePerShare = quantity > 0 ? buyValue / quantity : 0;
+
+        // Check if there's a matching SELL after this BUY
+        const symbolTxs = transactionsBySymbol.get(symbol) || [];
+        const buyDate = new Date(transaction.executedAt);
+        const matchingSell = symbolTxs.find(
+          (tx) =>
+            tx.type === "SELL" &&
+            new Date(tx.executedAt) > buyDate &&
+            tx.quantity <= quantity
         );
-        responseTimes.push(daysDiff);
 
-        // Calculate gain for BUY suggestions (current price vs execution price)
-        const pricePerShare =
-          transaction.quantity > 0
-            ? transaction.value / transaction.quantity
-            : 0;
-        let gainPercent: number | null = null;
+        let status: "holding" | "closed" = "holding";
+        let currentValue = 0;
+        let gainAmount = 0;
+        let gainPercent = 0;
 
-        if (
-          suggestion.action === "BUY" &&
-          suggestion.currentPrice &&
-          pricePerShare > 0
-        ) {
-          gainPercent =
-            ((suggestion.currentPrice - pricePerShare) / pricePerShare) * 100;
-          gains.push(gainPercent);
+        if (matchingSell) {
+          // Closed position - use actual sale proceeds
+          status = "closed";
+          const sellPricePerShare =
+            matchingSell.quantity > 0
+              ? matchingSell.value / matchingSell.quantity
+              : 0;
+          currentValue = sellPricePerShare * quantity; // Proportional to original quantity
+          gainAmount = currentValue - buyValue;
+          gainPercent = buyValue > 0 ? (gainAmount / buyValue) * 100 : 0;
+        } else if (currentPrice && currentPrice > 0) {
+          // Still holding - use current market price
+          currentValue = currentPrice * quantity;
+          gainAmount = currentValue - buyValue;
+          gainPercent = buyValue > 0 ? (gainAmount / buyValue) * 100 : 0;
         }
 
-        recentLinks.push({
-          suggestion_id: suggestion.id,
-          symbol: suggestion.symbol,
+        const daysHeld = Math.floor(
+          (Date.now() - buyDate.getTime()) / (1000 * 60 * 60 * 24)
+        );
+
+        tradePnL.push({
+          suggestionId: suggestion.id,
+          symbol,
           action: suggestion.action,
-          transaction_value: transaction.value,
-          gain_percent: gainPercent,
-          days_to_act: daysDiff,
-          linked_at: link.createdAt || "",
+          buyValue,
+          currentValue,
+          gainAmount,
+          gainPercent,
+          daysHeld,
+          status,
+          linkedAt: link.createdAt || "",
+        });
+      } else if (suggestion.action === "SELL") {
+        // For SELL suggestions: Calculate profit from the sale
+        // Find corresponding BUY to calculate average cost
+        const symbolTxs = transactionsBySymbol.get(symbol) || [];
+        const sellDate = new Date(transaction.executedAt);
+        const sellValue = transaction.value;
+        const sellQuantity = transaction.quantity;
+        const sellPricePerShare =
+          sellQuantity > 0 ? sellValue / sellQuantity : 0;
+
+        // Find BUYs before this SELL to calculate average cost
+        const priorBuys = symbolTxs.filter(
+          (tx) => tx.type === "BUY" && new Date(tx.executedAt) < sellDate
+        );
+
+        let totalBoughtQty = 0;
+        let totalBoughtValue = 0;
+        for (const buy of priorBuys) {
+          totalBoughtQty += buy.quantity;
+          totalBoughtValue += buy.value;
+        }
+
+        const avgBuyPrice =
+          totalBoughtQty > 0 ? totalBoughtValue / totalBoughtQty : 0;
+        const costBasis = avgBuyPrice * sellQuantity;
+        const gainAmount = sellValue - costBasis;
+        const gainPercent = costBasis > 0 ? (gainAmount / costBasis) * 100 : 0;
+
+        const daysHeld = Math.floor(
+          (sellDate.getTime() -
+            new Date(priorBuys[0]?.executedAt || sellDate).getTime()) /
+            (1000 * 60 * 60 * 24)
+        );
+
+        tradePnL.push({
+          suggestionId: suggestion.id,
+          symbol,
+          action: suggestion.action,
+          buyValue: costBasis, // Cost basis for the sold shares
+          currentValue: sellValue,
+          gainAmount,
+          gainPercent,
+          daysHeld,
+          status: "closed",
+          linkedAt: link.createdAt || "",
         });
       }
     }
 
-    // Sort recent links by link date
-    recentLinks.sort((a, b) => b.linked_at.localeCompare(a.linked_at));
+    // Aggregate metrics
+    const totalInvested = tradePnL.reduce((sum, t) => sum + t.buyValue, 0);
+    const totalPnL = tradePnL.reduce((sum, t) => sum + t.gainAmount, 0);
+    const totalPnLPercent =
+      totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
 
-    // Calculate by-action breakdown
-    const byAction: {
-      [action: string]: { count: number; linked: number; gains: number[] };
-    } = {};
+    const unrealizedPnL = tradePnL
+      .filter((t) => t.status === "holding")
+      .reduce((sum, t) => sum + t.gainAmount, 0);
 
-    for (const suggestion of approvedSuggestions) {
-      if (suggestion.status !== "approved") continue;
+    const realizedPnL = tradePnL
+      .filter((t) => t.status === "closed")
+      .reduce((sum, t) => sum + t.gainAmount, 0);
 
-      if (!byAction[suggestion.action]) {
-        byAction[suggestion.action] = { count: 0, linked: 0, gains: [] };
-      }
-      byAction[suggestion.action].count++;
+    const winningTrades = tradePnL.filter((t) => t.gainAmount > 0).length;
+    const winRate =
+      tradePnL.length > 0 ? (winningTrades / tradePnL.length) * 100 : 0;
 
-      if (linkedSuggestionIds.has(suggestion.id)) {
-        byAction[suggestion.action].linked++;
-      }
-    }
-
-    // Calculate average gain for each action type
-    for (const link of recentLinks) {
-      if (link.gain_percent !== null && byAction[link.action]) {
-        byAction[link.action].gains.push(link.gain_percent);
-      }
-    }
-
-    const avgResponseDays =
-      responseTimes.length > 0
-        ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length
+    // Find best and worst performers
+    const sortedByGain = [...tradePnL].sort(
+      (a, b) => b.gainPercent - a.gainPercent
+    );
+    const bestPerformer =
+      sortedByGain.length > 0
+        ? {
+            symbol: sortedByGain[0].symbol,
+            gain_percent: Math.round(sortedByGain[0].gainPercent * 10) / 10,
+            gain_amount: Math.round(sortedByGain[0].gainAmount),
+          }
         : null;
 
-    const avgGainPercent =
-      gains.length > 0 ? gains.reduce((a, b) => a + b, 0) / gains.length : null;
+    const worstPerformer =
+      sortedByGain.length > 0
+        ? {
+            symbol: sortedByGain[sortedByGain.length - 1].symbol,
+            gain_percent:
+              Math.round(
+                sortedByGain[sortedByGain.length - 1].gainPercent * 10
+              ) / 10,
+            gain_amount: Math.round(
+              sortedByGain[sortedByGain.length - 1].gainAmount
+            ),
+          }
+        : null;
 
-    const totalRealizedGain = recentLinks.reduce((sum, l) => {
-      if (l.gain_percent !== null) {
-        return sum + (l.transaction_value * l.gain_percent) / 100;
+    // By-action breakdown
+    const byActionMap: {
+      [action: string]: {
+        count: number;
+        linked: number;
+        pnl: number;
+        gains: number[];
+      };
+    } = {};
+
+    for (const suggestion of approvedSuggestions.filter(
+      (s) => s.status === "approved"
+    )) {
+      if (!byActionMap[suggestion.action]) {
+        byActionMap[suggestion.action] = {
+          count: 0,
+          linked: 0,
+          pnl: 0,
+          gains: [],
+        };
       }
-      return sum;
-    }, 0);
+      byActionMap[suggestion.action].count++;
+      if (linkedSuggestionIds.has(suggestion.id)) {
+        byActionMap[suggestion.action].linked++;
+      }
+    }
+
+    for (const trade of tradePnL) {
+      if (byActionMap[trade.action]) {
+        byActionMap[trade.action].pnl += trade.gainAmount;
+        byActionMap[trade.action].gains.push(trade.gainPercent);
+      }
+    }
+
+    // Format recent links
+    const recentLinks = tradePnL
+      .sort((a, b) => b.linkedAt.localeCompare(a.linkedAt))
+      .slice(0, 15)
+      .map((t) => ({
+        suggestion_id: t.suggestionId,
+        symbol: t.symbol,
+        action: t.action,
+        transaction_value: Math.round(t.buyValue),
+        current_value: Math.round(t.currentValue),
+        gain_amount: Math.round(t.gainAmount),
+        gain_percent: Math.round(t.gainPercent * 10) / 10,
+        days_held: t.daysHeld,
+        status: t.status,
+        linked_at: t.linkedAt,
+      }));
 
     const response: MetricsResponse = {
       summary: {
-        total_approved: approvedCount,
-        total_linked: linkedApprovedCount,
-        hit_rate: Math.round(hitRate * 10) / 10,
-        avg_response_days: avgResponseDays
-          ? Math.round(avgResponseDays * 10) / 10
-          : null,
-        avg_gain_percent: avgGainPercent
-          ? Math.round(avgGainPercent * 10) / 10
-          : null,
-        total_realized_gain: Math.round(totalRealizedGain),
+        total_pnl: Math.round(totalPnL),
+        total_pnl_percent: Math.round(totalPnLPercent * 10) / 10,
+        unrealized_pnl: Math.round(unrealizedPnL),
+        realized_pnl: Math.round(realizedPnL),
+        total_invested: Math.round(totalInvested),
+        win_rate: Math.round(winRate * 10) / 10,
+        total_trades: tradePnL.length,
+        winning_trades: winningTrades,
       },
-      by_action: Object.entries(byAction).map(([action, data]) => ({
+      best_performer: bestPerformer,
+      worst_performer: worstPerformer,
+      by_action: Object.entries(byActionMap).map(([action, data]) => ({
         action,
         count: data.count,
         linked: data.linked,
+        total_pnl: Math.round(data.pnl),
         avg_gain_percent:
           data.gains.length > 0
             ? Math.round(
@@ -200,7 +380,7 @@ export const GET: APIRoute = async ({ request, url }) => {
               ) / 10
             : null,
       })),
-      recent_links: recentLinks.slice(0, 10),
+      recent_links: recentLinks,
     };
 
     return new Response(JSON.stringify(response), {

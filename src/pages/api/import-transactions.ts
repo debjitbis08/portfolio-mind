@@ -50,6 +50,18 @@ export const POST: APIRoute = async ({ request }) => {
   if (authError) return authError;
 
   try {
+    // Clear all intraday transactions before importing real broker data
+    // These temporary manual trades are replaced by the imported transactions
+    const intradayCleared = await db
+      .delete(schema.intradaySuggestionLinks)
+      .returning();
+    await db.delete(schema.intradayTransactions);
+    if (intradayCleared.length > 0) {
+      console.log(
+        `[Import] Cleared ${intradayCleared.length} intraday transactions`
+      );
+    }
+
     const formData = await request.formData();
     const orderHistoryFile = formData.get("orderHistory") as File | null;
     const holdingsFile = formData.get("holdings") as File | null;

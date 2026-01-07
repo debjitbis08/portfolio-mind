@@ -59,7 +59,36 @@ async function getRecentTrades(args: {
       .orderBy(desc(schema.transactions.executedAt))
       .limit(50);
 
-    if (trades.length === 0) {
+    // Fetch intraday transactions (temporary manual trades)
+    let intradayTxs = await db.select().from(schema.intradayTransactions);
+    if (args.symbol) {
+      intradayTxs = intradayTxs.filter(
+        (tx) => tx.symbol === args.symbol?.toUpperCase()
+      );
+    }
+
+    const now = new Date();
+
+    // Format intraday transactions
+    const intradayFormatted = intradayTxs.map((tx) => {
+      const execDate = new Date(tx.executedAt || tx.createdAt || new Date());
+      const daysAgo = Math.floor(
+        (now.getTime() - execDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      return {
+        symbol: tx.symbol,
+        stockName: tx.stockName || tx.symbol,
+        type: tx.type as "BUY" | "SELL",
+        quantity: tx.quantity,
+        value: tx.quantity * tx.pricePerShare,
+        pricePerShare: tx.pricePerShare,
+        executedAt: tx.executedAt || tx.createdAt,
+        daysAgo,
+        isIntraday: true, // Flag to distinguish from regular trades
+      };
+    });
+
+    if (trades.length === 0 && intradayTxs.length === 0) {
       return {
         success: true,
         data: {
@@ -67,13 +96,13 @@ async function getRecentTrades(args: {
             ? `No trades found for ${args.symbol} in the last ${daysBack} days.`
             : `No trades found in the last ${daysBack} days.`,
           trades: [],
+          intradayTrades: [],
           summary: { totalBuys: 0, totalSells: 0, uniqueSymbols: 0 },
         },
       };
     }
 
-    // Calculate days ago and price per share
-    const now = new Date();
+    // Calculate days ago and price per share for regular trades
     const formattedTrades: TradeResult[] = trades.map((t) => {
       const execDate = new Date(t.executedAt);
       const daysAgo = Math.floor(
@@ -91,10 +120,11 @@ async function getRecentTrades(args: {
       };
     });
 
-    // Generate summary
-    const buys = formattedTrades.filter((t) => t.type === "BUY");
-    const sells = formattedTrades.filter((t) => t.type === "SELL");
-    const uniqueSymbols = new Set(formattedTrades.map((t) => t.symbol)).size;
+    // Generate summary (including intraday)
+    const allTrades = [...formattedTrades, ...intradayFormatted];
+    const buys = allTrades.filter((t) => t.type === "BUY");
+    const sells = allTrades.filter((t) => t.type === "SELL");
+    const uniqueSymbols = new Set(allTrades.map((t) => t.symbol)).size;
 
     // Group by symbol for easier agent consumption
     const bySymbol: Record<string, TradeResult[]> = {};
@@ -109,6 +139,7 @@ async function getRecentTrades(args: {
       success: true,
       data: {
         trades: formattedTrades,
+        intradayTrades: intradayFormatted,
         bySymbol,
         summary: {
           totalBuys: buys.length,
@@ -116,10 +147,11 @@ async function getRecentTrades(args: {
           uniqueSymbols,
           totalBuyValue: buys.reduce((sum, t) => sum + t.value, 0),
           totalSellValue: sells.reduce((sum, t) => sum + t.value, 0),
+          intradayCount: intradayFormatted.length,
           daysBack,
         },
         guidance:
-          "Use this data to understand the user's recent trading activity. Avoid recommending stocks that were just bought (within 7 days) unless there's a strong reason to add more. For recently sold stocks, check if there's a reason they exited the position.",
+          "Use this data to understand the user's recent trading activity. Intraday trades are temporary manual entries that haven't been imported from broker yet. Avoid recommending stocks that were just bought (within 7 days) unless there's a strong reason to add more. For recently sold stocks, check if there's a reason they exited the position.",
       },
     };
   } catch (error) {

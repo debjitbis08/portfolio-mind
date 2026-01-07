@@ -1,5 +1,6 @@
 import { Show, For } from "solid-js";
 import ActionNotes from "../notes/ActionNotes";
+import IntradayTransactionForm from "./IntradayTransactionForm";
 
 interface Citation {
   type: string;
@@ -245,6 +246,21 @@ export default function SuggestionCard(props: SuggestionCardProps) {
 
       {/* Action Notes */}
       <ActionNotes suggestionId={s().id} />
+
+      {/* Intraday Transaction Form - for active suggestions with BUY/SELL action */}
+      <Show
+        when={
+          (s().status === "pending" || s().status === "approved") &&
+          (s().action === "BUY" || s().action === "SELL")
+        }
+      >
+        <IntradayTransactionForm
+          suggestionId={s().id}
+          symbol={s().symbol}
+          stockName={s().stock_name}
+          suggestedAction={s().action as "BUY" | "SELL"}
+        />
+      </Show>
     </div>
   );
 }
