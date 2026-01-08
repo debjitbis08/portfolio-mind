@@ -4,9 +4,11 @@
   "version": "0.0.1",
   "scripts": {
     "dev": "astro dev --port 4328",
+    "dev:no-catalyst": "DISABLE_CATALYST_DAEMON=true astro dev --port 4328",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
+    "catalyst:daemon": "tsx scripts/start-catalyst-daemon.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -57,7 +59,8 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/markdown-it": "^14.1.2",
     "dotenv": "^17.2.3",
-    "drizzle-kit": "^0.31.8"
+    "drizzle-kit": "^0.31.8",
+    "tsx": "^4.21.0"
   },
   "volta": {
     "node": "22.21.1"

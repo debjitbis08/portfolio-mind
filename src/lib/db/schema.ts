@@ -793,3 +793,79 @@ export const potentialCatalysts = sqliteTable(
   },
   (table) => [index("idx_potential_catalysts_status").on(table.status)]
 );
+
+/**
+ * Catalyst Verification Metrics - Track prediction accuracy over time.
+ * Stores checkpoint validation results for backtesting and calibration.
+ */
+export const catalystVerificationMetrics = sqliteTable(
+  "catalyst_verification_metrics",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+
+    // Link to signal (if exists in DB)
+    signalId: text("signal_id").references(() => catalystSignals.id, {
+      onDelete: "set null",
+    }),
+
+    // Log file reference
+    opportunityLogId: text("opportunity_log_id").notNull().unique(), // From opportunities.log
+
+    // Initial prediction
+    keyword: text("keyword").notNull(),
+    headline: text("headline").notNull(),
+    predictedSentiment: text("predicted_sentiment", {
+      enum: ["BULLISH", "BEARISH"],
+    }).notNull(),
+    predictedImpactType: text("predicted_impact_type", {
+      enum: ["SUPPLY_SHOCK", "DEMAND_SHOCK", "REGULATORY"],
+    }).notNull(),
+    confidence: integer("confidence").notNull(), // 1-10
+
+    // Market state at prediction time
+    ticker: text("ticker").notNull(),
+    basePrice: real("base_price"),
+    basePriceChangePercent: real("base_price_change_percent"),
+    baseVolumeRatio: real("base_volume_ratio"),
+
+    // Checkpoint 1: After 1 hour
+    check1hrAt: text("check_1hr_at"),
+    check1hrPrice: real("check_1hr_price"),
+    check1hrChangePercent: real("check_1hr_change_percent"),
+    check1hrVerdict: text("check_1hr_verdict", {
+      enum: ["GOOD_CALL", "BAD_CALL", "NEUTRAL"],
+    }),
+
+    // Checkpoint 2: Next trading session
+    checkNextSessionAt: text("check_next_session_at"),
+    checkNextSessionPrice: real("check_next_session_price"),
+    checkNextSessionChangePercent: real("check_next_session_change_percent"),
+    checkNextSessionVerdict: text("check_next_session_verdict", {
+      enum: ["GOOD_CALL", "BAD_CALL", "NEUTRAL"],
+    }),
+
+    // Checkpoint 3: After 24 hours
+    check24hrAt: text("check_24hr_at"),
+    check24hrPrice: real("check_24hr_price"),
+    check24hrChangePercent: real("check_24hr_change_percent"),
+    check24hrVerdict: text("check_24hr_verdict", {
+      enum: ["GOOD_CALL", "BAD_CALL", "NEUTRAL"],
+    }),
+
+    // Final aggregated verdict
+    finalVerdict: text("final_verdict", {
+      enum: ["GOOD_CALL", "BAD_CALL", "NEUTRAL", "PENDING"],
+    }).default("PENDING"),
+
+    // Metadata
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index("idx_verification_metrics_verdict").on(table.finalVerdict),
+    index("idx_verification_metrics_keyword").on(table.keyword),
+    index("idx_verification_metrics_created").on(table.createdAt),
+  ]
+);

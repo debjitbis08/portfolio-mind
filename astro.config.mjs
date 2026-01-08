@@ -3,12 +3,13 @@ import { defineConfig, envField } from "astro/config";
 import solidJs from "@astrojs/solid-js";
 import tailwindcss from "@tailwindcss/vite";
 import node from "@astrojs/node";
+import { catalystDaemon } from "./src/integrations/catalyst-daemon";
 
 // https://astro.build/config
 export default defineConfig({
   output: "server",
   adapter: node({ mode: "standalone" }),
-  integrations: [solidJs()],
+  integrations: [solidJs(), catalystDaemon()],
   vite: {
     plugins: [tailwindcss()],
   },
