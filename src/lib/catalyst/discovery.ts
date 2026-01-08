@@ -2,8 +2,38 @@ import { type NewsItem, type CatalystAsset } from "./types";
 import { potentialCatalysts, processedArticles } from "../db/schema";
 import { db } from "../db";
 import { eq, inArray } from "drizzle-orm";
-import { getGeminiModel, ThinkingLevel } from "../gemini";
 import { z } from "zod";
+import { GoogleGenAI } from "@google/genai";
+
+// Standalone-compatible API key getter (uses process.env, works without Astro)
+function getApiKey(): string {
+  if (process.env.GEMINI_API_KEY) {
+    return process.env.GEMINI_API_KEY;
+  }
+  throw new Error("GEMINI_API_KEY not found in environment variables");
+}
+
+// ThinkingLevel enum for model configuration
+enum ThinkingLevel {
+  low = "LOW",
+  medium = "MEDIUM",
+  high = "HIGH",
+}
+
+// Standalone model helper that doesn't depend on Astro imports
+async function callGeminiForDiscovery(prompt: string): Promise<string> {
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    config: {
+      responseMimeType: "application/json",
+    },
+  });
+
+  return response.text || "{}";
+}
 
 /**
  * Result of the AI discovery process
@@ -131,11 +161,6 @@ async function analyzeBatchForDiscovery(
   news: NewsItem[],
   assets: CatalystAsset[]
 ) {
-  const model = getGeminiModel({
-    thinkingConfig: { thinkingLevel: ThinkingLevel.medium },
-    responseSchema: DiscoverySchema,
-  });
-
   const availableTickers = assets
     .map((a) => `${a.ticker} (${a.keyword})`)
     .join(", ");
@@ -148,33 +173,65 @@ async function analyzeBatchForDiscovery(
     .join("\n");
 
   const prompt = `
-  You are a Hedge Fund "Blind Spot" Detector.
+  You are an Indian Market Catalyst Detector.
 
-  Your goal is to find NON-OBVIOUS market catalysts in this news batch.
-  Ignore generic market noise. Look for specific events that will shock supply/demand.
+  Your goal is to find ACTIONABLE trading opportunities in this Indian business news batch.
+  Focus on events that will materially impact stock prices.
 
-  AVAILABLE ASSETS TO WATCH:
-  ${availableTickers}
+  WHAT TO LOOK FOR:
+  - Supply shocks (factory shutdowns, strikes, raw material shortages)
+  - Demand shocks (new orders, policy changes, consumer trends)
+  - Regulatory changes (SEBI, RBI, government policy)
+  - Corporate events (management changes, M&A, earnings surprises)
+  - Sector-wide impacts (IT hiring freezes, defence orders, infra spending)
 
+  IGNORE:
+  - Generic market commentary ("Sensex rises 200 points")
+  - Routine earnings (unless major surprise)
+  - Already widely known news
+
+  ${
+    availableTickers ? `KNOWN STOCKS TO CONSIDER:\n  ${availableTickers}\n` : ""
+  }
   NEWS BATCH:
   ${newsContext}
 
   TASK:
-  1. Do any of these news items create a tangible catalyst for the assets above?
-  2. If yes, define the PRECISE market reaction that would confirm your theory.
-     (e.g., "If copper strike confirmed, price should rise > 1% in 4 hours")
+  1. Identify news that creates a TANGIBLE catalyst
+  2. Determine which specific Indian stocks are affected
+     (Use NSE/BSE tickers like TATASTEEL.NS, TCS.NS, HINDCOPPER.NS)
+  3. Define the PRECISE market reaction that would confirm your theory
+     (e.g., "If TCS faces employee backlash, stock may drop 1-2% in 24 hours")
 
-  OUTPUT:
-  Return a JSON with a list of 'potentialCatalysts'.
-  If nothing interesting, return empty list.
+  OUTPUT FORMAT (JSON):
+  {
+    "potentialCatalysts": [
+      {
+        "impactSummary": "Concise summary of the event and why it moves the market",
+        "affectedTickers": ["TICKER1.NS", "TICKER2.NS"],
+        "confidence": 8,
+        "watchCriteria": {
+          "metric": "PRICE",
+          "direction": "UP",
+          "thresholdPercent": 2,
+          "timeoutHours": 24
+        }
+      }
+    ]
+  }
+
+  Return ONLY valid JSON. If nothing interesting, return {"potentialCatalysts": []}.
   `;
 
-  const response = await model.generateContent(prompt);
-  // @ts-ignore - The types for generateContent with schema are generic
-  const text =
-    typeof response.text === "function" ? response.text() : response.text;
+  const text = await callGeminiForDiscovery(prompt);
 
-  return response.candidates?.[0]?.content?.parts?.[0]?.functionCall
-    ? JSON.parse(text || "{}")
-    : JSON.parse(text || "{}");
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    console.error(
+      "Failed to parse discovery response:",
+      text.substring(0, 200)
+    );
+    return { potentialCatalysts: [] };
+  }
 }

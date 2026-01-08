@@ -54,7 +54,7 @@ export function getGeminiModel(config: {
       }
 
       return await ai.models.generateContent({
-        model: "gemini-2.0-flash-thinking-exp-01-21",
+        model: "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         config: genConfig,
       });

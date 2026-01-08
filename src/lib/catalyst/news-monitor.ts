@@ -19,6 +19,40 @@ const parser = new XMLParser({
 // Google News RSS base URL (no geo filter for global coverage)
 const GOOGLE_NEWS_RSS_BASE = "https://news.google.com/rss/search";
 
+// ============================================================================
+// India-Focused News Sources
+// ============================================================================
+
+/**
+ * Google News India Business category RSS feed.
+ * This is the main business news section - covers ALL business news.
+ */
+const GOOGLE_NEWS_INDIA_BUSINESS =
+  "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pKVGlnQVAB?hl=en-IN&gl=IN&ceid=IN:en";
+
+/**
+ * Direct RSS feeds from major Indian financial news sources.
+ * These provide higher quality, curated financial news.
+ */
+const INDIA_NEWS_RSS_FEEDS = [
+  {
+    url: GOOGLE_NEWS_INDIA_BUSINESS,
+    source: "Google News India Business",
+  },
+  {
+    url: "https://www.moneycontrol.com/rss/MCtopnews.xml",
+    source: "MoneyControl",
+  },
+  {
+    url: "https://economictimes.indiatimes.com/rssfeedstopstories.cms",
+    source: "Economic Times",
+  },
+  {
+    url: "https://www.livemint.com/rss/markets",
+    source: "Livemint",
+  },
+];
+
 /**
  * Build Google News RSS URL for a keyword.
  * Uses 'when:2h' to get articles from last 2 hours.
@@ -214,4 +248,122 @@ export async function getRecentProcessedArticles(
     .where(eq(processedArticles.keyword, keyword))
     .orderBy(desc(processedArticles.processedAt))
     .limit(limit);
+}
+
+// ============================================================================
+// India-Focused News Fetching
+// ============================================================================
+
+/**
+ * Fetch news from a direct RSS feed (not Google News).
+ */
+async function fetchFromRssFeed(
+  feedUrl: string,
+  sourceName: string,
+  maxResults: number = 10,
+  hoursAgo: number = 4
+): Promise<NewsItem[]> {
+  try {
+    const response = await fetch(feedUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
+
+    if (!response.ok) {
+      console.error(
+        `[NewsMonitor] Failed to fetch RSS from ${sourceName}: ${response.status}`
+      );
+      return [];
+    }
+
+    const xml = await response.text();
+    const parsed = parser.parse(xml);
+
+    const channel = parsed?.rss?.channel;
+    if (!channel || !channel.item) {
+      return [];
+    }
+
+    const items = Array.isArray(channel.item) ? channel.item : [channel.item];
+    const cutoffTime = new Date(Date.now() - hoursAgo * 60 * 60 * 1000);
+
+    const newItems: NewsItem[] = [];
+    for (const item of items) {
+      if (newItems.length >= maxResults) break;
+
+      const pubDate = item.pubDate ? new Date(item.pubDate) : new Date();
+      if (pubDate < cutoffTime) continue;
+
+      const newsItem: NewsItem = {
+        title: item.title || "",
+        link: item.link || "",
+        pubDate: pubDate.toISOString(),
+        source: sourceName,
+      };
+
+      if (!newsItem.link) continue;
+
+      const processed = await isAlreadyProcessed(newsItem.link);
+      if (!processed) {
+        newItems.push(newsItem);
+      }
+    }
+
+    return newItems;
+  } catch (error) {
+    console.error(`[NewsMonitor] Error fetching ${sourceName}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Fetch broad Indian market news from multiple sources.
+ * This is the primary source for India-focused catalyst discovery.
+ *
+ * Sources:
+ * 1. Google News with India-focused queries
+ * 2. Direct RSS feeds from MoneyControl, ET, Livemint
+ *
+ * @param maxPerSource - Max articles per individual source
+ * @param hoursAgo - How far back to search
+ */
+export async function fetchIndianMarketNews(
+  maxPerSource: number = 20,
+  hoursAgo: number = 4
+): Promise<NewsItem[]> {
+  console.log("\n📰 Fetching broad Indian market news...");
+
+  const allNews: NewsItem[] = [];
+  const seenUrls = new Set<string>();
+
+  // Helper to dedupe
+  const addIfNew = (items: NewsItem[]) => {
+    for (const item of items) {
+      if (!seenUrls.has(item.link)) {
+        seenUrls.add(item.link);
+        allNews.push(item);
+      }
+    }
+  };
+
+  // Fetch from RSS feeds (includes Google News India Business category)
+  for (const feed of INDIA_NEWS_RSS_FEEDS) {
+    try {
+      const news = await fetchFromRssFeed(
+        feed.url,
+        feed.source,
+        maxPerSource,
+        hoursAgo
+      );
+      addIfNew(news);
+      console.log(`   [${feed.source}]: ${news.length} articles`);
+    } catch (e) {
+      console.error(`   [${feed.source}] Error:`, e);
+    }
+  }
+
+  console.log(`   📊 Total unique articles: ${allNews.length}`);
+  return allNews;
 }

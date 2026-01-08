@@ -10,8 +10,10 @@
 
 import {
   fetchCatalystNews,
+  fetchIndianMarketNews,
   getUniqueKeywords,
   getAssetsForKeyword,
+  getEnabledAssets,
   markAsProcessed,
 } from "./news-monitor";
 import {
@@ -266,6 +268,90 @@ export async function runCatalystScan(
     return result;
   } catch (error) {
     const errMsg = `Scan failed: ${
+      error instanceof Error ? error.message : "Unknown error"
+    }`;
+    console.error(`\n❌ ${errMsg}`);
+    result.errors.push(errMsg);
+    return result;
+  }
+}
+
+/**
+ * Run broad Indian market news scan.
+ *
+ * This is the PRIMARY discovery function that:
+ * 1. Fetches news from multiple India-focused sources
+ * 2. Sends the combined batch to AI discovery
+ * 3. The AI identifies affected stocks/sectors (not limited to watchlist)
+ *
+ * Use this for comprehensive coverage of Indian market news.
+ */
+export async function runBroadIndianScan(
+  config: Partial<CatalystConfig> = {}
+): Promise<ScanResult> {
+  const mergedConfig: CatalystConfig = {
+    ...DEFAULT_CATALYST_CONFIG,
+    ...config,
+  };
+
+  const result: ScanResult = {
+    keywordsScanned: 0,
+    articlesProcessed: 0,
+    catalystsFound: 0,
+    signalsGenerated: 0,
+    signals: [],
+    errors: [],
+  };
+
+  console.log("\n🇮🇳 Starting Broad Indian Market Scan...");
+  console.log(`   ${getMarketStatusMessage()}`);
+  console.log(
+    `   Mode: ${mergedConfig.paperMode ? "📝 PAPER (calibration)" : "🔴 LIVE"}`
+  );
+  console.log(`   Confidence threshold: ${mergedConfig.confidenceThreshold}`);
+  console.log("");
+
+  try {
+    // Fetch broad Indian market news
+    const indianNews = await fetchIndianMarketNews(
+      5, // max per source
+      mergedConfig.newsMaxAgeHours
+    );
+
+    if (indianNews.length === 0) {
+      console.log("📭 No new Indian news articles found");
+      return result;
+    }
+
+    result.articlesProcessed = indianNews.length;
+    console.log(`\n📰 Collected ${indianNews.length} unique articles`);
+
+    // Get all enabled assets for context (optional - AI can suggest new ones)
+    const assets = await getEnabledAssets();
+
+    // Import and run discovery
+    const { discoverCatalysts } = await import("./discovery");
+    const discoveryResult = await discoverCatalysts(indianNews, assets);
+
+    result.catalystsFound = discoveryResult.newCatalysts;
+
+    console.log("\n" + "═".repeat(60));
+    console.log("📊 BROAD SCAN COMPLETE");
+    console.log("═".repeat(60));
+    console.log(`   Articles processed: ${result.articlesProcessed}`);
+    console.log(`   Catalysts discovered: ${result.catalystsFound}`);
+    if (discoveryResult.catalysts.length > 0) {
+      console.log("\n   🎯 Discovered catalysts:");
+      for (const cat of discoveryResult.catalysts) {
+        console.log(`      • ${cat.predictedImpact}`);
+        console.log(`        Affected: ${cat.affectedSymbols.join(", ")}`);
+      }
+    }
+    console.log("");
+
+    return result;
+  } catch (error) {
+    const errMsg = `Broad scan failed: ${
       error instanceof Error ? error.message : "Unknown error"
     }`;
     console.error(`\n❌ ${errMsg}`);

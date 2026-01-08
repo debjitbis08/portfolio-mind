@@ -18,7 +18,7 @@ import type {
 } from "./types";
 
 // Use Gemini 2.0 Flash for speed and cost efficiency
-const MODEL_ID = "gemini-2.0-flash";
+const MODEL_ID = "gemini-3-flash-preview";
 
 /**
  * Get Gemini API key from environment.
@@ -198,8 +198,9 @@ export async function analyzeNewsBatch(
           },
         ],
         config: {
+          responseMimeType: "application/json",
           temperature: 0.3,
-          maxOutputTokens: 800,
+          maxOutputTokens: 1500,
         },
       });
 
