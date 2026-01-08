@@ -5,6 +5,7 @@
 
 import { createSignal, createEffect, For, Show } from "solid-js";
 import { getSourceBadges } from "../../lib/utils/source-utils";
+import { FaSolidPencil } from "solid-icons/fa";
 
 interface WatchlistStock {
   symbol: string;
@@ -16,6 +17,21 @@ interface WatchlistStock {
   sector: string | null;
   current_price: number | null;
   rsi_14: number | null;
+  sma_50: number | null;
+  sma_200: number | null;
+  price_vs_sma50: number | null;
+  price_vs_sma200: number | null;
+  zone_status: "BUY" | "WAIT_TOO_HOT" | "WAIT_TOO_COLD" | null;
+  is_wait_zone: boolean;
+  wait_reasons: string[] | null;
+  portfolio_role:
+    | "VALUE"
+    | "MOMENTUM"
+    | "CORE"
+    | "SPECULATIVE"
+    | "INCOME"
+    | null;
+  technical_updated_at: string | null;
   has_thesis: boolean;
   has_financials: boolean;
   vrs_research: {
@@ -44,6 +60,10 @@ export default function WatchlistPage() {
   const [newSymbol, setNewSymbol] = createSignal("");
   const [newName, setNewName] = createSignal("");
   const [adding, setAdding] = createSignal(false);
+
+  // Inline name editing
+  const [editingSymbol, setEditingSymbol] = createSignal<string | null>(null);
+  const [editedName, setEditedName] = createSignal("");
 
   // Sync state
   const [syncing, setSyncing] = createSignal(false);
@@ -212,6 +232,103 @@ export default function WatchlistPage() {
     });
   };
 
+  // Start editing stock name
+  const startEditingName = (stock: WatchlistStock) => {
+    setEditingSymbol(stock.symbol);
+    setEditedName(stock.name || stock.symbol);
+  };
+
+  // Save edited name
+  const saveEditedName = async (symbol: string) => {
+    try {
+      const res = await fetch("/api/watchlist", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, name: editedName().trim() }),
+      });
+      if (res.ok) {
+        // Update local state
+        setStocks((prev) =>
+          prev.map((s) =>
+            s.symbol === symbol ? { ...s, name: editedName().trim() } : s
+          )
+        );
+      }
+    } catch (err) {
+      console.error("Failed to save name:", err);
+    } finally {
+      setEditingSymbol(null);
+    }
+  };
+
+  // Cancel editing
+  const cancelEditingName = () => {
+    setEditingSymbol(null);
+    setEditedName("");
+  };
+
+  // Copy table as markdown
+  const copyTableAsMarkdown = async () => {
+    const formatTechnical = (stock: WatchlistStock) => {
+      const badges = [];
+      if (stock.rsi_14 !== null) badges.push(`RSI ${stock.rsi_14}`);
+      if (stock.price_vs_sma50 !== null)
+        badges.push(
+          `${
+            stock.price_vs_sma50 >= 0 ? "+" : ""
+          }${stock.price_vs_sma50.toFixed(0)}% 50D`
+        );
+      if (stock.price_vs_sma200 !== null)
+        badges.push(
+          `${
+            stock.price_vs_sma200 >= 0 ? "+" : ""
+          }${stock.price_vs_sma200.toFixed(0)}% 200D`
+        );
+      if (stock.zone_status === "WAIT_TOO_HOT") badges.push("Too Hot");
+      else if (stock.zone_status === "WAIT_TOO_COLD") badges.push("Downtrend");
+      else if (stock.zone_status === "BUY") badges.push("Buy Zone");
+      if (stock.portfolio_role) badges.push(stock.portfolio_role);
+      return badges.length > 0 ? badges.join(", ") : "-";
+    };
+
+    const headers = [
+      "⭐",
+      "Name",
+      "Symbol",
+      "Sector",
+      "Source",
+      "Technical",
+      "Price",
+    ];
+    const separator = headers.map(() => "---");
+
+    const rows = stocks().map((stock) => [
+      stock.interesting ? "★" : "☆",
+      stock.name,
+      stock.symbol,
+      stock.sector || "-",
+      stock.source,
+      formatTechnical(stock),
+      stock.current_price
+        ? `₹${stock.current_price.toLocaleString("en-IN")}`
+        : "-",
+    ]);
+
+    const markdown = [
+      `| ${headers.join(" | ")} |`,
+      `| ${separator.join(" | ")} |`,
+      ...rows.map((row) => `| ${row.join(" | ")} |`),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(markdown);
+      alert("Table copied as markdown!");
+    } catch (err) {
+      console.error("Failed to copy:", err);
+      alert("Failed to copy to clipboard");
+    }
+  };
+
   return (
     <div class="p-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -250,6 +367,13 @@ export default function WatchlistPage() {
               {syncing() ? "⏳" : "📊"}
             </span>
             {syncing() ? "Syncing..." : "Sync All Financials"}
+          </button>
+          <button
+            class="px-4 py-2 text-sm bg-green/20 text-green rounded-lg hover:bg-green/30 transition-colors"
+            onClick={copyTableAsMarkdown}
+            title="Copy table as markdown"
+          >
+            📋 Copy MD
           </button>
           <button
             class="px-4 py-2 text-sm bg-mauve text-base rounded-lg hover:bg-mauve/80 transition-colors"
@@ -331,11 +455,11 @@ export default function WatchlistPage() {
                 <th class="text-left py-3 px-4 text-subtext0 font-medium">
                   Source
                 </th>
-                <th class="text-right py-3 px-4 text-subtext0 font-medium">
-                  Price
+                <th class="text-center py-3 px-4 text-subtext0 font-medium">
+                  Technical
                 </th>
                 <th class="text-right py-3 px-4 text-subtext0 font-medium">
-                  RSI
+                  Price
                 </th>
                 <th class="text-center py-3 px-4 text-subtext0 font-medium">
                   Thesis
@@ -375,21 +499,71 @@ export default function WatchlistPage() {
                       </button>
                     </td>
                     <td class="py-3 px-4">
-                      <a
-                        href={`/company/${stock.symbol}`}
-                        class="text-mauve hover:underline font-medium"
+                      <Show
+                        when={editingSymbol() === stock.symbol}
+                        fallback={
+                          <div>
+                            <div class="flex items-center gap-2 group">
+                              <a
+                                href={`/company/${stock.symbol}`}
+                                class="text-mauve hover:underline font-medium"
+                              >
+                                {stock.name}
+                              </a>
+                              <button
+                                onClick={() => startEditingName(stock)}
+                                class="opacity-0 group-hover:opacity-100 text-subtext0 hover:text-text transition-all p-1 rounded hover:bg-surface1"
+                                title="Edit name"
+                              >
+                                <FaSolidPencil />
+                              </button>
+                            </div>
+                            <div class="flex items-center gap-2 group text-xs text-subtext0 mt-1">
+                              <Show when={stock.name !== stock.symbol}>
+                                <span>{stock.symbol}</span>
+                              </Show>
+                              <Show
+                                when={
+                                  stock.name !== stock.symbol && stock.sector
+                                }
+                              >
+                                |
+                              </Show>
+                              <Show when={stock.sector}>
+                                <span>{stock.sector}</span>
+                              </Show>
+                            </div>
+                          </div>
+                        }
                       >
-                        {stock.name}
-                      </a>
-                      <Show when={stock.name !== stock.symbol}>
-                        <span class="text-xs text-subtext0 ml-1">
-                          ({stock.symbol})
-                        </span>
-                      </Show>
-                      <Show when={stock.sector}>
-                        <span class="text-xs text-subtext0 ml-2">
-                          {stock.sector}
-                        </span>
+                        <div class="flex items-center gap-2">
+                          <input
+                            type="text"
+                            class="px-2 py-1 bg-surface0 border border-surface1 rounded text-sm text-text"
+                            value={editedName()}
+                            onInput={(e) =>
+                              setEditedName(e.currentTarget.value)
+                            }
+                            onKeyPress={(e) => {
+                              if (e.key === "Enter")
+                                saveEditedName(stock.symbol);
+                              if (e.key === "Escape") cancelEditingName();
+                            }}
+                            autofocus
+                          />
+                          <button
+                            onClick={() => saveEditedName(stock.symbol)}
+                            class="px-2 py-0.5 bg-green/20 text-green rounded text-xs hover:bg-green/30"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            onClick={cancelEditingName}
+                            class="px-2 py-0.5 bg-surface1 text-subtext0 rounded text-xs hover:bg-surface2"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </Show>
                     </td>
                     <td class="py-3 px-4">
@@ -406,23 +580,131 @@ export default function WatchlistPage() {
                         </For>
                       </div>
                     </td>
+                    <td class="py-3 px-4 text-center">
+                      <div class="flex flex-wrap gap-1 justify-center">
+                        <Show
+                          when={
+                            stock.rsi_14 ||
+                            stock.price_vs_sma50 ||
+                            stock.zone_status ||
+                            stock.portfolio_role
+                          }
+                          fallback={
+                            <span class="text-xs text-subtext0">—</span>
+                          }
+                        >
+                          {/* RSI badge */}
+                          <Show when={stock.rsi_14 !== null}>
+                            <span
+                              class={`px-2 py-0.5 text-xs rounded ${
+                                stock.rsi_14! > 70
+                                  ? "bg-red/20 text-red"
+                                  : stock.rsi_14! < 30
+                                  ? "bg-green/20 text-green"
+                                  : "bg-surface2 text-subtext0"
+                              }`}
+                            >
+                              RSI {stock.rsi_14}
+                            </span>
+                          </Show>
+
+                          {/* SMA50 badge */}
+                          <Show when={stock.price_vs_sma50 !== null}>
+                            <span
+                              class={`px-2 py-0.5 text-xs rounded bg-surface2 ${
+                                stock.price_vs_sma50! > 20
+                                  ? "text-red"
+                                  : stock.price_vs_sma50! < -10
+                                  ? "text-yellow"
+                                  : stock.price_vs_sma50! >= 0
+                                  ? "text-green"
+                                  : "text-subtext0"
+                              }`}
+                            >
+                              {stock.price_vs_sma50! >= 0 ? "+" : ""}
+                              {stock.price_vs_sma50!.toFixed(0)}% 50D
+                            </span>
+                          </Show>
+
+                          {/* SMA200 badge */}
+                          <Show when={stock.price_vs_sma200 !== null}>
+                            <span
+                              class={`px-2 py-0.5 text-xs rounded bg-surface2 ${
+                                stock.price_vs_sma200! > 40
+                                  ? "text-red"
+                                  : stock.price_vs_sma200! < 0
+                                  ? "text-yellow"
+                                  : "text-green"
+                              }`}
+                            >
+                              {stock.price_vs_sma200! >= 0 ? "+" : ""}
+                              {stock.price_vs_sma200!.toFixed(0)}% 200D
+                            </span>
+                          </Show>
+
+                          {/* Zone status badge */}
+                          <Show when={stock.zone_status}>
+                            <Show when={stock.zone_status === "WAIT_TOO_HOT"}>
+                              <span class="px-2 py-0.5 text-xs rounded bg-red/20 text-red">
+                                🔥 Too Hot
+                              </span>
+                            </Show>
+                            <Show when={stock.zone_status === "WAIT_TOO_COLD"}>
+                              <span class="px-2 py-0.5 text-xs rounded bg-blue/20 text-blue">
+                                🧊 Downtrend
+                              </span>
+                            </Show>
+                            <Show when={stock.zone_status === "BUY"}>
+                              <span class="px-2 py-0.5 text-xs rounded bg-green/20 text-green">
+                                ✅ Buy Zone
+                              </span>
+                            </Show>
+                          </Show>
+
+                          {/* Portfolio Role badge */}
+                          <Show when={stock.portfolio_role}>
+                            <Show when={stock.portfolio_role === "VALUE"}>
+                              <span class="px-2 py-0.5 text-xs rounded bg-blue/20 text-blue">
+                                💎 Value
+                              </span>
+                            </Show>
+                            <Show when={stock.portfolio_role === "MOMENTUM"}>
+                              <span class="px-2 py-0.5 text-xs rounded bg-purple/20 text-purple">
+                                🚀 Momentum
+                              </span>
+                            </Show>
+                            <Show when={stock.portfolio_role === "CORE"}>
+                              <span class="px-2 py-0.5 text-xs rounded bg-mauve/20 text-mauve">
+                                🏛️ Core
+                              </span>
+                            </Show>
+                            <Show when={stock.portfolio_role === "SPECULATIVE"}>
+                              <span class="px-2 py-0.5 text-xs rounded bg-peach/20 text-peach">
+                                🎲 Speculative
+                              </span>
+                            </Show>
+                            <Show when={stock.portfolio_role === "INCOME"}>
+                              <span class="px-2 py-0.5 text-xs rounded bg-green/20 text-green">
+                                💰 Income
+                              </span>
+                            </Show>
+                          </Show>
+                        </Show>
+                      </div>
+                      <Show
+                        when={
+                          stock.wait_reasons && stock.wait_reasons.length > 0
+                        }
+                      >
+                        <div class="text-xs text-subtext0 mt-1">
+                          {stock.wait_reasons!.join(", ")}
+                        </div>
+                      </Show>
+                    </td>
                     <td class="py-3 px-4 text-right text-text">
                       {stock.current_price
                         ? `₹${stock.current_price.toLocaleString("en-IN")}`
                         : "—"}
-                    </td>
-                    <td
-                      class={`py-3 px-4 text-right ${
-                        stock.rsi_14
-                          ? stock.rsi_14 < 40
-                            ? "text-green"
-                            : stock.rsi_14 > 70
-                            ? "text-red"
-                            : "text-text"
-                          : "text-subtext0"
-                      }`}
-                    >
-                      {stock.rsi_14 ?? "—"}
                     </td>
                     <td class="py-3 px-4 text-center">
                       {stock.has_thesis ? (

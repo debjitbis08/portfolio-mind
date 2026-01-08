@@ -10,6 +10,11 @@ import type { APIRoute } from "astro";
 import { requireAuth } from "../../lib/middleware/requireAuth";
 import { db, schema } from "../../lib/db";
 import { eq, inArray, desc } from "drizzle-orm";
+import {
+  getZoneStatus,
+  getZoneReasons,
+  PortfolioRole,
+} from "../../lib/zone-status";
 
 // GET - List all watchlist stocks with enrichment data
 export const GET: APIRoute = async ({ request, url }) => {
@@ -26,6 +31,9 @@ export const GET: APIRoute = async ({ request, url }) => {
       .from(schema.watchlist)
       .orderBy(desc(schema.watchlist.addedAt));
 
+    // Filter out delisted stocks
+    watchlistStocks = watchlistStocks.filter((s) => !s.delisted);
+
     // Apply filters
     if (filterSource) {
       watchlistStocks = watchlistStocks.filter(
@@ -39,39 +47,53 @@ export const GET: APIRoute = async ({ request, url }) => {
     const symbols = watchlistStocks.map((s) => s.symbol);
 
     // Fetch enrichment data
-    const [stockIntelData, technicalData, financialsCount, vrsResearchData] =
-      await Promise.all([
-        symbols.length > 0
-          ? db
-              .select()
-              .from(schema.stockIntel)
-              .where(inArray(schema.stockIntel.symbol, symbols))
-          : [],
-        symbols.length > 0
-          ? db
-              .select()
-              .from(schema.technicalData)
-              .where(inArray(schema.technicalData.symbol, symbols))
-          : [],
-        symbols.length > 0
-          ? db
-              .select({ symbol: schema.companyFinancials.symbol })
-              .from(schema.companyFinancials)
-              .where(inArray(schema.companyFinancials.symbol, symbols))
-          : [],
-        symbols.length > 0
-          ? db
-              .select()
-              .from(schema.vrsResearch)
-              .where(inArray(schema.vrsResearch.symbol, symbols))
-          : [],
-      ]);
+    const [
+      stockIntelData,
+      technicalData,
+      financialsCount,
+      vrsResearchData,
+      portfolioRolesData,
+    ] = await Promise.all([
+      symbols.length > 0
+        ? db
+            .select()
+            .from(schema.stockIntel)
+            .where(inArray(schema.stockIntel.symbol, symbols))
+        : [],
+      symbols.length > 0
+        ? db
+            .select()
+            .from(schema.technicalData)
+            .where(inArray(schema.technicalData.symbol, symbols))
+        : [],
+      symbols.length > 0
+        ? db
+            .select({ symbol: schema.companyFinancials.symbol })
+            .from(schema.companyFinancials)
+            .where(inArray(schema.companyFinancials.symbol, symbols))
+        : [],
+      symbols.length > 0
+        ? db
+            .select()
+            .from(schema.vrsResearch)
+            .where(inArray(schema.vrsResearch.symbol, symbols))
+        : [],
+      symbols.length > 0
+        ? db
+            .select()
+            .from(schema.portfolioRoles)
+            .where(inArray(schema.portfolioRoles.symbol, symbols))
+        : [],
+    ]);
 
     // Build lookup maps
     const intelMap = new Map(stockIntelData.map((i) => [i.symbol, i]));
     const techMap = new Map(technicalData.map((t) => [t.symbol, t]));
     const financialSymbols = new Set(financialsCount.map((f) => f.symbol));
     const vrsMap = new Map(vrsResearchData.map((v) => [v.symbol, v]));
+    const portfolioRoleMap = new Map(
+      portfolioRolesData.map((pr) => [pr.symbol, pr.role])
+    );
 
     // Enrich stocks
     const enrichedStocks = watchlistStocks.map((stock) => {
@@ -98,6 +120,26 @@ export const GET: APIRoute = async ({ request, url }) => {
         } catch {}
       }
 
+      // Get portfolio role
+      const portfolioRole = portfolioRoleMap.get(stock.symbol) || null;
+
+      // Parse portfolio role to enum (defaults to CORE if not set)
+      const roleEnum =
+        portfolioRole && portfolioRole in PortfolioRole
+          ? (PortfolioRole as any)[portfolioRole]
+          : PortfolioRole.CORE;
+
+      // Compute zone status using role-aware logic
+      const techData = {
+        rsi14: tech?.rsi14 ?? null,
+        priceVsSma50: tech?.priceVsSma50 ?? null,
+        priceVsSma200: tech?.priceVsSma200 ?? null,
+        currentPrice: tech?.currentPrice ?? null,
+        sma200: tech?.sma200 ?? null,
+      };
+      const zoneStatus = getZoneStatus(techData, roleEnum);
+      const waitReasons = getZoneReasons(techData);
+
       return {
         symbol: stock.symbol,
         source: stock.source,
@@ -109,6 +151,15 @@ export const GET: APIRoute = async ({ request, url }) => {
         sector: fundamentals?.sector ?? null,
         current_price: tech?.currentPrice ?? null,
         rsi_14: tech?.rsi14 ? Math.round(tech.rsi14) : null,
+        sma_50: tech?.sma50 ?? null,
+        sma_200: tech?.sma200 ?? null,
+        price_vs_sma50: tech?.priceVsSma50 ?? null,
+        price_vs_sma200: tech?.priceVsSma200 ?? null,
+        zone_status: zoneStatus,
+        is_wait_zone: zoneStatus !== "BUY",
+        wait_reasons: waitReasons,
+        portfolio_role: portfolioRole,
+        technical_updated_at: tech?.updatedAt ?? null,
         has_thesis: hasThesis,
         has_financials: financialSymbols.has(stock.symbol),
         vrs_research: vrsMap.get(stock.symbol) || null,
@@ -203,7 +254,7 @@ export const PUT: APIRoute = async ({ request }) => {
 
   try {
     const body = await request.json();
-    const { symbol, notes, interesting } = body;
+    const { symbol, notes, interesting, name } = body;
 
     if (!symbol) {
       return new Response(JSON.stringify({ error: "Symbol is required" }), {
@@ -215,6 +266,7 @@ export const PUT: APIRoute = async ({ request }) => {
     const updates: Partial<typeof schema.watchlist.$inferInsert> = {};
     if (notes !== undefined) updates.notes = notes;
     if (interesting !== undefined) updates.interesting = interesting;
+    if (name !== undefined) updates.name = name;
 
     if (Object.keys(updates).length === 0) {
       return new Response(JSON.stringify({ error: "No updates provided" }), {

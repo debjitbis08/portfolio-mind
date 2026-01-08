@@ -121,7 +121,6 @@ export class ScreenerService {
                 name: stock.name || null,
                 source: "screener",
                 notes: "Imported from Screener.in",
-                addedAt: new Date().toISOString(),
               },
             });
         }

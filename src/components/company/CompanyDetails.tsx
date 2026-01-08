@@ -27,6 +27,8 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
   const [activeTab, setActiveTab] = createSignal("overview");
   const [isRefreshingTech, setIsRefreshingTech] = createSignal(false);
   const [isRefreshingVP, setIsRefreshingVP] = createSignal(false);
+  const [isEditingName, setIsEditingName] = createSignal(false);
+  const [editedName, setEditedName] = createSignal("");
 
   // Format currency
   const formatCurrency = (value: number) => {
@@ -209,6 +211,37 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
     }
   };
 
+  const saveName = async () => {
+    if (!editedName().trim()) {
+      setIsEditingName(false);
+      return;
+    }
+    try {
+      const res = await fetch("/api/watchlist", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: props.symbol,
+          name: editedName().trim(),
+        }),
+      });
+      if (res.ok) {
+        // Refresh watchlist stock data
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error("Failed to save name:", error);
+    } finally {
+      setIsEditingName(false);
+    }
+  };
+
+  const startEditingName = () => {
+    const currentName = watchlistStock()?.name || props.symbol;
+    setEditedName(currentName);
+    setIsEditingName(true);
+  };
+
   const tabs = () => [
     { id: "overview", label: "Overview" },
     {
@@ -244,17 +277,64 @@ export default function CompanyDetails(props: CompanyDetailsProps) {
           </a>
           <div>
             <div class="flex items-center gap-2 mb-0.5">
-              <h1 class="text-2xl font-bold text-text tracking-tight">
-                {holdings()?.stock_name ||
-                  watchlistStock()?.name ||
-                  props.symbol}
-              </h1>
+              <Show
+                when={!isEditingName()}
+                fallback={
+                  <div class="flex items-center gap-2">
+                    <input
+                      type="text"
+                      class="text-2xl font-bold text-text tracking-tight bg-surface0 border border-surface1 rounded px-2 py-1"
+                      value={editedName()}
+                      onInput={(e) => setEditedName(e.currentTarget.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === "Enter") saveName();
+                        if (e.key === "Escape") setIsEditingName(false);
+                      }}
+                      autofocus
+                    />
+                    <button
+                      onClick={saveName}
+                      class="px-2 py-1 bg-green/20 text-green rounded text-xs hover:bg-green/30"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => setIsEditingName(false)}
+                      class="px-2 py-1 bg-surface1 text-subtext0 rounded text-xs hover:bg-surface2"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                }
+              >
+                <h1 class="text-2xl font-bold text-text tracking-tight">
+                  {holdings()?.stock_name ||
+                    watchlistStock()?.name ||
+                    props.symbol}
+                </h1>
+                <Show when={!holdings() && !holdings.loading}>
+                  <button
+                    onClick={startEditingName}
+                    class="text-subtext0 hover:text-text transition-colors p-1 rounded hover:bg-surface1"
+                    title="Edit name"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-4 w-4"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                    </svg>
+                  </button>
+                </Show>
+              </Show>
               <Show when={holdings()}>
                 <span class="px-2 py-0.5 bg-mauve/10 text-mauve text-[10px] rounded uppercase font-bold border border-mauve/20">
                   Holding
                 </span>
               </Show>
-              <Show when={!holdings() && !holdings.loading}>
+              <Show when={!holdings() && !holdings.loading && !isEditingName()}>
                 <span class="px-2 py-0.5 bg-surface1 text-subtext1 text-[10px] rounded uppercase font-bold border border-surface2">
                   Watchlist
                 </span>

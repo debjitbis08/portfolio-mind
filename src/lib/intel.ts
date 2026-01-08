@@ -94,8 +94,19 @@ export class IntelService {
             socialSentiment = JSON.parse(existing[0].socialSentiment);
           } else {
             // Fetch fresh if missing or stale
+            // First, try to get the name from watchlist (most reliable)
+            const watchlistRecord = await db
+              .select()
+              .from(schema.watchlist)
+              .where(eq(schema.watchlist.symbol, symbol))
+              .limit(1);
+
             const rawName =
-              quote.price?.longName || quote.price?.shortName || symbol;
+              watchlistRecord[0]?.name ||
+              quote.price?.longName ||
+              quote.price?.shortName ||
+              symbol;
+
             const cleanName = rawName
               .replace(/ limited| ltd\.?| inc\.?| corp\.?| corporation/gi, "")
               .trim();
