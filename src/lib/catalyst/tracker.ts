@@ -9,6 +9,7 @@ import {
   DEFAULT_CATALYST_CONFIG,
 } from "./types";
 import { getEnabledAssets } from "./news-monitor";
+import { isIndianMarketOpen, getMarketStatusMessage } from "./market-hours";
 
 interface WatchCriteria {
   metric: "PRICE" | "VOLUME";
@@ -21,12 +22,63 @@ interface WatchCriteria {
  * Main loop for the tracker.
  * 1. Checks 'monitoring' potential catalysts.
  * 2. Checks active signals for outcomes.
+ *
+ * Note: Skips price validation when Indian market is closed,
+ * but still checks for expiries.
  */
 export async function runCatalystTracker() {
   console.log("\n🕵️  Running Catalyst Tracker...");
+  console.log(`   ${getMarketStatusMessage()}`);
+
+  // Skip price validation when market is closed
+  // (Global commodities still trade, but we trade Indian stocks)
+  if (!isIndianMarketOpen()) {
+    console.log("   ⏸️  Skipping price validation until market opens.");
+    // Still check for expired items
+    await expireStalePotentialCatalysts();
+    return;
+  }
 
   await checkPotentialCatalysts();
   // await checkActiveOutcomes(); // TODO: Implement outcome tracking later
+}
+
+/**
+ * Check and expire stale potential catalysts.
+ * Called even when market is closed to clean up old items.
+ */
+async function expireStalePotentialCatalysts() {
+  const monitors = await db
+    .select()
+    .from(potentialCatalysts)
+    .where(eq(potentialCatalysts.status, "monitoring"));
+
+  if (monitors.length === 0) {
+    return;
+  }
+
+  let expiredCount = 0;
+  for (const item of monitors) {
+    try {
+      const criteria = JSON.parse(item.watchCriteria) as WatchCriteria;
+      const createdAt = new Date(item.createdAt || Date.now());
+      const ageHours = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60);
+
+      if (ageHours > criteria.timeoutHours) {
+        await db
+          .update(potentialCatalysts)
+          .set({ status: "expired" })
+          .where(eq(potentialCatalysts.id, item.id));
+        expiredCount++;
+      }
+    } catch (error) {
+      console.error(`   Error checking expiry for ${item.id}:`, error);
+    }
+  }
+
+  if (expiredCount > 0) {
+    console.log(`   ⏰ Expired ${expiredCount} stale potential catalysts.`);
+  }
 }
 
 async function checkPotentialCatalysts() {

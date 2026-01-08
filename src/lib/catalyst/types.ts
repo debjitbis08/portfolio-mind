@@ -24,7 +24,12 @@ export type ImpactType =
 
 export type AssetType = "COMMODITY" | "EQUITY" | "ETF" | "CURRENCY" | "GLOBAL";
 
-export type SignalStatus = "active" | "acted" | "expired" | "dismissed";
+export type SignalStatus =
+  | "active"
+  | "pending_market_open"
+  | "acted"
+  | "expired"
+  | "dismissed";
 
 // ============================================================================
 // Watchlist & Assets

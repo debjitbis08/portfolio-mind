@@ -741,7 +741,7 @@ export const catalystSignals = sqliteTable(
 
     // Status tracking
     status: text("status", {
-      enum: ["active", "acted", "expired", "dismissed"],
+      enum: ["active", "pending_market_open", "acted", "expired", "dismissed"],
     }).default("active"),
     actedAt: text("acted_at"),
     notes: text("notes"), // User notes

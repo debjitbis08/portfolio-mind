@@ -32,6 +32,7 @@ import type {
   NewsItem,
 } from "./types";
 import { DEFAULT_CATALYST_CONFIG } from "./types";
+import { isIndianMarketOpen, getMarketStatusMessage } from "./market-hours";
 
 export interface ScanResult {
   keywordsScanned: number;
@@ -67,11 +68,18 @@ export async function runCatalystScan(
   };
 
   console.log("\n🚀 Starting Catalyst Scan...");
+  console.log(`   ${getMarketStatusMessage()}`);
   console.log(
     `   Mode: ${mergedConfig.paperMode ? "📝 PAPER (calibration)" : "🔴 LIVE"}`
   );
   console.log(`   Confidence threshold: ${mergedConfig.confidenceThreshold}`);
-  console.log(`   News age: ${mergedConfig.newsMaxAgeHours}h\n`);
+  console.log(`   News age: ${mergedConfig.newsMaxAgeHours}h`);
+  if (!isIndianMarketOpen()) {
+    console.log(
+      `   ⏰ After-hours signals will be marked as 'pending_market_open'`
+    );
+  }
+  console.log("");
 
   try {
     const keywords = await getUniqueKeywords();
@@ -392,3 +400,8 @@ export { getActiveSignals, updateSignalStatus } from "./signal-dispatcher";
 export { getEnabledAssets, getUniqueKeywords } from "./news-monitor";
 export { discoverCatalysts } from "./discovery";
 export { runCatalystTracker } from "./tracker";
+export {
+  isIndianMarketOpen,
+  getMarketStatusMessage,
+  getNextMarketOpen,
+} from "./market-hours";

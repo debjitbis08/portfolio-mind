@@ -22,12 +22,17 @@ import {
   writeFileSync,
 } from "fs";
 import { dirname } from "path";
+import { isIndianMarketOpen, getMarketStatusMessage } from "./market-hours";
 
 /**
  * Save a signal to the database.
  * Returns the generated signal ID.
  */
 export async function saveSignal(signal: CatalystSignal): Promise<string> {
+  // Determine status based on market hours
+  const marketOpen = isIndianMarketOpen();
+  const signalStatus = marketOpen ? "active" : "pending_market_open";
+
   const [inserted] = await db
     .insert(catalystSignals)
     .values({
@@ -50,7 +55,7 @@ export async function saveSignal(signal: CatalystSignal): Promise<string> {
       priceChangePercent: signal.technical.priceChangePercent,
       volumeRatio: signal.technical.volumeRatio,
       volumeSpike: signal.technical.volumeSpike,
-      status: "active",
+      status: signalStatus,
       expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(), // 48h expiry
     })
     .returning({ id: catalystSignals.id });
