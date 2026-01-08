@@ -23,6 +23,45 @@ import { db, schema } from "./db";
 import { desc, eq, inArray } from "drizzle-orm";
 import { buildTier3SystemPrompt as buildTier3SystemPromptCommon } from "./tier3-prompt";
 
+// Re-export or define ThinkingLevel for consumers
+export enum ThinkingLevel {
+  low = "LOW",
+  medium = "MEDIUM",
+  high = "HIGH",
+}
+
+// Helper to get a configured model instance
+export function getGeminiModel(config: {
+  thinkingConfig?: { thinkingLevel: ThinkingLevel };
+  responseSchema?: any;
+}) {
+  return {
+    generateContent: async (prompt: string) => {
+      const module = await import("@google/genai");
+      const GoogleGenAI = module.GoogleGenAI;
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+
+      const genConfig: any = {};
+
+      // Map local ThinkingLevel to what the model expects if needed,
+      // or just trust the model param.
+      // For 2.0 Flash Thinking, we don't pass an explicit level usually, just the model choice.
+      // But if we use a Pro-preview that supports it:
+
+      if (config.responseSchema) {
+        genConfig.responseMimeType = "application/json";
+        genConfig.responseSchema = config.responseSchema;
+      }
+
+      return await ai.models.generateContent({
+        model: "gemini-2.0-flash-thinking-exp-01-21",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: genConfig,
+      });
+    },
+  };
+}
+
 // ============================================================================
 // Types
 // ============================================================================

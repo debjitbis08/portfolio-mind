@@ -50,11 +50,13 @@
     "trading-signals": "^7.4.2",
     "typescript": "^5.9.3",
     "xlsx": "^0.18.5",
-    "yahoo-finance2": "^3.11.2"
+    "yahoo-finance2": "^3.11.2",
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/markdown-it": "^14.1.2",
+    "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.8"
   },
   "volta": {

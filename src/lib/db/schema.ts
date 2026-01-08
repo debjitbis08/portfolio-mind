@@ -648,3 +648,148 @@ export const intradaySuggestionLinks = sqliteTable(
     index("idx_intraday_suggestion_links_tx").on(table.intradayTransactionId),
   ]
 );
+
+// ============================================================================
+// Catalyst Catcher - Swing Trading Signal System
+// ============================================================================
+
+/**
+ * Catalyst Watchlist - Assets to monitor for swing trading signals.
+ * Same keyword can have multiple rows with different tickers.
+ * e.g., "Crude Oil" -> ONGC.NS, "Crude Oil" -> BPCL.NS
+ * For global keywords like "OPEC", relatedTickers stores comma-separated list.
+ */
+export const catalystWatchlist = sqliteTable(
+  "catalyst_watchlist",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    keyword: text("keyword").notNull(),
+    ticker: text("ticker"), // Yahoo ticker: "HINDCOPPER.NS" (null for global keywords)
+    assetType: text("asset_type", {
+      enum: ["COMMODITY", "EQUITY", "ETF", "CURRENCY", "GLOBAL"],
+    }).notNull(),
+    globalValidationTicker: text("global_validation_ticker"), // e.g., "HG=F" for Copper
+    relatedTickers: text("related_tickers"), // For GLOBAL: "ONGC.NS,BPCL.NS,IOC.NS"
+    enabled: integer("enabled", { mode: "boolean" }).default(true),
+    notes: text("notes"),
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("idx_catalyst_watchlist_keyword").on(table.keyword)]
+);
+
+/**
+ * Processed Articles - Dedupe cache for news articles.
+ * Prevents re-analyzing the same news story multiple times.
+ */
+export const processedArticles = sqliteTable(
+  "processed_articles",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    articleUrl: text("article_url").notNull().unique(),
+    articleTitle: text("article_title").notNull(),
+    keyword: text("keyword").notNull(),
+    isCatalyst: integer("is_catalyst", { mode: "boolean" }).default(false),
+    analysisJson: text("analysis_json"), // LLM analysis result
+    processedAt: text("processed_at").$defaultFn(() =>
+      new Date().toISOString()
+    ),
+  },
+  (table) => [
+    index("idx_processed_articles_url").on(table.articleUrl),
+    index("idx_processed_articles_keyword").on(table.keyword),
+  ]
+);
+
+/**
+ * Catalyst Signals - Generated trade signals from news analysis.
+ * Stores the full context: news item, LLM reasoning, market validation.
+ */
+export const catalystSignals = sqliteTable(
+  "catalyst_signals",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    keyword: text("keyword").notNull(),
+    ticker: text("ticker").notNull(),
+    action: text("action", { enum: ["BUY_WATCH", "SELL_WATCH"] }).notNull(),
+
+    // News context
+    newsTitle: text("news_title").notNull(),
+    newsUrl: text("news_url").notNull(),
+    newsSource: text("news_source"),
+    newsPubDate: text("news_pub_date"),
+
+    // LLM analysis
+    impactType: text("impact_type", {
+      enum: ["SUPPLY_SHOCK", "DEMAND_SHOCK", "REGULATORY"],
+    }).notNull(),
+    sentiment: text("sentiment", { enum: ["BULLISH", "BEARISH"] }).notNull(),
+    confidence: integer("confidence").notNull(), // 1-10
+    reasoning: text("reasoning").notNull(),
+
+    // Market validation
+    validationTicker: text("validation_ticker"), // Global ticker used (e.g., "HG=F")
+    currentPrice: real("current_price"),
+    priceChangePercent: real("price_change_percent"),
+    volumeRatio: real("volume_ratio"), // currentVol / avgVol
+    volumeSpike: integer("volume_spike", { mode: "boolean" }),
+
+    // Status tracking
+    status: text("status", {
+      enum: ["active", "acted", "expired", "dismissed"],
+    }).default("active"),
+    actedAt: text("acted_at"),
+    notes: text("notes"), // User notes
+
+    // Outcome Tracking
+    validationDetails: text("validation_details"), // Log of what triggered confirmation
+    outcomeResult: text("outcome_result"), // Final result (profit/loss, accuracy)
+
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+    expiresAt: text("expires_at"), // Signals expire after 24-48h
+  },
+  (table) => [
+    index("idx_catalyst_signals_status").on(table.status),
+    index("idx_catalyst_signals_ticker").on(table.ticker),
+    index("idx_catalyst_signals_keyword").on(table.keyword),
+  ]
+);
+
+/**
+ * Potential Catalysts - Unconfirmed market-moving events discovered by AI.
+ * These are monitored until they either become active signals (validation)
+ * or expire/invalidate.
+ */
+export const potentialCatalysts = sqliteTable(
+  "potential_catalysts",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+
+    // AI Analysis
+    predictedImpact: text("predicted_impact").notNull(), // Summary of what might happen
+    affectedSymbols: text("affected_symbols").notNull(), // JSON array of tickers
+    watchCriteria: text("watch_criteria").notNull(), // JSON: { ticker: string, condition: "price_drop_2pct" | "volume_spike", ... }
+
+    // Source Linkage
+    relatedArticleIds: text("related_article_ids"), // JSON array of processed_articles.id
+
+    // Status Tracking
+    status: text("status", {
+      enum: ["monitoring", "confirmed", "invalidated", "expired"],
+    }).default("monitoring"),
+
+    validationLog: text("validation_log"), // Log of market checks performed
+
+    createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
+    expiresAt: text("expires_at"), // Monitoring window expiry
+  },
+  (table) => [index("idx_potential_catalysts_status").on(table.status)]
+);
