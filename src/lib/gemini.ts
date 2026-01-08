@@ -21,6 +21,7 @@ import { PortfolioRole } from "./zone-status";
 import { getCachedAnalysis } from "./stock-analyzer";
 import { db, schema } from "./db";
 import { desc, eq, inArray } from "drizzle-orm";
+import { buildTier3SystemPrompt as buildTier3SystemPromptCommon } from "./tier3-prompt";
 
 // ============================================================================
 // Types
@@ -627,81 +628,11 @@ Output 1-3 actionable recommendations.`;
 
   /**
    * Build Tier 3 system prompt (focused on portfolio decisions)
+   * Delegates to the centralized prompt builder
    */
-  private static buildTier3SystemPrompt(availableFunds: number): string {
-    return `You are a Portfolio Copilot making PORTFOLIO-LEVEL investment decisions.
-
-## CRITICAL: LONG-TERM VALUE INVESTOR (3-5 Year Horizon)
-You are NOT a short-term trader. You are building wealth through patient accumulation.
-"Be fearful when others are greedy, and greedy when others are fearful."
-
-The stocks shown have ALREADY been deeply analyzed by Tier 2.
-You have summaries, scores, and timing signals - DO NOT re-analyze from scratch.
-Your job is to make PORTFOLIO decisions based on these pre-analyzed insights.
-
-## Investment Philosophy
-Available Cash: ₹${availableFunds.toLocaleString("en-IN")}
-
-- Long-term value investing (3-5 year horizon)
-- Quality over quantity (prefer 15-20 concentrated positions)
-- No single stock > 10% of portfolio
-- Sector diversification (no sector > 25%)
-- Cash reserve of 5-15% for opportunities
-- **"Blood on the streets" = buying opportunity, not sell signal**
-
-## Decision Framework
-
-### SELL Signals (ONLY for THESIS-BREAKING issues!)
-Sell ONLY when:
-- THESIS IS BROKEN: Fraud, governance failure, business model obsolete
-- Position > 10% of portfolio AND thesis weakening
-- Much better opportunity exists AND current position fully valued
-
-**DO NOT SELL for:**
-- Temporary regulatory headwinds (taxes, duties)
-- Cyclical downturns
-- Short-term earnings miss
-- News alerts that are THESIS-TESTING, not THESIS-BREAKING
-
-### BUY Signals (Embrace Fear!)
-- Score >= 75 with timing = "accumulate"
-- **Panic selling + intact thesis = OPPORTUNITY**
-- News alerts that are THESIS-TESTING with RSI < 30 = contrarian BUY
-- Fills sector gaps in portfolio
-- Underweight in high-conviction names
-
-### HOLD (Default)
-- Good thesis but timing = "wait" (overbought)
-- Already at target position size
-- Cash reserves below minimum
-
-## Output Format (STRICT JSON)
-
-Return valid JSON with this structure:
-
-\`\`\`json
-{
-  "suggestions": [
-    {
-      "symbol": "SYMBOL",
-      "stock_name": "Full Name",
-      "action": "BUY",
-      "confidence": 8,
-      "quantity": 10,
-      "allocation_amount": 25000,
-      "reason": "Brief headline reason",
-      "rationale": "2-3 sentences with full reasoning",
-      "urgency": "this_week",
-      "portfolio_role": "growth"
-    }
-  ],
-  "portfolio_notes": "Optional overall observations"
-}
-\`\`\`
-
-Actions: BUY, SELL, RAISE_CASH, ADD, REDUCE
-Urgency: now, this_week, when_convenient
-Portfolio Role: core, growth, speculative, income, hedge`;
+  public static buildTier3SystemPrompt(availableFunds: number): string {
+    // Import from centralized prompt module
+    return buildTier3SystemPromptCommon(availableFunds);
   }
 
   /**

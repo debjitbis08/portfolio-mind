@@ -89,10 +89,27 @@ export const GET: APIRoute = async ({ params, request }) => {
           }
         }
 
+        // Get delisted stocks to skip
+        const delistedStocks = await db
+          .select({ symbol: schema.watchlist.symbol })
+          .from(schema.watchlist)
+          .where(eq(schema.watchlist.delisted, true));
+        const delistedSymbols = new Set(delistedStocks.map((s) => s.symbol));
+
+        // Filter out delisted holdings
+        const activeHoldings = dbHoldings.filter(
+          (h) => !delistedSymbols.has(h.symbol)
+        );
+
+        if (delistedSymbols.size > 0) {
+          const skipped = dbHoldings.length - activeHoldings.length;
+          console.log(`[Job] Skipping ${skipped} delisted stock(s)`);
+        }
+
         // Step 2: Fetch Fundamentals
         await updateProgress(20, "Gathering fundamental intel...");
 
-        const symbols = dbHoldings.map((h) => h.symbol);
+        const symbols = activeHoldings.map((h) => h.symbol);
 
         try {
           const { IntelService } = await import("../../../../lib/intel");
@@ -115,7 +132,7 @@ export const GET: APIRoute = async ({ params, request }) => {
         // Step 3: Fetch technical data
         await updateProgress(
           30,
-          `Found ${dbHoldings.length} holdings. Loading technical data...`
+          `Found ${activeHoldings.length} holdings. Loading technical data...`
         );
 
         const technicalData = await db.select().from(schema.technicalData);
@@ -125,10 +142,10 @@ export const GET: APIRoute = async ({ params, request }) => {
           techMap.set(t.symbol, t);
         }
 
-        // Step 4: Build holdings for analysis
+        // Step 4: Build holdings for analysis (using activeHoldings without delisted)
         await updateProgress(40, "Preparing data for AI analysis...");
 
-        const holdings: HoldingForAnalysis[] = dbHoldings.map((h) => {
+        const holdings: HoldingForAnalysis[] = activeHoldings.map((h) => {
           const tech =
             techMap.get(h.symbol) ||
             techMap.get(`${h.symbol}.NS`) ||

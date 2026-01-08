@@ -92,7 +92,10 @@ export const POST: APIRoute = async ({ request, url }) => {
         return age > FRESHNESS_THRESHOLD_MS;
       }).length;
 
-      if (staleTechCount > 0 || existingTechData.length < activeHoldings.length) {
+      if (
+        staleTechCount > 0 ||
+        existingTechData.length < activeHoldings.length
+      ) {
         console.log(
           `[Cycle] Technical data is stale or incomplete (${staleTechCount} stale, ${existingTechData.length}/${activeHoldings.length} stocks). Refreshing...`
         );
@@ -103,7 +106,8 @@ export const POST: APIRoute = async ({ request, url }) => {
       }
 
       // Refresh technical data for all active holdings before analysis
-      const shouldRefresh = staleTechCount > 0 || existingTechData.length < activeHoldings.length;
+      const shouldRefresh =
+        staleTechCount > 0 || existingTechData.length < activeHoldings.length;
 
       if (shouldRefresh) {
         console.log(
@@ -189,9 +193,7 @@ export const POST: APIRoute = async ({ request, url }) => {
 
       // For Tier 3: Validate cached analysis freshness
       if (useCachedAnalysis) {
-        console.log(
-          `[Cycle] Validating data freshness for Tier 3 analysis...`
-        );
+        console.log(`[Cycle] Validating data freshness for Tier 3 analysis...`);
 
         const holdingSymbols = activeHoldings.map((h) => h.symbol);
         const freshnessReport = await checkPortfolioDataFreshness(
@@ -266,8 +268,8 @@ export const POST: APIRoute = async ({ request, url }) => {
       // Get available funds from settings
       const availableFunds = settings[0]?.availableFunds ?? 0;
 
-      // Build holdings with tech data for Gemini
-      const holdings: HoldingForAnalysis[] = dbHoldings.map((h) => {
+      // Build holdings with tech data for Gemini (using activeHoldings without delisted)
+      const holdings: HoldingForAnalysis[] = activeHoldings.map((h) => {
         const tech =
           techMap.get(h.symbol) ||
           techMap.get(`${h.symbol}.NS`) ||
@@ -342,7 +344,12 @@ export const POST: APIRoute = async ({ request, url }) => {
             cycleId: cycleRun.id,
             symbol: s.symbol,
             stockName: s.stock_name,
-            action: s.action as "BUY" | "SELL" | "HOLD" | "WATCH" | "RAISE_CASH",
+            action: s.action as
+              | "BUY"
+              | "SELL"
+              | "HOLD"
+              | "WATCH"
+              | "RAISE_CASH",
             rationale: s.rationale || s.reason,
             confidence: s.confidence,
             quantity: s.quantity,
@@ -368,7 +375,8 @@ export const POST: APIRoute = async ({ request, url }) => {
             .set({
               status: "superseded",
               supersededBy: newSuggestion.id,
-              supersededReason: "Updated recommendation from new analysis cycle",
+              supersededReason:
+                "Updated recommendation from new analysis cycle",
               reviewedAt: new Date().toISOString(),
             })
             .where(eq(schema.suggestions.id, existingSuggestion[0].id));
