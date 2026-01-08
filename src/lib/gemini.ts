@@ -389,10 +389,25 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
     const interestingSymbols = new Set(interestingStocks.map((s) => s.symbol));
 
     // Get all cached analysis (both holdings and opportunities), excluding delisted
-    const allCached = await db
-      .select()
+    // Join with watchlist to get stock names
+    const allCachedRaw = await db
+      .select({
+        cache: schema.stockAnalysisCache,
+        watchlist: {
+          name: schema.watchlist.name,
+        },
+      })
       .from(schema.stockAnalysisCache)
+      .leftJoin(
+        schema.watchlist,
+        eq(schema.stockAnalysisCache.symbol, schema.watchlist.symbol)
+      )
       .orderBy(desc(schema.stockAnalysisCache.opportunityScore));
+
+    const allCached = allCachedRaw.map((row) => ({
+      ...row.cache,
+      stockName: row.watchlist?.name || null,
+    }));
 
     // Filter out delisted stocks
     const validCached = allCached.filter((c) => !delistedSymbols.has(c.symbol));
@@ -537,7 +552,9 @@ ${accumulate
   .slice(0, 10)
   .map(
     (o) =>
-      `**${o.symbol}** — Score: ${o.opportunityScore}/100
+      `**${o.symbol}** (${o.stockName || "Unknown Name"}) — Score: ${
+        o.opportunityScore
+      }/100
 _${o.thesisSummary}_
 Risks: ${o.risksSummary}
 ${o.newsAlert ? `⚠️ NEWS: ${o.newsAlertReason}` : ""}`
@@ -557,10 +574,9 @@ ${wait
   .slice(0, 5)
   .map(
     (o) =>
-      `- **${o.symbol}** (${o.opportunityScore}): ${o.thesisSummary?.slice(
-        0,
-        100
-      )}...`
+      `- **${o.symbol}** (${o.stockName || "Unknown Name"}) [${
+        o.opportunityScore
+      }]: ${o.thesisSummary?.slice(0, 100)}...`
   )
   .join("\n")}
 

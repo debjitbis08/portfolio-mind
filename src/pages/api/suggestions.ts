@@ -45,11 +45,25 @@ export const GET: APIRoute = async ({ request, url }) => {
           : (await import("drizzle-orm")).and(...conditions)
         : undefined;
 
-    const suggestions = await db
-      .select()
+    const suggestionsRaw = await db
+      .select({
+        suggestion: schema.suggestions,
+        watchlist: {
+          name: schema.watchlist.name,
+        },
+      })
       .from(schema.suggestions)
+      .leftJoin(
+        schema.watchlist,
+        eq(schema.suggestions.symbol, schema.watchlist.symbol)
+      )
       .where(whereCondition)
       .orderBy(desc(schema.suggestions.createdAt));
+
+    const suggestions = suggestionsRaw.map((row) => ({
+      ...row.suggestion,
+      stockName: row.watchlist?.name || row.suggestion.stockName,
+    }));
 
     // Fetch linked transactions for all suggestions
     const suggestionIds = suggestions.map((s) => s.id);
