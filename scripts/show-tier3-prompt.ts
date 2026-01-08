@@ -14,6 +14,7 @@ import * as schema from "../src/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import type { HoldingForAnalysis } from "../src/lib/gemini";
 import { buildTier3SystemPrompt } from "../src/lib/tier3-prompt";
+import { getSuggestionsContext } from "../src/lib/tools/suggestions";
 
 // ============================================================================
 // MAIN SCRIPT
@@ -122,11 +123,25 @@ async function main() {
     .where(eq(schema.watchlist.interesting, true));
   const interestingSymbols = new Set(interestingStocks.map((s) => s.symbol));
 
-  // Get all cached analysis
-  const allCached = await db
-    .select()
+  // Get all cached analysis (joined with watchlist for names)
+  const allCachedRaw = await db
+    .select({
+      cache: schema.stockAnalysisCache,
+      watchlist: {
+        name: schema.watchlist.name,
+      },
+    })
     .from(schema.stockAnalysisCache)
+    .leftJoin(
+      schema.watchlist,
+      eq(schema.stockAnalysisCache.symbol, schema.watchlist.symbol)
+    )
     .orderBy(desc(schema.stockAnalysisCache.opportunityScore));
+
+  const allCached = allCachedRaw.map((row) => ({
+    ...row.cache,
+    stockName: row.watchlist?.name || null,
+  }));
 
   // Filter out delisted stocks
   const validCached = allCached.filter((c) => !delistedSymbols.has(c.symbol));
@@ -166,6 +181,66 @@ async function main() {
   console.log(`✓ Found ${accumulate.length} accumulate opportunities`);
   console.log(`✓ Found ${wait.length} wait zone stocks`);
   console.log(`✓ Found ${holdingsWithAlerts.length} holdings with alerts`);
+
+  // Fetch intraday transactions with their linked suggestion notes
+  const intradayWithNotesRaw = await db
+    .select({
+      id: schema.intradayTransactions.id,
+      symbol: schema.intradayTransactions.symbol,
+      stockName: schema.intradayTransactions.stockName,
+      type: schema.intradayTransactions.type,
+      quantity: schema.intradayTransactions.quantity,
+      pricePerShare: schema.intradayTransactions.pricePerShare,
+      executedAt: schema.intradayTransactions.executedAt,
+      createdAt: schema.intradayTransactions.createdAt,
+      note: schema.actionNotes.content,
+    })
+    .from(schema.intradayTransactions)
+    .leftJoin(
+      schema.intradaySuggestionLinks,
+      eq(
+        schema.intradayTransactions.id,
+        schema.intradaySuggestionLinks.intradayTransactionId
+      )
+    )
+    .leftJoin(
+      schema.actionNotes,
+      eq(
+        schema.intradaySuggestionLinks.suggestionId,
+        schema.actionNotes.suggestionId
+      )
+    );
+
+  // Group notes by transaction ID
+  const intradayMapForPrompt = new Map<string, any>();
+  for (const row of intradayWithNotesRaw) {
+    if (!intradayMapForPrompt.has(row.id)) {
+      intradayMapForPrompt.set(row.id, {
+        ...row,
+        notes: [] as string[],
+      });
+    }
+    if (row.note) {
+      intradayMapForPrompt.get(row.id).notes.push(row.note);
+    }
+  }
+
+  const recentIntraday = Array.from(intradayMapForPrompt.values()).filter(
+    (tx) => {
+      const execDate = new Date(tx.executedAt || tx.createdAt || 0);
+      const daysAgo = (Date.now() - execDate.getTime()) / (1000 * 60 * 60 * 24);
+      return daysAgo <= 7; // Only show last 7 days of activity
+    }
+  );
+  console.log(`✓ Found ${recentIntraday.length} recent intraday trades`);
+
+  // Fetch previous suggestions context
+  console.log("📊 FETCHING SUGGESTION HISTORY...");
+  const suggestionsContext = await getSuggestionsContext();
+  const pendingSuggestions = suggestionsContext.filter(
+    (s) => s.status === "pending"
+  );
+  console.log(`✓ Found ${pendingSuggestions.length} pending suggestions`);
   console.log();
 
   // -------------------------------------------------------------------------
@@ -216,9 +291,58 @@ ${holdingsWithAnalysis
 ${holdingsWithAlerts
   .map(
     (h) =>
-      `**${h.symbol}** (Score: ${h.opportunityScore}, Signal: ${h.timingSignal})
+      `**${h.stockName || h.symbol}** (${h.symbol}) (Score: ${
+        h.opportunityScore
+      }, Signal: ${h.timingSignal})
 - Alert: ${h.newsAlertReason}
 - Thesis: ${h.thesisSummary}`
+  )
+  .join("\n\n")}
+
+`;
+  }
+
+  // Add pending suggestions
+  if (pendingSuggestions.length > 0) {
+    userMessage += `## Pending Suggestions (Review These)
+
+${pendingSuggestions
+  .map(
+    (s) =>
+      `- **${s.symbol}**: ${s.action} (${new Date(
+        s.createdAt || ""
+      ).toLocaleDateString("en-IN")}) - ${s.rationale}${
+        s.notes && s.notes.length > 0
+          ? `\n  User Notes:\n${s.notes.map((n) => `  - "${n}"`).join("\n")}`
+          : ""
+      }`
+  )
+  .join("\n\n")}
+
+`;
+  }
+
+  // Add recent intraday activity
+  if (recentIntraday.length > 0) {
+    userMessage += `## 🕒 Recent Intraday Activity (Last 7 Days)
+
+These are manual trades entered since the last official broker import.
+The positions shown in the table above ALREADY include these shares.
+
+${recentIntraday
+  .map(
+    (tx) =>
+      `- **${tx.stockName || tx.symbol}** (${tx.symbol}): ${tx.type} ${
+        tx.quantity
+      } shares @ ₹${tx.pricePerShare} (${new Date(
+        tx.executedAt || tx.createdAt || ""
+      ).toLocaleDateString("en-IN")})${
+        tx.notes && tx.notes.length > 0
+          ? `\n  User Notes:\n${tx.notes
+              .map((n: string) => `  - "${n}"`)
+              .join("\n")}`
+          : ""
+      }`
   )
   .join("\n\n")}
 
@@ -235,7 +359,9 @@ ${accumulate
   .slice(0, 10)
   .map(
     (o) =>
-      `**${o.symbol}** — Score: ${o.opportunityScore}/100
+      `**${o.stockName || o.symbol}** (${o.symbol}) — Score: ${
+        o.opportunityScore
+      }/100
 _${o.thesisSummary}_
 Risks: ${o.risksSummary}
 ${o.newsAlert ? `⚠️ NEWS: ${o.newsAlertReason}` : ""}`
@@ -255,10 +381,9 @@ ${wait
   .slice(0, 5)
   .map(
     (o) =>
-      `- **${o.symbol}** (${o.opportunityScore}): ${o.thesisSummary?.slice(
-        0,
-        100
-      )}...`
+      `- **${o.stockName || o.symbol}** (${o.symbol}) (${
+        o.opportunityScore
+      }): ${o.thesisSummary?.slice(0, 100)}...`
   )
   .join("\n")}
 
@@ -274,7 +399,7 @@ ${wait
 
 You have all the pre-analyzed data you need. Focus on PORTFOLIO-LEVEL decisions.
 
-Output 1-3 actionable recommendations.`;
+Output 1-3 actionable recommendations. If no stocks meet the Buy criteria AND no holdings trigger a Sell signal, **it is perfectly fine to recommend NO trades.**`;
 
   console.log(userMessage);
   console.log();

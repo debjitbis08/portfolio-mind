@@ -15,6 +15,7 @@ import { eq } from "drizzle-orm";
 export const BUILT_IN_MAPPINGS: Record<string, string> = {
   // Groww/General mappings
   GODAWARIP: "GPIL",
+  "522195": "FRONTSP",
 
   // ICICI Direct mappings
   RELIND: "RELIANCE",

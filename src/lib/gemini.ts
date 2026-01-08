@@ -442,6 +442,55 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
       `Found ${accumulate.length} accumulate, ${wait.length} wait, ${holdingsWithAlerts.length} alerts`
     );
 
+    // Fetch intraday transactions with their linked suggestion notes
+    const intradayWithNotesRaw = await db
+      .select({
+        id: schema.intradayTransactions.id,
+        symbol: schema.intradayTransactions.symbol,
+        stockName: schema.intradayTransactions.stockName,
+        type: schema.intradayTransactions.type,
+        quantity: schema.intradayTransactions.quantity,
+        pricePerShare: schema.intradayTransactions.pricePerShare,
+        executedAt: schema.intradayTransactions.executedAt,
+        createdAt: schema.intradayTransactions.createdAt,
+        note: schema.actionNotes.content,
+      })
+      .from(schema.intradayTransactions)
+      .leftJoin(
+        schema.intradaySuggestionLinks,
+        eq(
+          schema.intradayTransactions.id,
+          schema.intradaySuggestionLinks.intradayTransactionId
+        )
+      )
+      .leftJoin(
+        schema.actionNotes,
+        eq(
+          schema.intradaySuggestionLinks.suggestionId,
+          schema.actionNotes.suggestionId
+        )
+      );
+
+    // Group notes by transaction ID
+    const intradayMap = new Map<string, any>();
+    for (const row of intradayWithNotesRaw) {
+      if (!intradayMap.has(row.id)) {
+        intradayMap.set(row.id, {
+          ...row,
+          notes: [] as string[],
+        });
+      }
+      if (row.note) {
+        intradayMap.get(row.id).notes.push(row.note);
+      }
+    }
+
+    const recentIntraday = Array.from(intradayMap.values()).filter((tx) => {
+      const execDate = new Date(tx.executedAt || tx.createdAt || 0);
+      const daysAgo = (Date.now() - execDate.getTime()) / (1000 * 60 * 60 * 24);
+      return daysAgo <= 7; // Only show last 7 days of activity
+    });
+
     // Dynamic import for SDK
     let GoogleGenAI: any;
     let ThinkingLevel: any;
@@ -517,7 +566,9 @@ ${holdingsWithAnalysis
 ${holdingsWithAlerts
   .map(
     (h) =>
-      `**${h.symbol}** (Score: ${h.opportunityScore}, Signal: ${h.timingSignal})
+      `**${h.stockName || h.symbol}** (${h.symbol}) (Score: ${
+        h.opportunityScore
+      }, Signal: ${h.timingSignal})
 - Alert: ${h.newsAlertReason}
 - Thesis: ${h.thesisSummary}`
   )
@@ -535,9 +586,40 @@ ${pendingSuggestions
     (s) =>
       `- **${s.symbol}**: ${s.action} (${new Date(
         s.createdAt || ""
-      ).toLocaleDateString()}) - ${s.rationale}`
+      ).toLocaleDateString("en-IN")}) - ${s.rationale}${
+        s.notes && s.notes.length > 0
+          ? `\n  User Notes:\n${s.notes.map((n) => `  - "${n}"`).join("\n")}`
+          : ""
+      }`
   )
-  .join("\n")}
+  .join("\n\n")}
+
+`;
+    }
+
+    // Add recent intraday activity
+    if (recentIntraday.length > 0) {
+      userMessage += `## 🕒 Recent Intraday Activity (Last 7 Days)
+
+These are manual trades entered since the last official broker import.
+The positions shown in the table above ALREADY include these shares.
+
+${recentIntraday
+  .map(
+    (tx) =>
+      `- **${tx.stockName || tx.symbol}** (${tx.symbol}): ${tx.type} ${
+        tx.quantity
+      } shares @ ₹${tx.pricePerShare} (${new Date(
+        tx.executedAt || tx.createdAt || ""
+      ).toLocaleDateString("en-IN")})${
+        tx.notes && tx.notes.length > 0
+          ? `\n  User Notes:\n${tx.notes
+              .map((n: string) => `  - "${n}"`)
+              .join("\n")}`
+          : ""
+      }`
+  )
+  .join("\n\n")}
 
 `;
     }
@@ -552,7 +634,7 @@ ${accumulate
   .slice(0, 10)
   .map(
     (o) =>
-      `**${o.symbol}** (${o.stockName || "Unknown Name"}) — Score: ${
+      `**${o.stockName || o.symbol}** (${o.symbol}) — Score: ${
         o.opportunityScore
       }/100
 _${o.thesisSummary}_
@@ -574,7 +656,7 @@ ${wait
   .slice(0, 5)
   .map(
     (o) =>
-      `- **${o.symbol}** (${o.stockName || "Unknown Name"}) [${
+      `- **${o.stockName || o.symbol}** (${o.symbol}) [${
         o.opportunityScore
       }]: ${o.thesisSummary?.slice(0, 100)}...`
   )
@@ -592,7 +674,7 @@ ${wait
 
 You have all the pre-analyzed data you need. Focus on PORTFOLIO-LEVEL decisions.
 
-Output 1-3 actionable recommendations.`;
+Output 1-3 actionable recommendations. If no stocks meet the Buy criteria AND no holdings trigger a Sell signal, **it is perfectly fine to recommend NO trades.**`;
 
     // Tier 3 does NOT use tools - it has all the pre-analyzed data it needs
     // This prevents expensive external scraper calls (ValuePickr, News, etc.)

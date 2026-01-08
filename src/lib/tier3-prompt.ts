@@ -7,7 +7,15 @@
  * Build Tier 3 system prompt (focused on portfolio decisions)
  */
 export function buildTier3SystemPrompt(availableFunds: number): string {
+  const currentDate = new Date().toLocaleDateString("en-IN", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
   return `You are a Portfolio Copilot making PORTFOLIO-LEVEL investment decisions.
+Current Date: ${currentDate}
 
 ## CRITICAL: CORE & SATELLITE STRATEGY
 You are managing a hybrid portfolio. You must balance two conflicting goals:
