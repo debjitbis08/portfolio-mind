@@ -152,17 +152,17 @@ const checkWaitZoneDeclaration: ToolDeclaration = {
 const getStockNewsDeclaration: ToolDeclaration = {
   name: "get_stock_news",
   description:
-    "Get recent news headlines for a stock from Google News. Use this to understand current market sentiment and any recent developments affecting the stock.",
+    "Get recent news headlines for a stock from Google News. Use this to understand current market sentiment and any recent developments affecting the stock. The tool automatically looks up the company name from holdings to ensure better search results.",
   parameters: {
     type: Type.OBJECT,
     properties: {
-      query: {
+      symbol: {
         type: Type.STRING,
         description:
-          "Stock name or company name to search for (e.g., 'ITC', 'Tata Motors')",
+          "Stock symbol to get news for (e.g., 'RELIANCE', 'KPL', 'TCS'). The tool will automatically look up the company name for better search results.",
       },
     },
-    required: ["query"],
+    required: ["symbol"],
   },
 };
 
@@ -285,6 +285,29 @@ const getFinancialsDeclaration: ToolDeclaration = {
       },
     },
     required: ["symbol"],
+  },
+};
+
+const searchSymbolDeclaration: ToolDeclaration = {
+  name: "search_symbol",
+  description:
+    "Search for correct stock ticker symbols using company name or validate if a ticker exists. Essential when you encounter invalid tickers or need to find the correct NSE/BSE symbol for an Indian company. Returns validated tickers with prices when available.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      query: {
+        type: Type.STRING,
+        description:
+          "Company name to search for (e.g., 'Vardhman Textiles', 'REC Limited') OR ticker to validate (e.g., 'VARDHMNRLV.NS', 'REC.NS')",
+      },
+      mode: {
+        type: Type.STRING,
+        description:
+          "Search mode: 'search' (find matches), 'validate' (check if ticker works), 'smart' (search + validate). Default: 'search'",
+        enum: ["search", "validate", "smart"],
+      },
+    },
+    required: ["query"],
   },
 };
 
@@ -415,6 +438,18 @@ const TOOL_REGISTRY: Map<string, ToolRegistration> = new Map([
       defaultConfig: {
         enabled: true,
         defaultPeriodType: "annual",
+      },
+    },
+  ],
+  [
+    "search_symbol",
+    {
+      declaration: searchSymbolDeclaration,
+      execute: notImplemented,
+      source: "yahoo",
+      defaultConfig: {
+        enabled: true,
+        defaultMode: "smart",
       },
     },
   ],

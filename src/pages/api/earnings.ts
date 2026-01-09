@@ -12,6 +12,7 @@ import {
   parseScreenerExcelBuffer,
   type FinancialPeriod,
 } from "../../lib/scrapers/screener-financials";
+import { getSymbolForStock } from "../../lib/mappings";
 import puppeteer from "puppeteer";
 import {
   existsSync,
@@ -74,9 +75,24 @@ export const POST: APIRoute = async ({ request }) => {
       }
       financials = parseScreenerExcel(filePath);
     } else if (screenerUrl && email) {
+      // Apply symbol mapping before downloading
+      const watchlistRecord = await db
+        .select()
+        .from(schema.watchlist)
+        .where(eq(schema.watchlist.symbol, symbol))
+        .limit(1);
+
+      const companyName = watchlistRecord[0]?.name || symbol;
+      const mappedSymbol = await getSymbolForStock(companyName, symbol);
+
+      console.log(`[Earnings API] Mapped ${symbol} -> ${mappedSymbol}`);
+
+      // Reconstruct URL with mapped symbol
+      const mappedUrl = `https://www.screener.in/company/${mappedSymbol}/`;
+
       // Download from Screener
       const excelBuffer = await downloadScreenerExcel(
-        screenerUrl,
+        mappedUrl,
         email,
         password
       );

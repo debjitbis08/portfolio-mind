@@ -1,0 +1,1 @@
+ALTER TABLE `potential_catalysts` ADD `source_citations` text;

@@ -373,12 +373,24 @@ function extractMainContent(html: string): string {
  */
 export async function fetchGoogleNews(
   query: string,
-  maxResults: number = 5
+  maxResults: number = 5,
+  hoursRecent: number = 48 // Default: last 48 hours
 ): Promise<StockNews> {
-  const encodedQuery = encodeURIComponent(`${query} stock India`);
+  // Clean up query: remove common suffixes that might reduce search quality
+  // e.g., "Kwality Pharmaceuticals Ltd" -> "Kwality Pharmaceuticals"
+  let cleanedQuery = query
+    .replace(/\s+(Ltd|Limited|Ltd\.|Inc|Inc\.|Corp|Corp\.)$/i, "")
+    .trim();
+
+  // Add time filter: when:Xh (last X hours) or when:Xd (last X days)
+  const timeFilter = hoursRecent <= 24
+    ? `when:${hoursRecent}h`
+    : `when:${Math.ceil(hoursRecent / 24)}d`;
+
+  const encodedQuery = encodeURIComponent(`${cleanedQuery} stock India ${timeFilter}`);
   const rssUrl = `https://news.google.com/rss/search?q=${encodedQuery}&hl=en-IN&gl=IN&ceid=IN:en`;
 
-  console.log(`[News] Fetching news for: ${query}`);
+  console.log(`[News] Fetching news for: ${query} (cleaned: ${cleanedQuery})`);
 
   try {
     const response = await fetch(rssUrl, {
@@ -533,11 +545,12 @@ KEY_EVENTS:
  */
 export async function getNewsIntel(
   query: string,
-  targetReadableArticles: number = 5
+  targetReadableArticles: number = 5,
+  hoursRecent: number = 48 // Default: last 48 hours
 ): Promise<NewsIntel> {
   // Fetch more articles than needed so we have buffer for failures (404, 403, paywalls)
   const fetchLimit = Math.min(targetReadableArticles * 3, 15);
-  const news = await fetchGoogleNews(query, fetchLimit);
+  const news = await fetchGoogleNews(query, fetchLimit, hoursRecent);
 
   if (news.items.length === 0) {
     return {

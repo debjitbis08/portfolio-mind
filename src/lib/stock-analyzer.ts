@@ -10,10 +10,11 @@
 
 import { GEMINI_API_KEY } from "astro:env/server";
 import { db, getHoldings, schema } from "./db";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, or, desc } from "drizzle-orm";
 import { getStockNews } from "./tools/news";
 import { getStockThesis } from "./tools/valuepickr";
 import { getTechnicals } from "./tools/technicals";
+import { isSymbolAffected } from "./symbol-matcher";
 
 // ============================================================================
 // Types
@@ -132,9 +133,8 @@ async function getNewsData(
   data: any | null;
   fetchedAt: string;
 }> {
-  // Always fetch fresh news
-  const query = stockName || symbol;
-  const result = await getStockNews({ query });
+  // Always fetch fresh news (tool will automatically look up company name)
+  const result = await getStockNews({ symbol });
 
   const data = result.data as
     | {
@@ -244,6 +244,100 @@ async function getTechnicalsData(symbol: string): Promise<{
   };
 }
 
+/**
+ * Get relevant catalyst data for a symbol
+ * Includes both confirmed catalysts and monitoring potentials
+ */
+async function getCatalystData(symbol: string): Promise<{
+  data: any | null;
+  fetchedAt: string;
+}> {
+  try {
+    // Get active/pending catalyst signals for this symbol
+    const signals = await db
+      .select()
+      .from(schema.catalystSignals)
+      .where(
+        or(
+          eq(schema.catalystSignals.status, "active"),
+          eq(schema.catalystSignals.status, "pending_market_open")
+        )
+      )
+      .orderBy(desc(schema.catalystSignals.createdAt))
+      .limit(5);
+
+    // Get potential catalysts that are monitoring or confirmed
+    const potentials = await db
+      .select()
+      .from(schema.potentialCatalysts)
+      .where(
+        or(
+          eq(schema.potentialCatalysts.status, "monitoring"),
+          eq(schema.potentialCatalysts.status, "confirmed")
+        )
+      )
+      .orderBy(desc(schema.potentialCatalysts.createdAt))
+      .limit(10);
+
+    // Filter catalysts relevant to this symbol using fuzzy matching
+    const relevantSignals = signals.filter((signal) => {
+      return isSymbolAffected(symbol, [signal.ticker]);
+    });
+
+    const relevantPotentials = potentials.filter((potential) => {
+      try {
+        const affectedSymbols = JSON.parse(potential.affectedSymbols || "[]");
+        return isSymbolAffected(symbol, affectedSymbols);
+      } catch {
+        return false;
+      }
+    });
+
+    // If no relevant catalysts, return null
+    if (relevantSignals.length === 0 && relevantPotentials.length === 0) {
+      return {
+        data: null,
+        fetchedAt: new Date().toISOString(),
+      };
+    }
+
+    // Format catalyst data for LLM consumption
+    const catalystData = {
+      confirmedSignals: relevantSignals.map((s) => ({
+        action: s.action,
+        newsTitle: s.newsTitle,
+        newsSource: s.newsSource,
+        newsPubDate: s.newsPubDate,
+        impactType: s.impactType,
+        sentiment: s.sentiment,
+        confidence: s.confidence,
+        reasoning: s.reasoning,
+        priceChangePercent: s.priceChangePercent,
+        volumeSpike: s.volumeSpike,
+        createdAt: s.createdAt,
+      })),
+      potentialCatalysts: relevantPotentials.map((p) => ({
+        predictedImpact: p.predictedImpact,
+        affectedSymbols: JSON.parse(p.affectedSymbols || "[]"),
+        status: p.status,
+        createdAt: p.createdAt,
+        expiresAt: p.expiresAt,
+      })),
+    };
+
+    return {
+      data: catalystData,
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error(`[StockAnalyzer] Error fetching catalyst data for ${symbol}:`, error);
+    return {
+      data: null,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+}
+
 // ============================================================================
 // LLM Analysis
 // ============================================================================
@@ -255,7 +349,8 @@ async function runLLMAnalysis(
   financials: any,
   news: any,
   valuepickr: any,
-  technicals: any
+  technicals: any,
+  catalysts: any
 ): Promise<StockAnalysisResult> {
   // Dynamic import to bypass build issues
   let GoogleGenAI: any;
@@ -277,7 +372,8 @@ async function runLLMAnalysis(
     financials,
     news,
     valuepickr,
-    technicals
+    technicals,
+    catalysts
   );
 
   try {
@@ -325,7 +421,8 @@ function buildAnalysisPrompt(
   financials: any,
   news: any,
   valuepickr: any,
-  technicals: any
+  technicals: any,
+  catalysts: any
 ): string {
   let prompt = `You are evaluating a single stock for investment potential.
 
@@ -440,6 +537,63 @@ ${
     prompt += `## Technicals: Not available\n\n`;
   }
 
+  // Catalyst Section (NEW)
+  if (catalysts?.data) {
+    const data = catalysts.data;
+    const fetchDate = new Date(catalysts.fetchedAt).toLocaleString();
+
+    prompt += `## ⚡ CATALYST ALERTS (Fetched: ${fetchDate})
+🚨 HIGH PRIORITY: This stock has been flagged by our Catalyst Catcher system!
+
+`;
+
+    // Confirmed Signals
+    if (data.confirmedSignals && data.confirmedSignals.length > 0) {
+      prompt += `### Confirmed Market-Moving Events:\n`;
+      data.confirmedSignals.forEach((signal: any, idx: number) => {
+        const signalAge = Math.round(
+          (Date.now() - new Date(signal.createdAt).getTime()) / (1000 * 60 * 60)
+        );
+        prompt += `
+${idx + 1}. **${signal.action}** (Confidence: ${signal.confidence}/10, ${signalAge}h ago)
+   - Impact: ${signal.impactType} | Sentiment: ${signal.sentiment}
+   - News: "${signal.newsTitle}" (${signal.newsSource}, ${signal.newsPubDate || 'recent'})
+   - Reasoning: ${signal.reasoning}
+   - Market Response: ${signal.priceChangePercent ? `${signal.priceChangePercent.toFixed(2)}%` : 'N/A'}${signal.volumeSpike ? ' + Volume Spike ⚠️' : ''}
+`;
+      });
+      prompt += '\n';
+    }
+
+    // Potential Catalysts (Monitoring)
+    if (data.potentialCatalysts && data.potentialCatalysts.length > 0) {
+      prompt += `### Potential Catalysts Being Monitored:\n`;
+      data.potentialCatalysts.forEach((potential: any, idx: number) => {
+        const status = potential.status === 'confirmed' ? '✅ CONFIRMED' : '👁️ MONITORING';
+        const expires = potential.expiresAt
+          ? new Date(potential.expiresAt).toLocaleDateString()
+          : 'TBD';
+        prompt += `
+${idx + 1}. [${status}] ${potential.predictedImpact}
+   - Affected symbols: ${potential.affectedSymbols.join(', ')}
+   - Monitoring until: ${expires}
+`;
+      });
+      prompt += '\n';
+    }
+
+    prompt += `**CRITICAL INSTRUCTION**: Give significant weight to these catalyst alerts!
+- Confirmed signals are HIGH-CONFIDENCE events validated by market data
+- If sentiment is BULLISH + low RSI = exceptional timing opportunity
+- If sentiment is BEARISH = reconsider thesis or adjust score down
+- Consider catalyst timing in your "timing_signal" output
+- Set "news_alert" to TRUE if any catalyst fundamentally changes the investment case
+
+`;
+  } else {
+    prompt += `## Catalyst Alerts: No active catalysts detected for this stock\n\n`;
+  }
+
   // Instructions - Long-term Value Investing Framework
   prompt += `---
 
@@ -547,12 +701,13 @@ export async function analyzeStock(
     // Gather all data
     console.log(`[StockAnalyzer] Gathering data for ${symbol}...`);
 
-    const [vrs, financials, news, valuepickr, technicals] = await Promise.all([
+    const [vrs, financials, news, valuepickr, technicals, catalysts] = await Promise.all([
       getVRSData(symbol),
       getFinancialsData(symbol),
       getNewsData(symbol, stockName),
       getValuePickrData(symbol, stockName),
       getTechnicalsData(symbol),
+      getCatalystData(symbol),
     ]);
 
     console.log(`[StockAnalyzer] Running LLM analysis for ${symbol}...`);
@@ -565,14 +720,15 @@ export async function analyzeStock(
       financials,
       news,
       valuepickr,
-      technicals
+      technicals,
+      catalysts
     );
 
     // Calculate expiry (7 days from now)
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    // Save to cache
+    // Save to cache (including catalyst timestamp)
     await db
       .insert(schema.stockAnalysisCache)
       .values({
@@ -588,6 +744,7 @@ export async function analyzeStock(
         financialsAt: financials.fetchedAt,
         valuepickrAt: valuepickr.fetchedAt,
         newsAt: news.fetchedAt,
+        catalystDataAt: catalysts.fetchedAt,
         analyzedAt: new Date().toISOString(),
         expiresAt: expiresAt.toISOString(),
       })
@@ -605,6 +762,7 @@ export async function analyzeStock(
           financialsAt: financials.fetchedAt,
           valuepickrAt: valuepickr.fetchedAt,
           newsAt: news.fetchedAt,
+          catalystDataAt: catalysts.fetchedAt,
           analyzedAt: new Date().toISOString(),
           expiresAt: expiresAt.toISOString(),
         },

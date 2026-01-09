@@ -43,6 +43,8 @@ export async function saveSignal(signal: CatalystSignal): Promise<string> {
       newsUrl: signal.news.link,
       newsSource: signal.news.source,
       newsPubDate: signal.news.pubDate,
+      newsSourceId: signal.news.sourceId,
+      newsSourcePriority: signal.news.sourcePriority,
       impactType: signal.analysis.impactType as
         | "SUPPLY_SHOCK"
         | "DEMAND_SHOCK"

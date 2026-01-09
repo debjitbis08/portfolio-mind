@@ -55,6 +55,8 @@ export interface NewsItem {
   link: string;
   pubDate: string;
   source: string;
+  sourceId?: string; // ID from source registry (e.g., "pib-rss", "rbi-rss")
+  sourcePriority?: number; // 0=Official, 1=Media, 2=Social, 3=Aggregator
 }
 
 // ============================================================================
@@ -191,7 +193,7 @@ export interface CatalystConfig {
 }
 
 export const DEFAULT_CATALYST_CONFIG: CatalystConfig = {
-  paperMode: true, // Start in paper mode for calibration
+  paperMode: false, // Start in paper mode for calibration
   scanIntervalMinutes: 30,
   newsMaxAgeHours: 2,
   confidenceThreshold: 7,

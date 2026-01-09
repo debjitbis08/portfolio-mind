@@ -1,0 +1,1 @@
+ALTER TABLE `stock_analysis_cache` ADD `catalyst_data_at` text;

@@ -12,6 +12,9 @@ export default defineConfig({
   integrations: [solidJs(), catalystDaemon()],
   vite: {
     plugins: [tailwindcss()],
+    optimizeDeps: {
+      include: ["lightweight-charts"],
+    },
   },
   env: {
     schema: {

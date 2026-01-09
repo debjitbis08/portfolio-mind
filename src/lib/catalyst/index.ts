@@ -35,6 +35,7 @@ import type {
 } from "./types";
 import { DEFAULT_CATALYST_CONFIG } from "./types";
 import { isIndianMarketOpen, getMarketStatusMessage } from "./market-hours";
+import { getEnabledSources, fetchFromSources } from "./sources/registry";
 
 export interface ScanResult {
   keywordsScanned: number;
@@ -43,11 +44,65 @@ export interface ScanResult {
   signalsGenerated: number;
   signals: CatalystSignal[];
   errors: string[];
+  sourcesPolled?: number;
+  sourceResults?: Array<{ source: string; items: number; success: boolean }>;
 }
 
 /**
+ * Fetch news from all registered sources (BSE, PIB, RBI, DIPAM, DPIIT, etc.)
+ * and match against keyword.
+ *
+ * @param keyword - Keyword to match against
+ * @param maxAgeHours - Maximum age of articles in hours
+ * @returns Tuple of [matched items, source stats]
+ */
+async function fetchFromSourceRegistry(
+  keyword: string,
+  maxAgeHours: number
+): Promise<[import("./types").NewsItem[], Array<{ source: string; items: number; success: boolean }>]> {
+  const sources = getEnabledSources();
+  const results = await fetchFromSources(sources);
+
+  const cutoffTime = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  const matchedItems: import("./types").NewsItem[] = [];
+  const sourceStats: Array<{ source: string; items: number; success: boolean }> = [];
+
+  for (const result of results) {
+    sourceStats.push({
+      source: result.source,
+      items: result.itemsFound,
+      success: result.success,
+    });
+
+    if (!result.success) continue;
+
+    for (const item of result.newItems) {
+      // Check if article is within time window
+      const pubDate = new Date(item.pubDate);
+      if (pubDate < cutoffTime) continue;
+
+      // Check if keyword appears in title (case-insensitive)
+      const titleLower = item.title.toLowerCase();
+      const keywordLower = keyword.toLowerCase();
+
+      if (titleLower.includes(keywordLower)) {
+        matchedItems.push(item);
+      }
+    }
+  }
+
+  return [matchedItems, sourceStats];
+}
+
+/**
+ * @deprecated Legacy keyword-based scan. Use runBroadIndianScan() instead.
+ *
  * Run a full catalyst scan across all enabled watchlist keywords.
  * Uses batch analysis for each keyword (NOT per-headline).
+ *
+ * NOTE: This function is kept for backward compatibility but is NOT used by the daemon.
+ * The primary discovery mode is runBroadIndianScan() which fetches from all sources
+ * and lets AI discover catalysts without pre-defined keywords.
  *
  * @param config - Override default configuration
  * @returns Summary of scan results
@@ -99,19 +154,29 @@ export async function runCatalystScan(
       console.log(`\n━━━ Scanning: ${keyword} ━━━`);
 
       try {
-        // Fetch recent news
-        const newsItems = await fetchCatalystNews(
+        // Fetch from ALL registered sources (BSE, PIB, RBI, DIPAM, DPIIT, etc.)
+        console.log(`   📡 Fetching from source registry...`);
+        const [newsItems, sourceStats] = await fetchFromSourceRegistry(
           keyword,
-          10, // Fetch more articles for batch analysis
           mergedConfig.newsMaxAgeHours
         );
 
+        // Update result with source stats
+        if (!result.sourceResults) {
+          result.sourceResults = sourceStats;
+          result.sourcesPolled = sourceStats.length;
+        }
+
         if (newsItems.length === 0) {
-          console.log(`   No new articles found`);
+          console.log(`   No matching articles found from ${sourceStats.length} sources`);
+          const successfulSources = sourceStats.filter(s => s.success && s.items > 0);
+          if (successfulSources.length > 0) {
+            console.log(`   ℹ️  Sources fetched ${sourceStats.reduce((sum, s) => sum + s.items, 0)} total items, but none matched keyword "${keyword}"`);
+          }
           continue;
         }
 
-        console.log(`   Found ${newsItems.length} new article(s)`);
+        console.log(`   Found ${newsItems.length} matching article(s) from source registry`);
         result.articlesProcessed += newsItems.length;
 
         // Pre-filter obvious noise
@@ -260,6 +325,18 @@ export async function runCatalystScan(
     console.log(`   Articles processed: ${result.articlesProcessed}`);
     console.log(`   Catalysts found: ${result.catalystsFound}`);
     console.log(`   Signals generated: ${result.signalsGenerated}`);
+    if (result.sourcesPolled) {
+      console.log(`   Sources polled: ${result.sourcesPolled}`);
+      const successfulSources = result.sourceResults?.filter(s => s.success) || [];
+      console.log(`   Sources successful: ${successfulSources.length}/${result.sourcesPolled}`);
+      if (successfulSources.length > 0) {
+        console.log(`\n   📡 Source Summary:`);
+        result.sourceResults?.forEach(s => {
+          const status = s.success ? "✅" : "❌";
+          console.log(`      ${status} ${s.source}: ${s.items} items`);
+        });
+      }
+    }
     if (result.errors.length > 0) {
       console.log(`   Errors: ${result.errors.length}`);
     }
@@ -277,14 +354,15 @@ export async function runCatalystScan(
 }
 
 /**
- * Run broad Indian market news scan.
+ * Run broad Indian market news scan - PRIMARY DISCOVERY MODE
  *
- * This is the PRIMARY discovery function that:
- * 1. Fetches news from multiple India-focused sources
+ * This is the main catalyst discovery function that:
+ * 1. Fetches news from ALL registered sources (BSE, PIB, RBI, DIPAM, DPIIT, Media)
  * 2. Sends the combined batch to AI discovery
- * 3. The AI identifies affected stocks/sectors (not limited to watchlist)
+ * 3. The AI identifies catalysts and affected stocks (not limited to watchlist)
+ * 4. Generates signals for discovered catalysts
  *
- * Use this for comprehensive coverage of Indian market news.
+ * Signals show on catalyst page. Portfolio Mind uses signals for watchlist/holdings.
  */
 export async function runBroadIndianScan(
   config: Partial<CatalystConfig> = {}
@@ -303,7 +381,7 @@ export async function runBroadIndianScan(
     errors: [],
   };
 
-  console.log("\n🇮🇳 Starting Broad Indian Market Scan...");
+  console.log("\n🇮🇳 Starting Catalyst Discovery Scan...");
   console.log(`   ${getMarketStatusMessage()}`);
   console.log(
     `   Mode: ${mergedConfig.paperMode ? "📝 PAPER (calibration)" : "🔴 LIVE"}`
@@ -312,32 +390,67 @@ export async function runBroadIndianScan(
   console.log("");
 
   try {
-    // Fetch broad Indian market news
-    const indianNews = await fetchIndianMarketNews(
-      5, // max per source
-      mergedConfig.newsMaxAgeHours
-    );
+    // Fetch from ALL registered sources (BSE, PIB, RBI, DIPAM, DPIIT, Media)
+    console.log("📡 Fetching from source registry...");
+    const sources = getEnabledSources();
+    const sourceResults = await fetchFromSources(sources);
 
-    if (indianNews.length === 0) {
-      console.log("📭 No new Indian news articles found");
+    // Collect all news items
+    const allNews: import("./types").NewsItem[] = [];
+    const sourceStats: Array<{ source: string; items: number; success: boolean }> = [];
+
+    for (const sourceResult of sourceResults) {
+      sourceStats.push({
+        source: sourceResult.source,
+        items: sourceResult.itemsFound,
+        success: sourceResult.success,
+      });
+
+      if (sourceResult.success) {
+        allNews.push(...sourceResult.newItems);
+      }
+    }
+
+    result.sourcesPolled = sourceStats.length;
+    result.sourceResults = sourceStats;
+
+    // Log source summary
+    const successfulSources = sourceStats.filter(s => s.success);
+    console.log(`   Polled ${sourceStats.length} sources: ${successfulSources.length} successful`);
+    sourceStats.forEach(s => {
+      const status = s.success ? "✅" : "❌";
+      console.log(`   ${status} ${s.source}: ${s.items} items`);
+    });
+
+    if (allNews.length === 0) {
+      console.log("\n📭 No new articles found from any source");
       return result;
     }
 
-    result.articlesProcessed = indianNews.length;
-    console.log(`\n📰 Collected ${indianNews.length} unique articles`);
+    // Filter by time window
+    const cutoffTime = new Date(Date.now() - mergedConfig.newsMaxAgeHours * 60 * 60 * 1000);
+    const recentNews = allNews.filter(item => {
+      const pubDate = new Date(item.pubDate);
+      return pubDate >= cutoffTime;
+    });
+
+    result.articlesProcessed = recentNews.length;
+    console.log(`\n📰 Collected ${recentNews.length} articles within ${mergedConfig.newsMaxAgeHours}h window (${allNews.length} total)`);
 
     // Get all enabled assets for context (optional - AI can suggest new ones)
     const assets = await getEnabledAssets();
 
     // Import and run discovery
     const { discoverCatalysts } = await import("./discovery");
-    const discoveryResult = await discoverCatalysts(indianNews, assets);
+    const discoveryResult = await discoverCatalysts(recentNews, assets);
 
     result.catalystsFound = discoveryResult.newCatalysts;
 
     console.log("\n" + "═".repeat(60));
-    console.log("📊 BROAD SCAN COMPLETE");
+    console.log("📊 CATALYST DISCOVERY COMPLETE");
     console.log("═".repeat(60));
+    console.log(`   Sources polled: ${result.sourcesPolled}`);
+    console.log(`   Sources successful: ${successfulSources.length}/${result.sourcesPolled}`);
     console.log(`   Articles processed: ${result.articlesProcessed}`);
     console.log(`   Catalysts discovered: ${result.catalystsFound}`);
     if (discoveryResult.catalysts.length > 0) {

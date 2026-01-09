@@ -569,6 +569,7 @@ export const stockAnalysisCache = sqliteTable(
     financialsAt: text("financials_at"),
     valuepickrAt: text("valuepickr_at"),
     newsAt: text("news_at"),
+    catalystDataAt: text("catalyst_data_at"), // When catalyst data was last checked
 
     // Timestamps
     analyzedAt: text("analyzed_at").$defaultFn(() => new Date().toISOString()),
@@ -694,6 +695,8 @@ export const processedArticles = sqliteTable(
     keyword: text("keyword").notNull(),
     isCatalyst: integer("is_catalyst", { mode: "boolean" }).default(false),
     analysisJson: text("analysis_json"), // LLM analysis result
+    sourceId: text("source_id"), // Source registry ID (e.g., "pib-rss", "rbi-rss")
+    sourcePriority: integer("source_priority"), // 0=Official, 1=Media, 2=Social, 3=Aggregator
     processedAt: text("processed_at").$defaultFn(() =>
       new Date().toISOString()
     ),
@@ -701,6 +704,7 @@ export const processedArticles = sqliteTable(
   (table) => [
     index("idx_processed_articles_url").on(table.articleUrl),
     index("idx_processed_articles_keyword").on(table.keyword),
+    index("idx_processed_articles_source_id").on(table.sourceId),
   ]
 );
 
@@ -723,6 +727,8 @@ export const catalystSignals = sqliteTable(
     newsUrl: text("news_url").notNull(),
     newsSource: text("news_source"),
     newsPubDate: text("news_pub_date"),
+    newsSourceId: text("news_source_id"), // Source registry ID
+    newsSourcePriority: integer("news_source_priority"), // 0-3 priority level
 
     // LLM analysis
     impactType: text("impact_type", {
@@ -773,12 +779,13 @@ export const potentialCatalysts = sqliteTable(
       .$defaultFn(() => crypto.randomUUID()),
 
     // AI Analysis
-    predictedImpact: text("predicted_impact").notNull(), // Summary of what might happen
+    predictedImpact: text("predicted_impact").notNull(), // Summary of what might happen (with inline citations [1], [2], etc.)
     affectedSymbols: text("affected_symbols").notNull(), // JSON array of tickers
     watchCriteria: text("watch_criteria").notNull(), // JSON: { ticker: string, condition: "price_drop_2pct" | "volume_spike", ... }
 
-    // Source Linkage
+    // Source Linkage & Citations
     relatedArticleIds: text("related_article_ids"), // JSON array of processed_articles.id
+    sourceCitations: text("source_citations"), // JSON array of {index: number, title: string, url: string, source: string, pubDate: string}
 
     // Status Tracking
     status: text("status", {
@@ -867,5 +874,30 @@ export const catalystVerificationMetrics = sqliteTable(
     index("idx_verification_metrics_verdict").on(table.finalVerdict),
     index("idx_verification_metrics_keyword").on(table.keyword),
     index("idx_verification_metrics_created").on(table.createdAt),
+  ]
+);
+
+// ============================================================================
+// BSE-NSE Ticker Mapping - Maps BSE scrip codes to NSE symbols
+// ============================================================================
+
+/**
+ * Maps BSE scrip codes (e.g., "500325") to NSE symbols (e.g., "RELIANCE").
+ * This enables BSE corporate announcement alerts to be correlated with
+ * your watchlist and portfolio holdings (which typically use NSE symbols).
+ */
+export const bseNseMapping = sqliteTable(
+  "bse_nse_mapping",
+  {
+    bseScripCode: text("bse_scrip_code").primaryKey(), // BSE code: "500325"
+    nseSymbol: text("nse_symbol").notNull(), // NSE symbol: "RELIANCE"
+    companyName: text("company_name").notNull(), // "Reliance Industries Ltd"
+    isin: text("isin"), // ISIN for validation
+    lastVerifiedAt: text("last_verified_at").$defaultFn(() => new Date().toISOString()),
+    source: text("source").default("manual"), // "manual", "api", "scrape"
+  },
+  (table) => [
+    index("idx_bse_nse_mapping_nse").on(table.nseSymbol),
+    index("idx_bse_nse_mapping_isin").on(table.isin),
   ]
 );

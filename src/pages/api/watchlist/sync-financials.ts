@@ -11,6 +11,7 @@ import {
   parseScreenerExcelBuffer,
   type FinancialPeriod,
 } from "../../../lib/scrapers/screener-financials";
+import { getSymbolForStock } from "../../../lib/mappings";
 import puppeteer from "puppeteer";
 import {
   existsSync,
@@ -112,7 +113,20 @@ export const POST: APIRoute = async ({ request }) => {
         try {
           console.log(`[Batch Sync] Syncing ${symbol}...`);
 
-          const screenerUrl = `https://www.screener.in/company/${symbol}/`;
+          // Get the watchlist record to retrieve company name
+          const watchlistRecord = await db
+            .select()
+            .from(schema.watchlist)
+            .where(eq(schema.watchlist.symbol, symbol))
+            .limit(1);
+
+          const companyName = watchlistRecord[0]?.name || symbol;
+
+          // Apply symbol mapping (e.g., KPL -> 539997 for BSE stocks)
+          const mappedSymbol = await getSymbolForStock(companyName, symbol);
+          console.log(`[Batch Sync] Mapped ${symbol} -> ${mappedSymbol}`);
+
+          const screenerUrl = `https://www.screener.in/company/${mappedSymbol}/`;
 
           // Navigate to company page
           await page.goto(screenerUrl, { waitUntil: "domcontentloaded" });

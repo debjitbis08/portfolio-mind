@@ -78,9 +78,104 @@ type WatchlistItem = {
   createdAt: string;
 };
 
+type PotentialCatalyst = {
+  id: string;
+  predictedImpact: string;
+  affectedSymbols: string[];
+  watchCriteria: {
+    metric: "PRICE" | "VOLUME";
+    direction: "UP" | "DOWN";
+    thresholdPercent: number;
+    timeoutHours: number;
+  };
+  relatedArticleIds: string[];
+  sourceCitations?: Array<{
+    index: number;
+    title: string;
+    url: string;
+    source: string;
+    pubDate: string;
+  }>;
+  status: "monitoring" | "confirmed" | "invalidated" | "expired";
+  validationLog: Array<{
+    time: string;
+    ticker: string;
+    price: number;
+    change: number;
+    met: boolean;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string | null;
+};
+
 export default function CatalystPage() {
-  const [activeTab, setActiveTab] = createSignal<"signals" | "metrics" | "watchlist">("signals");
+  const [activeTab, setActiveTab] = createSignal<"potentials" | "signals" | "metrics" | "watchlist">("potentials");
   const [statusFilter, setStatusFilter] = createSignal<string>("active");
+  const [potentialFilter, setPotentialFilter] = createSignal<string>("monitoring");
+
+  // Helper to render text with clickable citations
+  const renderTextWithCitations = (
+    text: string,
+    citations?: Array<{ index: number; title: string; url: string; source: string; pubDate: string }>
+  ) => {
+    if (!citations || citations.length === 0) {
+      return text;
+    }
+
+    // Split text by citation pattern [1], [2], etc.
+    const parts: Array<{ type: "text" | "citation"; content: string; index?: number }> = [];
+    let lastIndex = 0;
+    const citationRegex = /\[(\d+)\]/g;
+    let match;
+
+    while ((match = citationRegex.exec(text)) !== null) {
+      // Add text before citation
+      if (match.index > lastIndex) {
+        parts.push({ type: "text", content: text.slice(lastIndex, match.index) });
+      }
+      // Add citation
+      const citationIndex = parseInt(match[1], 10);
+      parts.push({ type: "citation", content: match[0], index: citationIndex });
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push({ type: "text", content: text.slice(lastIndex) });
+    }
+
+    return (
+      <span>
+        <For each={parts}>
+          {(part) => (
+            <>
+              {part.type === "text" ? (
+                part.content
+              ) : (
+                <Show
+                  when={citations.find((c) => c.index === part.index)}
+                  fallback={<span class="text-yellow">{part.content}</span>}
+                >
+                  {(citation) => (
+                    <a
+                      href={citation().url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="text-mauve hover:text-mauve/80 underline decoration-dotted cursor-pointer"
+                      title={`${citation().source}: ${citation().title}`}
+                    >
+                      {part.content}
+                    </a>
+                  )}
+                </Show>
+              )}
+            </>
+          )}
+        </For>
+      </span>
+    );
+  };
 
   // Get the base URL for API calls (works in both browser and SSR)
   const getBaseUrl = () => {
@@ -126,6 +221,20 @@ export default function CatalystPage() {
     }
   );
 
+  // Fetch potential catalysts
+  const [potentials, { refetch: refetchPotentials }] = createResource(
+    () => ({ filter: potentialFilter(), enabled: typeof window !== "undefined" }),
+    async ({ filter, enabled }) => {
+      if (!enabled) return [];
+      const url = filter
+        ? `${getBaseUrl()}/api/catalyst/potentials?status=${filter}`
+        : `${getBaseUrl()}/api/catalyst/potentials`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data as PotentialCatalyst[];
+    }
+  );
+
   const updateSignalStatus = async (id: string, status: string) => {
     await fetch(`${getBaseUrl()}/api/catalyst/signals`, {
       method: "PATCH",
@@ -142,6 +251,24 @@ export default function CatalystPage() {
       body: JSON.stringify({ id, enabled }),
     });
     refetchWatchlist();
+  };
+
+  const confirmPotential = async (id: string) => {
+    await fetch(`${getBaseUrl()}/api/catalyst/potentials`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action: "confirm" }),
+    });
+    refetchPotentials();
+  };
+
+  const dismissPotential = async (id: string) => {
+    await fetch(`${getBaseUrl()}/api/catalyst/potentials`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action: "invalidate" }),
+    });
+    refetchPotentials();
   };
 
   const formatDate = (dateStr: string) => {
@@ -198,6 +325,21 @@ export default function CatalystPage() {
       {/* Tabs */}
       <div class="flex gap-2 mb-6 border-b border-surface1">
         <button
+          onClick={() => setActiveTab("potentials")}
+          class={`px-4 py-2 font-medium transition-colors ${
+            activeTab() === "potentials"
+              ? "text-mauve border-b-2 border-mauve"
+              : "text-subtext0 hover:text-text"
+          }`}
+        >
+          Discoveries
+          <Show when={potentials() && potentials()!.length > 0}>
+            <span class="ml-2 px-2 py-0.5 text-xs bg-mauve/20 text-mauve rounded-full">
+              {potentials()!.length}
+            </span>
+          </Show>
+        </button>
+        <button
           onClick={() => setActiveTab("signals")}
           class={`px-4 py-2 font-medium transition-colors ${
             activeTab() === "signals"
@@ -231,6 +373,260 @@ export default function CatalystPage() {
 
       {/* Tab Content */}
       <Switch>
+        <Match when={activeTab() === "potentials"}>
+          <div class="space-y-4">
+            {/* Filter */}
+            <div class="flex gap-2">
+              <button
+                onClick={() => setPotentialFilter("monitoring")}
+                class={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  potentialFilter() === "monitoring"
+                    ? "bg-mauve/20 text-mauve"
+                    : "bg-surface1 text-subtext0 hover:text-text"
+                }`}
+              >
+                Monitoring
+              </button>
+              <button
+                onClick={() => setPotentialFilter("confirmed")}
+                class={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  potentialFilter() === "confirmed"
+                    ? "bg-mauve/20 text-mauve"
+                    : "bg-surface1 text-subtext0 hover:text-text"
+                }`}
+              >
+                Confirmed
+              </button>
+              <button
+                onClick={() => setPotentialFilter("all")}
+                class={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  potentialFilter() === "all"
+                    ? "bg-mauve/20 text-mauve"
+                    : "bg-surface1 text-subtext0 hover:text-text"
+                }`}
+              >
+                All
+              </button>
+            </div>
+
+            {/* Potentials List */}
+            <Show when={!potentials.loading} fallback={<div class="text-subtext0">Loading discoveries...</div>}>
+              <Show when={potentials() && potentials()!.length > 0} fallback={<div class="text-subtext0">No catalyst discoveries yet. The AI will analyze news and identify market-moving events.</div>}>
+                <div class="space-y-6">
+                  {/* Group potentials by ticker */}
+                  <For each={(() => {
+                    // Group by ticker
+                    const grouped = new Map<string, PotentialCatalyst[]>();
+                    potentials()?.forEach(p => {
+                      p.affectedSymbols.forEach(ticker => {
+                        if (!grouped.has(ticker)) {
+                          grouped.set(ticker, []);
+                        }
+                        grouped.get(ticker)!.push(p);
+                      });
+                    });
+                    return Array.from(grouped.entries());
+                  })()}>
+                    {([ticker, tickerPotentials]) => (
+                      <div class="border border-surface1 rounded-xl overflow-hidden">
+                        {/* Ticker Header */}
+                        <div class="bg-surface1 px-5 py-3 border-b border-surface2">
+                          <div class="flex items-center justify-between">
+                            <div>
+                              <h3 class="text-lg font-bold text-mauve">{ticker}</h3>
+                              <p class="text-xs text-subtext0">{tickerPotentials.length} catalyst{tickerPotentials.length > 1 ? 's' : ''} discovered</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Catalysts for this ticker */}
+                        <div class="divide-y divide-surface1">
+                          <For each={tickerPotentials}>
+                            {(potential) => {
+                              // Calculate progress from latest validation check FOR THIS TICKER ONLY
+                              // Filter validation log to only show entries for the current ticker
+                              const tickerValidationLog = potential.validationLog && potential.validationLog.length > 0
+                                ? potential.validationLog.filter((entry: any) => entry.ticker === ticker)
+                                : [];
+
+                              const latestCheck = tickerValidationLog.length > 0
+                                ? tickerValidationLog[tickerValidationLog.length - 1]
+                                : null;
+
+                              // Calculate progress - only show positive progress toward target
+                              const progressPercent = latestCheck && potential.watchCriteria
+                                ? (() => {
+                                    const change = latestCheck.change;
+                                    const threshold = potential.watchCriteria.thresholdPercent;
+                                    const direction = potential.watchCriteria.direction;
+
+                                    // For UP direction: positive change = progress, negative = 0
+                                    if (direction === "UP") {
+                                      return change > 0 ? (change / threshold) * 100 : 0;
+                                    }
+                                    // For DOWN direction: negative change = progress, positive = 0
+                                    else {
+                                      return change < 0 ? (-change / threshold) * 100 : 0;
+                                    }
+                                  })()
+                                : 0;
+
+                              // Check if moving in wrong direction
+                              const wrongDirection = latestCheck && potential.watchCriteria
+                                ? (potential.watchCriteria.direction === "UP" && latestCheck.change < 0) ||
+                                  (potential.watchCriteria.direction === "DOWN" && latestCheck.change > 0)
+                                : false;
+
+                              const ageInHours = () => {
+                                const created = new Date(potential.createdAt);
+                                const now = new Date();
+                                return Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60));
+                              };
+
+                              const timeLeft = potential.watchCriteria
+                                ? Math.max(0, potential.watchCriteria.timeoutHours - ageInHours())
+                                : 0;
+
+                              return (
+                                <div class="bg-surface0 p-5 hover:bg-surface0/80 transition-all">
+                                  {/* Header */}
+                                  <div class="flex items-start justify-between mb-3">
+                                    <div class="flex-1">
+                                      <div class="flex items-center gap-2 mb-2">
+                                        <span class={`px-2 py-1 text-xs rounded ${
+                                          potential.status === "monitoring"
+                                            ? "bg-blue/20 text-blue"
+                                            : potential.status === "confirmed"
+                                            ? "bg-green/20 text-green"
+                                            : "bg-overlay0 text-subtext0"
+                                        }`}>
+                                          {potential.status}
+                                        </span>
+                                        <span class="text-xs text-subtext1">
+                                          {formatDate(potential.createdAt)}
+                                        </span>
+                                        <Show when={potential.status === "monitoring" && timeLeft > 0}>
+                                          <span class="text-xs text-yellow">
+                                            {timeLeft}h left
+                                          </span>
+                                        </Show>
+                                      </div>
+                                      <p class="text-text leading-relaxed">
+                                        {renderTextWithCitations(potential.predictedImpact, potential.sourceCitations)}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                          {/* Watch Criteria */}
+                          <Show when={potential.watchCriteria}>
+                            <div class="mb-3 p-3 bg-surface1 rounded-lg">
+                              <div class="text-xs text-subtext1 mb-1">
+                                Watching for: {potential.watchCriteria.metric} {potential.watchCriteria.direction} {
+                                  potential.watchCriteria.direction === "UP" ? "+" : "-"
+                                }{potential.watchCriteria.thresholdPercent}%
+                              </div>
+                              <Show when={latestCheck}>
+                                <Show when={wrongDirection}>
+                                  <div class="flex items-center gap-2 p-2 bg-red/10 rounded mt-2">
+                                    <span class="text-xs text-red">
+                                      ⚠️ Moving opposite direction: {latestCheck!.ticker} {latestCheck!.change > 0 ? "+" : ""}{latestCheck!.change.toFixed(2)}%
+                                    </span>
+                                  </div>
+                                </Show>
+                                <Show when={!wrongDirection}>
+                                  <div class="flex items-center gap-3 mt-2">
+                                    <div class="flex-1">
+                                      <div class="text-xs text-subtext0 mb-1">
+                                        {latestCheck!.ticker}: {latestCheck!.change > 0 ? "+" : ""}{latestCheck!.change.toFixed(2)}%
+                                      </div>
+                                      <div class="h-2 bg-surface0 rounded-full overflow-hidden">
+                                        <div
+                                          class={`h-full transition-all ${
+                                            progressPercent >= 100
+                                              ? "bg-green"
+                                              : progressPercent >= 50
+                                              ? "bg-yellow"
+                                              : "bg-blue"
+                                          }`}
+                                          style={{
+                                            width: `${Math.min(Math.max(progressPercent, 0), 100)}%`
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div class={`text-sm font-medium ${
+                                      progressPercent >= 100 ? "text-green" : progressPercent >= 50 ? "text-yellow" : "text-subtext0"
+                                    }`}>
+                                      {progressPercent.toFixed(0)}%
+                                    </div>
+                                  </div>
+                                </Show>
+                                <div class="text-xs text-subtext1 mt-1">
+                                  Last checked: {formatDate(latestCheck!.time)}
+                                </div>
+                              </Show>
+                            </div>
+                          </Show>
+
+                          {/* Citations Reference Section */}
+                          <Show when={potential.sourceCitations && potential.sourceCitations.length > 0}>
+                            <div class="mt-3 p-3 bg-surface1/50 rounded-lg border-l-2 border-mauve/30">
+                              <div class="text-xs font-semibold text-subtext1 mb-2">📚 Sources</div>
+                              <div class="space-y-1">
+                                <For each={potential.sourceCitations}>
+                                  {(citation) => (
+                                    <div class="text-xs text-subtext0">
+                                      <span class="text-mauve font-medium">[{citation.index}]</span>{" "}
+                                      <a
+                                        href={citation.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        class="text-text hover:text-mauve underline decoration-dotted"
+                                      >
+                                        {citation.title}
+                                      </a>
+                                      {" "}
+                                      <span class="text-subtext1">
+                                        - {citation.source} ({citation.pubDate})
+                                      </span>
+                                    </div>
+                                  )}
+                                </For>
+                              </div>
+                            </div>
+                          </Show>
+
+                          {/* Actions */}
+                          <div class="flex gap-2 pt-3 border-t border-surface1">
+                            <Show when={potential.status === "monitoring"}>
+                              <button
+                                onClick={() => confirmPotential(potential.id)}
+                                class="px-3 py-1.5 text-sm bg-green/20 text-green hover:bg-green/30 rounded-lg transition-colors"
+                              >
+                                ✓ Confirm
+                              </button>
+                              <button
+                                onClick={() => dismissPotential(potential.id)}
+                                class="px-3 py-1.5 text-sm bg-red/20 text-red hover:bg-red/30 rounded-lg transition-colors"
+                              >
+                                ✗ Dismiss
+                              </button>
+                            </Show>
+                          </div>
+                        </div>
+                      );
+                    }}
+                          </For>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </Show>
+          </div>
+        </Match>
+
         <Match when={activeTab() === "signals"}>
           <div class="space-y-4">
             {/* Filter */}
@@ -270,68 +666,100 @@ export default function CatalystPage() {
             {/* Signals List */}
             <Show when={!signals.loading} fallback={<div class="text-subtext0">Loading signals...</div>}>
               <Show when={signals()?.length ?? 0 > 0} fallback={<div class="text-subtext0">No signals found</div>}>
-                <div class="space-y-4">
-                  <For each={signals()}>
-                    {(signal) => (
-                      <div class="bg-surface0 rounded-lg p-4 border border-surface1">
-                        <div class="flex items-start justify-between mb-3">
-                          <div class="flex-1">
-                            <div class="flex items-center gap-2 mb-1">
-                              <span class="font-semibold text-text">{signal.keyword}</span>
-                              <span class="text-subtext0 text-sm">({signal.ticker})</span>
-                              <span class={`text-sm font-medium ${getSentimentColor(signal.sentiment)}`}>
-                                {signal.action}
-                              </span>
-                              <span class={`px-2 py-0.5 rounded text-xs ${getStatusBadge(signal.status)}`}>
-                                {signal.status.replace(/_/g, " ")}
-                              </span>
+                <div class="space-y-6">
+                  {/* Group signals by ticker */}
+                  <For each={(() => {
+                    // Group by ticker
+                    const grouped = new Map<string, Signal[]>();
+                    signals()?.forEach(s => {
+                      if (!grouped.has(s.ticker)) {
+                        grouped.set(s.ticker, []);
+                      }
+                      grouped.get(s.ticker)!.push(s);
+                    });
+                    return Array.from(grouped.entries());
+                  })()}>
+                    {([ticker, tickerSignals]) => (
+                      <div class="border border-surface1 rounded-xl overflow-hidden">
+                        {/* Ticker Header */}
+                        <div class="bg-surface1 px-5 py-3 border-b border-surface2">
+                          <div class="flex items-center justify-between">
+                            <div>
+                              <h3 class="text-lg font-bold text-mauve">{ticker}</h3>
+                              <p class="text-xs text-subtext0">{tickerSignals.length} signal{tickerSignals.length > 1 ? 's' : ''}</p>
                             </div>
-                            <div class="flex items-center gap-3 text-sm text-subtext0 mb-2">
-                              <span class={getImpactColor(signal.impactType)}>{signal.impactType}</span>
-                              <span>Confidence: {signal.confidence}/10</span>
-                              <span>{formatDate(signal.createdAt)}</span>
-                            </div>
+                            {/* Show latest price if available */}
+                            <Show when={tickerSignals[0]?.currentPrice}>
+                              <div class="text-right">
+                                <div class="text-sm font-medium text-text">₹{tickerSignals[0].currentPrice?.toFixed(2)}</div>
+                                <div class={`text-xs ${tickerSignals[0].priceChangePercent && tickerSignals[0].priceChangePercent > 0 ? "text-green" : "text-red"}`}>
+                                  {tickerSignals[0].priceChangePercent && tickerSignals[0].priceChangePercent > 0 ? "+" : ""}{tickerSignals[0].priceChangePercent?.toFixed(2)}%
+                                </div>
+                              </div>
+                            </Show>
                           </div>
                         </div>
 
-                        <a
-                          href={signal.newsUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="text-mauve hover:text-mauve/80 font-medium mb-2 block"
-                        >
-                          {signal.newsTitle}
-                        </a>
+                        {/* Signals for this ticker */}
+                        <div class="divide-y divide-surface1">
+                          <For each={tickerSignals}>
+                            {(signal) => (
+                              <div class="bg-surface0 p-5 hover:bg-surface0/80 transition-all">
+                                <div class="flex items-start justify-between mb-3">
+                                  <div class="flex-1">
+                                    <div class="flex items-center gap-2 mb-1">
+                                      <span class="font-semibold text-text">{signal.keyword}</span>
+                                      <span class={`text-sm font-medium ${getSentimentColor(signal.sentiment)}`}>
+                                        {signal.action}
+                                      </span>
+                                      <span class={`px-2 py-0.5 rounded text-xs ${getStatusBadge(signal.status)}`}>
+                                        {signal.status.replace(/_/g, " ")}
+                                      </span>
+                                    </div>
+                                    <div class="flex items-center gap-3 text-sm text-subtext0 mb-2">
+                                      <span class={getImpactColor(signal.impactType)}>{signal.impactType}</span>
+                                      <span>Confidence: {signal.confidence}/10</span>
+                                      <span>{formatDate(signal.createdAt)}</span>
+                                    </div>
+                                  </div>
+                                </div>
 
-                        <p class="text-sm text-subtext1 mb-3">{signal.reasoning}</p>
+                                <a
+                                  href={signal.newsUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  class="text-mauve hover:text-mauve/80 font-medium mb-2 block"
+                                >
+                                  {signal.newsTitle}
+                                </a>
 
-                        <Show when={signal.currentPrice}>
-                          <div class="flex items-center gap-4 text-sm text-subtext0 mb-3">
-                            <span>Price: ₹{signal.currentPrice?.toFixed(2)}</span>
-                            <span class={signal.priceChangePercent && signal.priceChangePercent > 0 ? "text-green" : "text-red"}>
-                              {signal.priceChangePercent?.toFixed(2)}%
-                            </span>
-                            <Show when={signal.volumeSpike}>
-                              <span class="text-yellow">Volume Spike!</span>
-                            </Show>
-                          </div>
-                        </Show>
+                                <p class="text-sm text-subtext1 mb-3">{signal.reasoning}</p>
 
-                        <div class="flex gap-2">
-                          <Show when={signal.status === "active" || signal.status === "pending_market_open"}>
-                            <button
-                              onClick={() => updateSignalStatus(signal.id, "acted")}
-                              class="px-3 py-1 bg-green/20 text-green rounded-lg text-sm hover:bg-green/30 transition-colors"
-                            >
-                              Mark Acted
-                            </button>
-                            <button
-                              onClick={() => updateSignalStatus(signal.id, "dismissed")}
-                              class="px-3 py-1 bg-red/20 text-red rounded-lg text-sm hover:bg-red/30 transition-colors"
-                            >
-                              Dismiss
-                            </button>
-                          </Show>
+                                <Show when={signal.volumeSpike}>
+                                  <div class="inline-flex items-center gap-1 px-2 py-1 bg-yellow/20 text-yellow rounded text-xs mb-3">
+                                    <span>📊</span> Volume Spike!
+                                  </div>
+                                </Show>
+
+                                <div class="flex gap-2">
+                                  <Show when={signal.status === "active" || signal.status === "pending_market_open"}>
+                                    <button
+                                      onClick={() => updateSignalStatus(signal.id, "acted")}
+                                      class="px-3 py-1 bg-green/20 text-green rounded-lg text-sm hover:bg-green/30 transition-colors"
+                                    >
+                                      Mark Acted
+                                    </button>
+                                    <button
+                                      onClick={() => updateSignalStatus(signal.id, "dismissed")}
+                                      class="px-3 py-1 bg-red/20 text-red rounded-lg text-sm hover:bg-red/30 transition-colors"
+                                    >
+                                      Dismiss
+                                    </button>
+                                  </Show>
+                                </div>
+                              </div>
+                            )}
+                          </For>
                         </div>
                       </div>
                     )}

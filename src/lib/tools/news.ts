@@ -8,9 +8,25 @@
 
 import { registerToolExecutor, type ToolResponse } from "./registry";
 import { getNewsIntel } from "../scrapers/news";
+import { getHoldings } from "../db";
 
 interface GetStockNewsArgs {
-  query: string;
+  symbol: string;
+  hours_recent?: number; // Optional: default to 24h for fresher news
+}
+
+/**
+ * Get company name for a symbol from holdings
+ */
+async function getCompanyName(symbol: string): Promise<string | null> {
+  try {
+    const holdings = await getHoldings();
+    const holding = holdings.find((h) => h.symbol === symbol);
+    return holding?.stockName || null;
+  } catch (error) {
+    console.warn(`[News Tool] Failed to lookup company name for ${symbol}:`, error);
+    return null;
+  }
 }
 
 /**
@@ -19,31 +35,38 @@ interface GetStockNewsArgs {
 async function getStockNews(
   args: Record<string, unknown>
 ): Promise<ToolResponse> {
-  const { query } = args as unknown as GetStockNewsArgs;
+  const { symbol, hours_recent = 24 } = args as unknown as GetStockNewsArgs; // Default: 24h for Tier 2
 
-  if (!query || query.trim().length === 0) {
+  if (!symbol || symbol.trim().length === 0) {
     return {
       success: false,
       error: {
         code: "PARSE_ERROR",
-        message: "Query parameter is required",
+        message: "Symbol parameter is required",
         retryable: false,
       },
     };
   }
 
   try {
-    console.log(`[News Tool] Fetching news for: ${query}`);
+    // Look up company name from holdings
+    const companyName = await getCompanyName(symbol.trim());
 
-    const intel = await getNewsIntel(query.trim(), 5);
+    // Use company name if available, otherwise fall back to symbol
+    const searchQuery = companyName || symbol.trim();
+
+    console.log(`[News Tool] Fetching news for: ${symbol} (search query: ${searchQuery}, last ${hours_recent}h)`);
+
+    const intel = await getNewsIntel(searchQuery, 5, hours_recent);
 
     if (intel.articles_found === 0) {
       return {
         success: true,
         data: {
           found: false,
-          query: query,
-          message: `No recent news found for "${query}".`,
+          symbol: symbol,
+          search_query: searchQuery,
+          message: `No recent news found for "${searchQuery}".`,
         },
         meta: {
           source: "google_news",
@@ -55,7 +78,8 @@ async function getStockNews(
       success: true,
       data: {
         found: true,
-        query: query,
+        symbol: symbol,
+        search_query: searchQuery,
         articles_found: intel.articles_found,
         articles_analyzed: intel.articles_readable,
         sentiment_summary: intel.sentiment_summary,

@@ -1,6 +1,5 @@
 import {
   runBroadIndianScan,
-  runCatalystScan,
   runCatalystTracker,
 } from "../src/lib/catalyst";
 
@@ -10,7 +9,8 @@ const NEWS_LOOKBACK_HOURS = 4; // Look back 4 hours for broad scan
 
 async function main() {
   console.log("🚀 Starting Catalyst Daemon...");
-  console.log("   Mode: India-Focused Broad Discovery + Keyword Tracking");
+  console.log("   Mode: Discovery Scan (All Sources)");
+  console.log("   Sources: BSE API, PIB RSS, RBI RSS, DIPAM, DPIIT, Media");
   console.log("   Interval: 30 minutes");
   console.log("");
 
@@ -23,18 +23,11 @@ async function main() {
       // 1. Tracker Pass (Validate existing potential catalysts)
       await runCatalystTracker();
 
-      // 2. Broad Indian Market Scan (Primary - comprehensive coverage)
+      // 2. Discovery Scan - Fetch from ALL sources and discover catalysts
       console.log("\n" + "─".repeat(60));
       await runBroadIndianScan({
         newsMaxAgeHours: NEWS_LOOKBACK_HOURS,
-        paperMode: true, // Stay in paper mode for calibration
-      });
-
-      // 3. Keyword-Based Scan (Secondary - for specific commodities)
-      console.log("\n" + "─".repeat(60));
-      await runCatalystScan({
-        newsMaxAgeHours: NEWS_LOOKBACK_HOURS,
-        paperMode: true,
+        paperMode: false, // Live mode - save signals to database
       });
 
       const duration = Date.now() - cycleStart;

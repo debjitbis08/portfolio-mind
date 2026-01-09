@@ -8,9 +8,71 @@
 import YahooFinance from "yahoo-finance2";
 import type { MarketConfirmation, Sentiment, CatalystAsset } from "./types";
 import { GLOBAL_VALIDATION_TICKERS } from "./types";
+import { validateTicker, findBestMatch } from "../tools/symbol-search";
 
 // Initialize Yahoo Finance client (v3 API)
 const yahooFinance = new YahooFinance();
+
+/**
+ * Suggest a ticker correction using symbol search.
+ * This helps identify the correct ticker when validation fails.
+ */
+async function suggestTickerCorrection(
+  failedTicker: string,
+  companyKeyword: string
+): Promise<void> {
+  try {
+    // Skip if no valid search query
+    if (!companyKeyword || companyKeyword.trim().length === 0) {
+      // Try using the ticker base as a fallback search term
+      const baseTicker = failedTicker.replace(/\.(NS|BO|BSE|NSE)$/, '');
+      if (baseTicker && baseTicker.length > 2) {
+        console.warn(
+          `[MarketValidator]    ℹ️  No company name available, trying ticker search: "${baseTicker}"`
+        );
+        companyKeyword = baseTicker;
+      } else {
+        console.warn(
+          `[MarketValidator]    ⚠️  Cannot suggest correction: no company name or valid ticker base`
+        );
+        return;
+      }
+    }
+
+    // Try to find a match using the company keyword
+    const result = await findBestMatch(companyKeyword);
+
+    if (result.found && result.matches.length > 0) {
+      const bestMatch = result.matches[0];
+      if (bestMatch.validated) {
+        console.warn(
+          `[MarketValidator]    🔍 Suggestion: "${failedTicker}" → "${bestMatch.symbol}" (${bestMatch.name})`
+        );
+        console.warn(
+          `[MarketValidator]    📝 Add to TICKER_CORRECTIONS: "${failedTicker}": "${bestMatch.symbol}"`
+        );
+      } else if (result.matches.length > 1) {
+        console.warn(
+          `[MarketValidator]    🔍 Found ${result.matches.length} possible matches:`
+        );
+        result.matches.slice(0, 3).forEach((match, i) => {
+          console.warn(
+            `[MarketValidator]       ${i + 1}. ${match.symbol} - ${match.name} (${match.exchange})`
+          );
+        });
+      }
+    } else {
+      console.warn(
+        `[MarketValidator]    ⚠️  No alternatives found for "${companyKeyword}". Try manual search: pnpm tsx scripts/search-ticker.ts --smart "${companyKeyword}"`
+      );
+    }
+  } catch (error: any) {
+    // Log error for debugging but don't fail validation
+    console.warn(
+      `[MarketValidator]    ⚠️  Symbol search failed: ${error.message}`
+    );
+  }
+}
 
 /**
  * Get the validation ticker for an asset.
@@ -60,13 +122,43 @@ export async function validateWithMarket(
     return null;
   }
 
-  try {
-    const quote = (await yahooFinance.quote(ticker)) as any;
+  // Try both NSE and BSE suffixes if ticker has one
+  const tickersToTry: string[] = [ticker];
+  if (ticker.endsWith('.NS')) {
+    tickersToTry.push(ticker.replace('.NS', '.BO'));
+  } else if (ticker.endsWith('.BO')) {
+    tickersToTry.push(ticker.replace('.BO', '.NS'));
+  }
 
-    if (!quote || !quote.regularMarketPrice) {
-      console.warn(`[MarketValidator] No quote data for "${ticker}"`);
-      return null;
+  let quote: any = null;
+  let finalTicker: string = ticker;
+
+  for (const tryTicker of tickersToTry) {
+    try {
+      quote = (await yahooFinance.quote(tryTicker)) as any;
+      if (quote && quote.regularMarketPrice) {
+        finalTicker = tryTicker;
+        break;
+      }
+    } catch (err) {
+      // Try next ticker
+      continue;
     }
+  }
+
+  if (!quote || !quote.regularMarketPrice) {
+    // Log failed ticker lookups to help identify corrections needed
+    // These might be wrong tickers from AI that need to be added to TICKER_CORRECTIONS in symbol-matcher.ts
+    console.warn(`[MarketValidator] ❌ No quote data for "${ticker}" (also tried: ${tickersToTry.slice(1).join(', ') || 'no alternatives'})`);
+    console.warn(`[MarketValidator]    💡 If this ticker is wrong, add correction to src/lib/symbol-matcher.ts TICKER_CORRECTIONS`);
+
+    // Try to auto-suggest a correction using symbol search
+    await suggestTickerCorrection(ticker, asset.keyword);
+
+    return null;
+  }
+
+  try {
 
     const currentPrice = quote.regularMarketPrice as number;
     const priceChange = (quote.regularMarketChangePercent || 0) as number;
@@ -100,7 +192,7 @@ export async function validateWithMarket(
     const isTrending = priceChange > 0; // Simplified: positive = trending up
 
     return {
-      ticker,
+      ticker: finalTicker, // Use the ticker that actually worked (might be .BO instead of .NS)
       currentPrice,
       priceChangePercent: priceChange,
       averageVolume,

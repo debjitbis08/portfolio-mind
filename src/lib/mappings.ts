@@ -15,7 +15,12 @@ import { eq } from "drizzle-orm";
 export const BUILT_IN_MAPPINGS: Record<string, string> = {
   // Groww/General mappings
   GODAWARIP: "GPIL",
-  "522195": "FRONTSP",
+
+  // Frontier Springs: BSE-only stock (scrip code: 522195, ISIN: INE572D01014)
+  // Broker uses FRONTSP, but we normalize to 522195 for Screener compatibility
+  // For price fetching, we need to force BOM exchange to avoid wrong prices
+  FRONTSP: "522195", // Broker code → canonical BSE scrip code
+  KPL: "539997",
 
   // ICICI Direct mappings
   RELIND: "RELIANCE",

@@ -14,6 +14,7 @@ import {
   scrapeScreenerDocuments,
   type DocumentLink,
 } from "../../lib/scrapers/concall-processor";
+import { getSymbolForStock } from "../../lib/mappings";
 
 // ============================================================================
 // POST /api/concalls - Process a concall PDF
@@ -56,8 +57,23 @@ export const POST: APIRoute = async ({ request }) => {
 
     // If screenerUrl provided, auto-discover and process transcripts
     if (screenerUrl && email) {
+      // Apply symbol mapping before scraping
+      const watchlistRecord = await db
+        .select()
+        .from(schema.watchlist)
+        .where(eq(schema.watchlist.symbol, symbol))
+        .limit(1);
+
+      const companyName = watchlistRecord[0]?.name || symbol;
+      const mappedSymbol = await getSymbolForStock(companyName, symbol);
+
+      console.log(`[Concalls API] Mapped ${symbol} -> ${mappedSymbol}`);
+
+      // Reconstruct URL with mapped symbol
+      const mappedUrl = `https://www.screener.in/company/${mappedSymbol}/`;
+
       const documents = await scrapeScreenerDocuments(
-        screenerUrl,
+        mappedUrl,
         email,
         password
       );

@@ -23,13 +23,46 @@ export interface GoogleFinanceQuote {
 export async function getGoogleFinanceQuote(
   symbol: string
 ): Promise<GoogleFinanceQuote | null> {
+  // Check if symbol already has exchange suffix (e.g., "522195:BOM")
+  if (symbol.includes(":")) {
+    try {
+      const quote = await scrapeGoogleFinance(symbol);
+      if (quote) {
+        // Return original symbol without suffix for consistency
+        const baseSymbol = symbol.split(":")[0];
+        return { ...quote, symbol: baseSymbol };
+      }
+    } catch (error) {
+      console.error(`[GoogleFinance] Failed for pre-suffixed ${symbol}:`, error);
+    }
+    return null; // If pre-suffixed symbol fails, don't try alternatives
+  }
+
   const isBseCode = /^\d{5,6}$/.test(symbol);
 
-  // Build Google Finance URLs to try
-  // For BSE codes, try BSE first; for symbol names, try NSE first
-  const suffixes = isBseCode
-    ? [`${symbol}:BOM`, `${symbol}:NSE`] // BOM = Bombay (BSE)
-    : [`${symbol}:NSE`, `${symbol}:BOM`];
+  // HEURISTIC: If symbol is all digits (BSE scrip code), it's BSE-only
+  // Rationale:
+  // - BSE uses numeric scrip codes (5-6 digits)
+  // - NSE uses alphabetic symbols
+  // - If a BSE stock is also on NSE, it has a DIFFERENT alphabetic symbol on NSE
+  // - Therefore, a numeric symbol can ONLY exist on BSE, never on NSE
+  // - Trying NSE with numeric codes often returns wrong/stale data from unrelated securities
+  if (isBseCode) {
+    console.log(`[GoogleFinance] ${symbol} is numeric (BSE scrip code), skipping NSE`);
+    try {
+      const quote = await scrapeGoogleFinance(`${symbol}:BOM`);
+      if (quote) {
+        return { ...quote, symbol };
+      }
+    } catch (error) {
+      console.error(`[GoogleFinance] Failed for BSE scrip code ${symbol}:`, error);
+    }
+    return null;
+  }
+
+  // For alphabetic symbols, try both exchanges
+  // NSE first (more liquid), then BSE as fallback
+  const suffixes = [`${symbol}:NSE`, `${symbol}:BOM`];
 
   for (const gfSymbol of suffixes) {
     try {

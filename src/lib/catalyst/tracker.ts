@@ -1,7 +1,6 @@
 import { potentialCatalysts, catalystSignals } from "../db/schema";
 import { db } from "../db";
-import { eq, or, and, isNotNull } from "drizzle-orm";
-import yahooFinance from "yahoo-finance2";
+import { eq } from "drizzle-orm";
 import { dispatchSignal } from "./signal-dispatcher";
 import {
   type CatalystAsset,
@@ -10,6 +9,8 @@ import {
 } from "./types";
 import { getEnabledAssets } from "./news-monitor";
 import { isIndianMarketOpen, getMarketStatusMessage } from "./market-hours";
+import { validateMultipleTickers } from "./market-validator";
+import { correctTickers } from "../symbol-matcher";
 
 interface WatchCriteria {
   metric: "PRICE" | "VOLUME";
@@ -21,7 +22,8 @@ interface WatchCriteria {
 /**
  * Main loop for the tracker.
  * 1. Checks 'monitoring' potential catalysts.
- * 2. Checks active signals for outcomes.
+ * 2. Reevaluates each potential with latest market data and potential new news.
+ * 3. Creates signals when market confirms predicted movement.
  *
  * Note: Skips price validation when Indian market is closed,
  * but still checks for expiries.
@@ -39,7 +41,7 @@ export async function runCatalystTracker() {
     return;
   }
 
-  await checkPotentialCatalysts();
+  await checkAndReevaluatePotentialCatalysts();
   // await checkActiveOutcomes(); // TODO: Implement outcome tracking later
 }
 
@@ -81,7 +83,17 @@ async function expireStalePotentialCatalysts() {
   }
 }
 
-async function checkPotentialCatalysts() {
+/**
+ * Check and reevaluate potential catalysts on every cycle.
+ *
+ * NEW BEHAVIOR:
+ * 1. Fetches all monitoring catalysts
+ * 2. For each catalyst, validates market movement against watch criteria
+ * 3. Reevaluates predicted impact/potential based on latest market data
+ * 4. Creates signal when criteria is met
+ * 5. Updates or expires based on market behavior and time
+ */
+async function checkAndReevaluatePotentialCatalysts() {
   // 1. Fetch all monitoring items
   const monitors = await db
     .select()
@@ -102,7 +114,8 @@ async function checkPotentialCatalysts() {
     try {
       // Parse data
       const criteria = JSON.parse(item.watchCriteria) as WatchCriteria;
-      const symbols = JSON.parse(item.affectedSymbols) as string[]; // ["RELIANCE.NS", ...]
+      const rawSymbols = JSON.parse(item.affectedSymbols) as string[]; // ["RELIANCE.NS", ...]
+      const symbols = correctTickers(rawSymbols); // Auto-correct common AI mistakes
       const log = item.validationLog ? JSON.parse(item.validationLog) : [];
 
       // Check expiry
@@ -121,61 +134,88 @@ async function checkPotentialCatalysts() {
         continue;
       }
 
-      // Check market for EACH symbol
+      // Check market for EACH symbol using the market-validator utility
+      const expectedSentiment = criteria.direction === "UP" ? "BULLISH" : "BEARISH";
+      const marketResults = await validateMultipleTickers(symbols, expectedSentiment);
+
       let confirmed = false;
       let confirmingTicker = "";
       let marketDataSnapshot: any = null;
 
-      for (const ticker of symbols) {
-        try {
-          const quote = (await yahooFinance.quote(ticker)) as any;
-          const currentPrice = quote.regularMarketPrice;
-          const openPrice = quote.regularMarketOpen || quote.previousClose;
+      // Track best performing ticker for reevaluation
+      let bestPerformance = { ticker: "", change: -Infinity, data: null as any };
 
-          if (!currentPrice || !openPrice) continue;
+      // Check each symbol's market data against criteria
+      for (const [ticker, marketData] of Array.from(marketResults.entries())) {
+        const priceChange = marketData.priceChangePercent;
 
-          const priceChange = ((currentPrice - openPrice) / openPrice) * 100;
-          const volume = quote.regularMarketVolume || 0;
-          // Simplified volume check (no average available in simple quote usually, need validation ticker logic if strictly robust)
-
-          // Check Criteria
-          // Example: Price DROP > 2%
-          if (criteria.metric === "PRICE") {
-            if (
-              criteria.direction === "DOWN" &&
-              priceChange <= -criteria.thresholdPercent
-            ) {
-              confirmed = true;
-            } else if (
-              criteria.direction === "UP" &&
-              priceChange >= criteria.thresholdPercent
-            ) {
-              confirmed = true;
-            }
-          }
-
-          // Log the check
-          log.push({
-            time: new Date().toISOString(),
-            ticker,
-            price: currentPrice,
-            change: priceChange,
-            met: confirmed,
-          });
-
-          if (confirmed) {
-            confirmingTicker = ticker;
-            marketDataSnapshot = {
-              ticker,
-              currentPrice,
-              priceChangePercent: priceChange,
-              volume,
-            };
-            break;
-          }
-        } catch (err) {
-          console.error(`   Error checking ${ticker}:`, err);
+        // Track performance for reevaluation
+        const performanceScore = criteria.direction === "UP" ? priceChange : -priceChange;
+        if (performanceScore > bestPerformance.change) {
+          bestPerformance = { ticker, change: priceChange, data: marketData };
         }
+
+        // Log the check
+        log.push({
+          time: new Date().toISOString(),
+          ticker,
+          price: marketData.currentPrice,
+          change: priceChange,
+          met: false, // Will update if confirmed
+        });
+
+        // Check Criteria
+        if (criteria.metric === "PRICE") {
+          if (
+            criteria.direction === "DOWN" &&
+            priceChange <= -criteria.thresholdPercent
+          ) {
+            confirmed = true;
+          } else if (
+            criteria.direction === "UP" &&
+            priceChange >= criteria.thresholdPercent
+          ) {
+            confirmed = true;
+          }
+        } else if (criteria.metric === "VOLUME") {
+          // Use volume ratio from market validator
+          if (
+            criteria.direction === "UP" &&
+            marketData.volumeRatio >= criteria.thresholdPercent / 100
+          ) {
+            confirmed = true;
+          }
+        }
+
+        if (confirmed) {
+          confirmingTicker = ticker;
+          marketDataSnapshot = {
+            ticker: marketData.ticker,
+            currentPrice: marketData.currentPrice,
+            priceChangePercent: marketData.priceChangePercent,
+            averageVolume: marketData.averageVolume,
+            currentVolume: marketData.currentVolume,
+            volumeRatio: marketData.volumeRatio,
+            volumeSpike: marketData.volumeSpike,
+            isTrending: marketData.isTrending,
+            priceConfirmsSentiment: marketData.priceConfirmsSentiment,
+          };
+          // Update log entry to mark as met
+          log[log.length - 1].met = true;
+          break;
+        }
+      }
+
+      // REEVALUATION: Log current potential status
+      if (!confirmed && bestPerformance.ticker) {
+        const progressPercent = criteria.direction === "UP"
+          ? (bestPerformance.change / criteria.thresholdPercent) * 100
+          : (-bestPerformance.change / criteria.thresholdPercent) * 100;
+
+        console.log(
+          `   🔄 [${item.id.slice(0, 6)}] Monitoring: ${bestPerformance.ticker} ${criteria.direction} ` +
+          `${bestPerformance.change.toFixed(2)}% (${progressPercent.toFixed(0)}% to target ${criteria.direction === "UP" ? "+" : "-"}${criteria.thresholdPercent}%)`
+        );
       }
 
       // Update DB
@@ -193,9 +233,21 @@ async function checkPotentialCatalysts() {
           .where(eq(potentialCatalysts.id, item.id));
 
         // Create formal Signal
-        const relatedAsset =
-          allAssets.find((a) => a.ticker === confirmingTicker) ||
-          (allAssets[0] as CatalystAsset); // Fallback
+        // Find the asset or create a temporary one for the confirming ticker
+        let relatedAsset = allAssets.find((a) => a.ticker === confirmingTicker);
+
+        if (!relatedAsset) {
+          // Extract company name from ticker (remove .NS/.BO suffix)
+          const tickerBase = confirmingTicker.replace(/\.(NS|BO)$/, '');
+
+          relatedAsset = {
+            id: `temp-${confirmingTicker}`,
+            keyword: tickerBase,
+            ticker: confirmingTicker,
+            assetType: "EQUITY",
+            enabled: true,
+          };
+        }
 
         const signal: CatalystSignal = {
           asset: relatedAsset,
@@ -215,14 +267,7 @@ async function checkPotentialCatalysts() {
             confidence: 8,
             reasoning: `AI Validation Confirmed: ${criteria.metric} moved ${criteria.direction} on ${confirmingTicker}`,
           },
-          technical: {
-            ...marketDataSnapshot,
-            averageVolume: 0,
-            volumeRatio: 0,
-            volumeSpike: false,
-            isTrending: true,
-            priceConfirmsSentiment: true,
-          },
+          technical: marketDataSnapshot,
           status: "active",
           createdAt: new Date().toISOString(),
         };

@@ -94,6 +94,12 @@ export async function isAlreadyProcessed(articleUrl: string): Promise<boolean> {
 
 /**
  * Mark an article as processed with its analysis result.
+ *
+ * Uses INSERT OR REPLACE to handle duplicate URLs gracefully.
+ * This can happen when:
+ * - Same article appears in multiple RSS feeds
+ * - Same keyword is scanned multiple times in parallel
+ * - Article URL is reprocessed after a restart
  */
 export async function markAsProcessed(
   article: NewsItem,
@@ -101,13 +107,34 @@ export async function markAsProcessed(
   isCatalyst: boolean,
   analysisJson?: string
 ): Promise<void> {
-  await db.insert(processedArticles).values({
-    articleUrl: article.link,
-    articleTitle: article.title,
-    keyword,
-    isCatalyst,
-    analysisJson,
-  });
+  try {
+    await db.insert(processedArticles).values({
+      articleUrl: article.link,
+      articleTitle: article.title,
+      keyword,
+      isCatalyst,
+      analysisJson,
+      sourceId: article.sourceId,
+      sourcePriority: article.sourcePriority,
+    }).onConflictDoUpdate({
+      target: processedArticles.articleUrl,
+      set: {
+        // Update with latest analysis if reprocessed
+        keyword,
+        isCatalyst,
+        analysisJson,
+        sourceId: article.sourceId,
+        sourcePriority: article.sourcePriority,
+        processedAt: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    // Log but don't throw - article is already processed
+    console.warn(
+      `[NewsMonitor] Failed to mark article as processed (already exists): ${article.link}`,
+      error
+    );
+  }
 }
 
 /**

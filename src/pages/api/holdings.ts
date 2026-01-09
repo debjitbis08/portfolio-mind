@@ -121,73 +121,24 @@ export const GET: APIRoute = async ({ request }) => {
 
     // Step 2: Fetch stale/missing from Yahoo
     if (staleSymbols.length > 0) {
-      try {
-        // Try NSE first with retry
-        const nseSymbols = staleSymbols.map((s) => `${s}.NS`);
-        const nseResults = await fetchQuoteWithRetry(nseSymbols);
-        const nseArray = Array.isArray(nseResults) ? nseResults : [nseResults];
+      // Separate BSE-only numeric symbols from regular symbols
+      const bseOnlySymbols: string[] = [];
+      const regularSymbols: string[] = [];
 
-        const pricesToCache: Array<{ symbol: string; price: number }> = [];
-
-        for (const quote of nseArray) {
-          if (quote?.symbol && quote.regularMarketPrice) {
-            const yahoo = quote.symbol.replace(".NS", "");
-            freshPrices[yahoo] = quote.regularMarketPrice;
-            pricesToCache.push({
-              symbol: yahoo,
-              price: quote.regularMarketPrice,
-            });
-          }
+      for (const symbol of staleSymbols) {
+        // Detect BSE scrip codes (5-6 digit numeric codes)
+        if (/^\d{5,6}$/.test(symbol)) {
+          bseOnlySymbols.push(symbol);
+          console.log(`[Holdings] ${symbol} is BSE scrip code, using Google Finance only`);
+        } else {
+          regularSymbols.push(symbol);
         }
+      }
 
-        // Try BSE for remaining
-        const stillMissing = staleSymbols.filter((s) => !freshPrices[s]);
-        if (stillMissing.length > 0) {
-          try {
-            const bseSymbols = stillMissing.map((s) => `${s}.BO`);
-            const bseResults = await fetchQuoteWithRetry(bseSymbols);
-            const bseArray = Array.isArray(bseResults)
-              ? bseResults
-              : [bseResults];
-
-            for (const quote of bseArray) {
-              if (quote?.symbol && quote.regularMarketPrice) {
-                const yahoo = quote.symbol.replace(".BO", "");
-                freshPrices[yahoo] = quote.regularMarketPrice;
-                pricesToCache.push({
-                  symbol: yahoo,
-                  price: quote.regularMarketPrice,
-                });
-              }
-            }
-          } catch (bseErr) {
-            console.error("BSE fetch error:", bseErr);
-          }
-        }
-
-        // Step 3: Update cache
-        for (const p of pricesToCache) {
-          await db
-            .insert(schema.priceCache)
-            .values({
-              symbol: p.symbol,
-              price: p.price,
-              updatedAt: new Date().toISOString(),
-            })
-            .onConflictDoUpdate({
-              target: schema.priceCache.symbol,
-              set: {
-                price: p.price,
-                updatedAt: new Date().toISOString(),
-              },
-            });
-        }
-      } catch (err) {
-        console.error("Yahoo Finance error:", err);
-
-        // Try Google Finance as fallback before using stale cache
+      // Try Google Finance first for BSE-only symbols (skip Yahoo entirely)
+      if (bseOnlySymbols.length > 0) {
         console.log(
-          `[Holdings] Yahoo Finance failed, trying Google Finance for ${staleSymbols.length} symbols...`
+          `[Holdings] Fetching ${bseOnlySymbols.length} BSE-only symbols via Google Finance...`
         );
 
         try {
@@ -197,9 +148,7 @@ export const GET: APIRoute = async ({ request }) => {
 
           const pricesToCache: Array<{ symbol: string; price: number }> = [];
 
-          for (const yahoo of staleSymbols) {
-            if (freshPrices[yahoo]) continue; // Already have price
-
+          for (const yahoo of bseOnlySymbols) {
             try {
               const gfQuote = await getGoogleFinanceQuote(yahoo);
               if (gfQuote) {
@@ -209,14 +158,14 @@ export const GET: APIRoute = async ({ request }) => {
                   price: gfQuote.price,
                 });
                 console.log(
-                  `[Holdings] ✓ Google Finance: ${yahoo} = ₹${gfQuote.price.toFixed(2)}`
+                  `[Holdings] ✓ Google Finance (BSE-only): ${yahoo} = ₹${gfQuote.price.toFixed(2)}`
                 );
               }
               // Small delay to avoid rate limiting
               await new Promise((r) => setTimeout(r, 200));
             } catch (gfErr) {
               console.warn(
-                `[Holdings] Google Finance failed for ${yahoo}:`,
+                `[Holdings] Google Finance failed for BSE-only ${yahoo}:`,
                 gfErr instanceof Error ? gfErr.message : "Unknown error"
               );
             }
@@ -240,7 +189,134 @@ export const GET: APIRoute = async ({ request }) => {
               });
           }
         } catch (gfError) {
-          console.error("[Holdings] Google Finance fallback failed:", gfError);
+          console.error("[Holdings] Google Finance for BSE-only symbols failed:", gfError);
+        }
+      }
+
+      // Try Yahoo Finance for regular symbols only
+      if (regularSymbols.length > 0) {
+        try {
+          // Try NSE first with retry
+          const nseSymbols = regularSymbols.map((s) => `${s}.NS`);
+          const nseResults = await fetchQuoteWithRetry(nseSymbols);
+          const nseArray = Array.isArray(nseResults) ? nseResults : [nseResults];
+
+          const pricesToCache: Array<{ symbol: string; price: number }> = [];
+
+          for (const quote of nseArray) {
+            if (quote?.symbol && quote.regularMarketPrice) {
+              const yahoo = quote.symbol.replace(".NS", "");
+              freshPrices[yahoo] = quote.regularMarketPrice;
+              pricesToCache.push({
+                symbol: yahoo,
+                price: quote.regularMarketPrice,
+              });
+            }
+          }
+
+          // Try BSE for remaining
+          const stillMissing = regularSymbols.filter((s) => !freshPrices[s]);
+          if (stillMissing.length > 0) {
+            try {
+              const bseSymbols = stillMissing.map((s) => `${s}.BO`);
+              const bseResults = await fetchQuoteWithRetry(bseSymbols);
+              const bseArray = Array.isArray(bseResults)
+                ? bseResults
+                : [bseResults];
+
+              for (const quote of bseArray) {
+                if (quote?.symbol && quote.regularMarketPrice) {
+                  const yahoo = quote.symbol.replace(".BO", "");
+                  freshPrices[yahoo] = quote.regularMarketPrice;
+                  pricesToCache.push({
+                    symbol: yahoo,
+                    price: quote.regularMarketPrice,
+                  });
+                }
+              }
+            } catch (bseErr) {
+              console.error("BSE fetch error:", bseErr);
+            }
+          }
+
+          // Step 3: Update cache for Yahoo Finance results
+          for (const p of pricesToCache) {
+            await db
+              .insert(schema.priceCache)
+              .values({
+                symbol: p.symbol,
+                price: p.price,
+                updatedAt: new Date().toISOString(),
+              })
+              .onConflictDoUpdate({
+                target: schema.priceCache.symbol,
+                set: {
+                  price: p.price,
+                  updatedAt: new Date().toISOString(),
+                },
+              });
+          }
+        } catch (err) {
+          console.error("Yahoo Finance error:", err);
+
+          // Try Google Finance as fallback for regular symbols (BSE-only already handled)
+          const remainingSymbols = regularSymbols.filter((s) => !freshPrices[s]);
+          if (remainingSymbols.length > 0) {
+            console.log(
+              `[Holdings] Yahoo Finance failed, trying Google Finance for ${remainingSymbols.length} symbols...`
+            );
+
+            try {
+              const { getGoogleFinanceQuote } = await import(
+                "../../lib/scrapers/google-finance"
+              );
+
+              const pricesToCache: Array<{ symbol: string; price: number }> = [];
+
+              for (const yahoo of remainingSymbols) {
+                try {
+                  const gfQuote = await getGoogleFinanceQuote(yahoo);
+                  if (gfQuote) {
+                    freshPrices[yahoo] = gfQuote.price;
+                    pricesToCache.push({
+                      symbol: yahoo,
+                      price: gfQuote.price,
+                    });
+                    console.log(
+                      `[Holdings] ✓ Google Finance: ${yahoo} = ₹${gfQuote.price.toFixed(2)}`
+                    );
+                  }
+                  // Small delay to avoid rate limiting
+                  await new Promise((r) => setTimeout(r, 200));
+                } catch (gfErr) {
+                  console.warn(
+                    `[Holdings] Google Finance failed for ${yahoo}:`,
+                    gfErr instanceof Error ? gfErr.message : "Unknown error"
+                  );
+                }
+              }
+
+              // Update cache with Google Finance prices
+              for (const p of pricesToCache) {
+                await db
+                  .insert(schema.priceCache)
+                  .values({
+                    symbol: p.symbol,
+                    price: p.price,
+                    updatedAt: new Date().toISOString(),
+                  })
+                  .onConflictDoUpdate({
+                    target: schema.priceCache.symbol,
+                    set: {
+                      price: p.price,
+                      updatedAt: new Date().toISOString(),
+                    },
+                  });
+              }
+            } catch (gfError) {
+              console.error("[Holdings] Google Finance fallback failed:", gfError);
+            }
+          }
         }
 
         // TRY TECHNICAL DATA TABLE: Use recently refreshed technical data
