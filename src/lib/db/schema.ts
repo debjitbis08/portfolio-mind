@@ -826,6 +826,14 @@ export const potentialCatalysts = sqliteTable(
 
     validationLog: text("validation_log"), // Log of market checks performed
 
+    // Base Price Recording (captured at discovery time for accurate % change calculation)
+    basePrice: real("base_price"), // Stock price at discovery time
+    basePriceTicker: text("base_price_ticker"), // Which ticker was used for base price
+    basePriceRecordedAt: text("base_price_recorded_at"), // When the base price was captured
+    basePriceType: text("base_price_type", {
+      enum: ["discovery", "next_open", "pending_next_open"],
+    }), // How the price was obtained
+
     createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
     updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
     expiresAt: text("expires_at"), // Monitoring window expiry

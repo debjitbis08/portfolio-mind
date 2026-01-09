@@ -1,6 +1,13 @@
-import { potentialCatalysts, catalystSignals } from "../db/schema";
-import { db } from "../db";
-import { eq } from "drizzle-orm";
+import {
+  potentialCatalysts,
+  catalystSignals,
+  suggestions,
+  intradayTransactions,
+  settings,
+} from "../db/schema";
+import { db, getCatalystHoldings } from "../db";
+import * as schema from "../db/schema";
+import { eq, desc, and, gte } from "drizzle-orm";
 import { dispatchSignal } from "./signal-dispatcher";
 import {
   type CatalystAsset,
@@ -11,12 +18,116 @@ import { getEnabledAssets } from "./news-monitor";
 import { isIndianMarketOpen, getMarketStatusMessage } from "./market-hours";
 import { validateMultipleTickers } from "./market-validator";
 import { correctTickers } from "../symbol-matcher";
+import { CatalystGeminiService } from "./catalyst-gemini";
+import YahooFinance from "yahoo-finance2";
 
 interface WatchCriteria {
   metric: "PRICE" | "VOLUME";
   direction: "UP" | "DOWN";
   thresholdPercent: number;
   timeoutHours: number;
+}
+
+// Initialize Yahoo Finance client
+const yahooFinance = new YahooFinance();
+
+/**
+ * Capture base prices for catalysts marked as "pending_next_open".
+ * Should be called at market open to set the opening price as base.
+ */
+async function capturePendingBasePrices(): Promise<void> {
+  const pending = await db
+    .select()
+    .from(potentialCatalysts)
+    .where(
+      and(
+        eq(potentialCatalysts.status, "monitoring"),
+        eq(potentialCatalysts.basePriceType, "pending_next_open")
+      )
+    );
+
+  if (pending.length === 0) {
+    return;
+  }
+
+  console.log(
+    `   💰 Capturing base prices for ${pending.length} pending catalyst(s)...`
+  );
+
+  for (const catalyst of pending) {
+    const ticker = catalyst.primaryTicker;
+    if (!ticker) continue;
+
+    try {
+      const tickersToTry = [ticker];
+      if (ticker.endsWith(".NS")) {
+        tickersToTry.push(ticker.replace(".NS", ".BO"));
+      } else if (ticker.endsWith(".BO")) {
+        tickersToTry.push(ticker.replace(".BO", ".NS"));
+      }
+
+      let quote: any = null;
+      let finalTicker = ticker;
+
+      for (const tryTicker of tickersToTry) {
+        try {
+          quote = await yahooFinance.quote(tryTicker);
+          if (quote?.regularMarketPrice) {
+            finalTicker = tryTicker;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (quote?.regularMarketPrice) {
+        await db
+          .update(potentialCatalysts)
+          .set({
+            basePrice: quote.regularMarketPrice,
+            basePriceTicker: finalTicker,
+            basePriceRecordedAt: new Date().toISOString(),
+            basePriceType: "next_open",
+          })
+          .where(eq(potentialCatalysts.id, catalyst.id));
+
+        console.log(
+          `      ✅ ${ticker}: ₹${quote.regularMarketPrice.toFixed(
+            2
+          )} (market open)`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `      ❌ Error capturing base price for ${ticker}:`,
+        error
+      );
+    }
+  }
+}
+
+/**
+ * Get recent intraday trades for the catalyst portfolio.
+ * Used to provide context to AI for signal-to-suggestion conversion.
+ */
+async function getRecentIntradayTrades(days: number = 7): Promise<any[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+
+  const trades = await db
+    .select()
+    .from(intradayTransactions)
+    .where(
+      and(
+        eq(intradayTransactions.portfolioType, "CATALYST"),
+        gte(intradayTransactions.executedAt, cutoff.toISOString())
+      )
+    )
+    .orderBy(desc(intradayTransactions.executedAt))
+    .limit(20);
+
+  return trades;
 }
 
 /**
@@ -40,6 +151,9 @@ export async function runCatalystTracker() {
     await expireStalePotentialCatalysts();
     return;
   }
+
+  // Capture base prices for catalysts discovered after market close
+  await capturePendingBasePrices();
 
   await checkAndReevaluatePotentialCatalysts();
   // await checkActiveOutcomes(); // TODO: Implement outcome tracking later
@@ -135,22 +249,38 @@ async function checkAndReevaluatePotentialCatalysts() {
       }
 
       // Check market for EACH symbol using the market-validator utility
-      const expectedSentiment = criteria.direction === "UP" ? "BULLISH" : "BEARISH";
-      const marketResults = await validateMultipleTickers(symbols, expectedSentiment);
+      const expectedSentiment =
+        criteria.direction === "UP" ? "BULLISH" : "BEARISH";
+      const marketResults = await validateMultipleTickers(
+        symbols,
+        expectedSentiment
+      );
 
       let confirmed = false;
       let confirmingTicker = "";
       let marketDataSnapshot: any = null;
 
       // Track best performing ticker for reevaluation
-      let bestPerformance = { ticker: "", change: -Infinity, data: null as any };
+      let bestPerformance = {
+        ticker: "",
+        change: -Infinity,
+        data: null as any,
+      };
 
       // Check each symbol's market data against criteria
       for (const [ticker, marketData] of Array.from(marketResults.entries())) {
-        const priceChange = marketData.priceChangePercent;
+        // Calculate price change from BASE price (discovery time) instead of previous close
+        let priceChange = marketData.priceChangePercent;
+
+        if (item.basePrice && item.basePrice > 0) {
+          // Use base price from discovery time for accurate % change
+          priceChange =
+            ((marketData.currentPrice - item.basePrice) / item.basePrice) * 100;
+        }
 
         // Track performance for reevaluation
-        const performanceScore = criteria.direction === "UP" ? priceChange : -priceChange;
+        const performanceScore =
+          criteria.direction === "UP" ? priceChange : -priceChange;
         if (performanceScore > bestPerformance.change) {
           bestPerformance = { ticker, change: priceChange, data: marketData };
         }
@@ -160,6 +290,7 @@ async function checkAndReevaluatePotentialCatalysts() {
           time: new Date().toISOString(),
           ticker,
           price: marketData.currentPrice,
+          basePrice: item.basePrice || null,
           change: priceChange,
           met: false, // Will update if confirmed
         });
@@ -208,13 +339,20 @@ async function checkAndReevaluatePotentialCatalysts() {
 
       // REEVALUATION: Log current potential status
       if (!confirmed && bestPerformance.ticker) {
-        const progressPercent = criteria.direction === "UP"
-          ? (bestPerformance.change / criteria.thresholdPercent) * 100
-          : (-bestPerformance.change / criteria.thresholdPercent) * 100;
+        const progressPercent =
+          criteria.direction === "UP"
+            ? (bestPerformance.change / criteria.thresholdPercent) * 100
+            : (-bestPerformance.change / criteria.thresholdPercent) * 100;
 
         console.log(
-          `   🔄 [${item.id.slice(0, 6)}] Monitoring: ${bestPerformance.ticker} ${criteria.direction} ` +
-          `${bestPerformance.change.toFixed(2)}% (${progressPercent.toFixed(0)}% to target ${criteria.direction === "UP" ? "+" : "-"}${criteria.thresholdPercent}%)`
+          `   🔄 [${item.id.slice(0, 6)}] Monitoring: ${
+            bestPerformance.ticker
+          } ${criteria.direction} ` +
+            `${bestPerformance.change.toFixed(2)}% (${progressPercent.toFixed(
+              0
+            )}% to target ${criteria.direction === "UP" ? "+" : "-"}${
+              criteria.thresholdPercent
+            }%)`
         );
       }
 
@@ -238,7 +376,7 @@ async function checkAndReevaluatePotentialCatalysts() {
 
         if (!relatedAsset) {
           // Extract company name from ticker (remove .NS/.BO suffix)
-          const tickerBase = confirmingTicker.replace(/\.(NS|BO)$/, '');
+          const tickerBase = confirmingTicker.replace(/\.(NS|BO)$/, "");
 
           relatedAsset = {
             id: `temp-${confirmingTicker}`,
@@ -275,6 +413,83 @@ async function checkAndReevaluatePotentialCatalysts() {
         // Use default config but ensure we save to DB (not paper mode if intended for production)
         const config = { ...DEFAULT_CATALYST_CONFIG, paperMode: false };
         await dispatchSignal(signal, config);
+
+        // === SIGNAL → SUGGESTION CONVERSION ===
+        // Create a portfolio-aware suggestion using AI analysis
+        try {
+          // Fetch catalyst portfolio context
+          const [settingsRow] = await db.select().from(settings).limit(1);
+          const catalystFunds = settingsRow?.catalystFunds || 0;
+
+          // Get current catalyst holdings
+          const holdingsRaw = await getCatalystHoldings();
+          const catalystHoldings = holdingsRaw.map((h) => ({
+            symbol: h.symbol,
+            stock_name: h.stockName,
+            quantity: h.quantity,
+            avg_buy_price: h.avgBuyPrice,
+            current_price: 0, // Will be filled by market data if needed
+            returns_percent: 0,
+          }));
+
+          // Get recent intraday trades
+          const recentTrades = await getRecentIntradayTrades(7);
+
+          console.log(
+            `   🤖 Analyzing signal for suggestion (Cash: ₹${catalystFunds.toLocaleString(
+              "en-IN"
+            )})...`
+          );
+
+          const suggestion = await CatalystGeminiService.analyzeSignal(
+            {
+              ticker: confirmingTicker,
+              newsTitle: item.predictedImpact || signal.news.title,
+              sentiment: signal.analysis.sentiment,
+              impactType: signal.analysis.impactType,
+              confidence: signal.analysis.confidence,
+            },
+            {
+              availableFunds: catalystFunds,
+              currentHoldings: catalystHoldings,
+              recentTrades: recentTrades,
+            }
+          );
+
+          if (suggestion) {
+            await db.insert(suggestions).values({
+              symbol: suggestion.symbol,
+              stockName: relatedAsset?.keyword || confirmingTicker,
+              action: suggestion.action as
+                | "BUY"
+                | "SELL"
+                | "HOLD"
+                | "WATCH"
+                | "RAISE_CASH",
+              rationale: suggestion.rationale,
+              currentPrice: marketDataSnapshot?.currentPrice || 0,
+              targetPrice: suggestion.target_price || null,
+              confidence: suggestion.confidence,
+              quantity: suggestion.quantity || null,
+              allocationAmount: suggestion.allocation_amount || null,
+              portfolioType: "CATALYST",
+              status: "pending",
+            });
+
+            console.log(
+              `   📝 Created CATALYST suggestion: ${suggestion.action} ${suggestion.symbol}`
+            );
+          } else {
+            console.log(
+              `   ⏸️  No suggestion created (AI returned PASS: ${
+                catalystFunds === 0 ? "no cash" : "see reasoning"
+              })`
+            );
+          }
+        } catch (suggError) {
+          console.error(`   ⚠️  Failed to create suggestion:`, suggError);
+          // Signal is still created, just no suggestion
+        }
       } else {
         // Just update log
         await db

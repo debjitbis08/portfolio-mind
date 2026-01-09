@@ -485,8 +485,13 @@ Better to stay in cash than force a trade.`;
   }
 
   /**
-   * Quick analysis of a specific catalyst signal.
-   * Called when a new signal is generated to get AI's take.
+   * Portfolio-aware analysis of a confirmed catalyst signal.
+   * Called when a signal is confirmed to determine if we should create a suggestion.
+   *
+   * Takes into account:
+   * - Available catalyst cash
+   * - Current catalyst holdings (exposure check)
+   * - Recent trades (washout rule)
    */
   static async analyzeSignal(
     signal: {
@@ -496,7 +501,23 @@ Better to stay in cash than force a trade.`;
       impactType: string;
       confidence: number;
     },
-    availableFunds: number = 0
+    portfolioContext: {
+      availableFunds: number;
+      currentHoldings: Array<{
+        symbol: string;
+        stock_name: string;
+        quantity: number;
+        avg_buy_price: number;
+        current_price: number;
+        returns_percent: number;
+      }>;
+      recentTrades: Array<{
+        symbol: string;
+        type: string;
+        pricePerShare: number;
+        executedAt: string;
+      }>;
+    }
   ): Promise<CatalystSuggestion | null> {
     clearRequestCache();
 
@@ -511,34 +532,87 @@ Better to stay in cash than force a trade.`;
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    // Quick prompt for signal analysis
-    const prompt = `You are a swing trader evaluating a catalyst signal.
+    // Build holdings context
+    const holdingsText =
+      portfolioContext.currentHoldings.length > 0
+        ? portfolioContext.currentHoldings
+            .map(
+              (h) =>
+                `- ${h.symbol}: ${
+                  h.quantity
+                } shares @ ₹${h.avg_buy_price.toFixed(2)} (${
+                  h.returns_percent >= 0 ? "+" : ""
+                }${h.returns_percent.toFixed(1)}%)`
+            )
+            .join("\n")
+        : "No current positions";
 
-## Signal
+    // Build recent trades context
+    const recentTradesText =
+      portfolioContext.recentTrades.length > 0
+        ? portfolioContext.recentTrades
+            .slice(0, 5)
+            .map(
+              (t) =>
+                `- ${t.type} ${t.symbol} @ ₹${t.pricePerShare} (${new Date(
+                  t.executedAt
+                ).toLocaleDateString()})`
+            )
+            .join("\n")
+        : "No recent trades";
+
+    // Portfolio-aware prompt with safety protocols
+    const prompt = `You are a SHORT-TERM SWING TRADER evaluating a confirmed catalyst signal.
+Holding period: 1-28 days. This is the CATALYST portfolio, separate from long-term.
+
+## Confirmed Signal
 - **Stock**: ${signal.ticker}
 - **News**: ${signal.newsTitle}
 - **Sentiment**: ${signal.sentiment}
 - **Impact Type**: ${signal.impactType}
-- **Confidence**: ${signal.confidence}/10
+- **Signal Confidence**: ${signal.confidence}/10
 
-## Available Cash
-₹${availableFunds.toLocaleString("en-IN")}
+## Your Current CATALYST Portfolio
+${holdingsText}
+Total positions: ${portfolioContext.currentHoldings.length}
+
+## Available CATALYST Cash
+₹${portfolioContext.availableFunds.toLocaleString("en-IN")}
+
+## Recent Catalyst Trades (Last 7 Days)
+${recentTradesText}
+
+## Catalyst Portfolio Rules (Safety Protocols)
+1. **Dispassionate Execution**: You are the emotional buffer. Ignore hype; focus on volume and structure.
+2. **The 2:1 Rule**: Only recommend "BUY" if Reward:Risk ratio >= 2.0.
+3. **Concentration Guard**: Max 20% per position; Max 5 total positions.
+4. **Washout Rule**: Do not re-enter a stock within 3 days of an exit, even if a new catalyst appears.
+5. **Cash Check**: No cash = No buy. Don't recommend if funds are insufficient.
 
 ## Task
-Should we act on this signal? Give a quick recommendation.
+Evaluate if this signal warrants capital deployment.
 
 Return JSON:
 \`\`\`json
 {
   "action": "BUY" | "HOLD" | "PASS",
   "symbol": "${signal.ticker}",
-  "rationale": "Why or why not to act",
+  "rationale": "Why this fits or doesn't fit the catalyst portfolio NOW",
   "confidence": 7,
-  "target_price": 0,
-  "stop_loss": 0,
-  "allocation_amount": 0
+  "quantity": 50,
+  "allocation_amount": 15000,
+  "entry_price": 300.00,
+  "target_price": 330.00,
+  "stop_loss": 285.00,
+  "max_hold_days": 14
 }
-\`\`\``;
+\`\`\`
+
+Return action="PASS" if:
+- Portfolio is full (5 positions) or cash is insufficient
+- The news is already "priced in"
+- The Stop Loss is too wide to maintain a 2:1 ratio
+- Washout rule applies (recently exited this stock)`;
 
     try {
       const response = await ai.models.generateContent({
@@ -551,6 +625,9 @@ Return JSON:
       const parsed = JSON.parse(text);
 
       if (parsed.action === "PASS") {
+        console.log(
+          `[Catalyst Gemini] PASS: ${parsed.rationale || "No reason given"}`
+        );
         return null;
       }
 
@@ -559,9 +636,12 @@ Return JSON:
         action: parsed.action || "HOLD",
         confidence: parsed.confidence || 5,
         rationale: parsed.rationale || "Signal-based trade",
+        quantity: parsed.quantity,
+        allocation_amount: parsed.allocation_amount,
+        entry_price: parsed.entry_price,
         target_price: parsed.target_price,
         stop_loss: parsed.stop_loss,
-        allocation_amount: parsed.allocation_amount,
+        max_hold_days: parsed.max_hold_days,
       };
     } catch (error) {
       console.error("[Catalyst Gemini] Signal analysis failed:", error);

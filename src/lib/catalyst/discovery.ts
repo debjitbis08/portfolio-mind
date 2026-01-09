@@ -3,6 +3,8 @@ import { potentialCatalysts } from "../db/schema";
 import { db } from "../db";
 import { eq, and, gte, lt } from "drizzle-orm";
 import { GoogleGenAI } from "@google/genai";
+import YahooFinance from "yahoo-finance2";
+import { isIndianMarketOpen } from "./market-hours";
 
 // Standalone-compatible API key getter (uses process.env, works without Astro)
 function getApiKey(): string {
@@ -37,6 +39,92 @@ interface DiscoveryResult {
     affectedSymbols: string[];
     watchCriteria: any;
   }[];
+}
+
+// Initialize Yahoo Finance client
+const yahooFinance = new YahooFinance();
+
+/**
+ * Capture and record base price for a catalyst at discovery time.
+ * If market is closed, marks as pending for next-open capture.
+ */
+async function captureBasePrice(
+  catalystId: string,
+  ticker: string
+): Promise<void> {
+  const marketOpen = isIndianMarketOpen();
+
+  if (marketOpen) {
+    try {
+      // Try both NSE and BSE suffixes
+      const tickersToTry = [ticker];
+      if (ticker.endsWith(".NS")) {
+        tickersToTry.push(ticker.replace(".NS", ".BO"));
+      } else if (ticker.endsWith(".BO")) {
+        tickersToTry.push(ticker.replace(".BO", ".NS"));
+      }
+
+      let quote: any = null;
+      let finalTicker = ticker;
+
+      for (const tryTicker of tickersToTry) {
+        try {
+          quote = await yahooFinance.quote(tryTicker);
+          if (quote?.regularMarketPrice) {
+            finalTicker = tryTicker;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (quote?.regularMarketPrice) {
+        await db
+          .update(potentialCatalysts)
+          .set({
+            basePrice: quote.regularMarketPrice,
+            basePriceTicker: finalTicker,
+            basePriceRecordedAt: new Date().toISOString(),
+            basePriceType: "discovery",
+          })
+          .where(eq(potentialCatalysts.id, catalystId));
+
+        console.log(
+          `      💰 Base price recorded: ${finalTicker} @ ₹${quote.regularMarketPrice.toFixed(
+            2
+          )}`
+        );
+      } else {
+        console.warn(
+          `      ⚠️  Could not fetch base price for ${ticker}, marking as pending`
+        );
+        await db
+          .update(potentialCatalysts)
+          .set({ basePriceType: "pending_next_open" })
+          .where(eq(potentialCatalysts.id, catalystId));
+      }
+    } catch (error) {
+      console.error(
+        `      ❌ Error capturing base price for ${ticker}:`,
+        error
+      );
+      await db
+        .update(potentialCatalysts)
+        .set({ basePriceType: "pending_next_open" })
+        .where(eq(potentialCatalysts.id, catalystId));
+    }
+  } else {
+    // Market closed - mark for next-open capture
+    await db
+      .update(potentialCatalysts)
+      .set({ basePriceType: "pending_next_open" })
+      .where(eq(potentialCatalysts.id, catalystId));
+
+    console.log(
+      `      ⏰ Market closed - base price will be captured at next open for ${ticker}`
+    );
+  }
 }
 
 // -- AI Analysis --
@@ -775,6 +863,11 @@ export async function discoverCatalysts(
                 synthesis.sentiment
               }, confidence ${synthesis.confidence}/10)`
             );
+
+            // Capture base price if not already recorded
+            if (!newestCatalyst.basePrice) {
+              await captureBasePrice(newestCatalyst.id, ticker);
+            }
           }
         }
       }
