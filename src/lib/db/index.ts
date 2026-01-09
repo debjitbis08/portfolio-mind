@@ -177,12 +177,21 @@ export interface Holding {
 }
 
 /**
+ * Portfolio type for dual-portfolio architecture.
+ */
+export type PortfolioType = "LONGTERM" | "CATALYST";
+
+/**
  * Get current holdings computed from transactions.
  * Replaces the PostgreSQL "holdings" view.
  * Also merges intraday transactions (temporary manual trades) at read-time.
+ *
+ * @param portfolioType - Filter by portfolio type (default: LONGTERM)
  */
-export async function getHoldings(): Promise<Holding[]> {
-  // Get regular transactions
+export async function getHoldings(
+  portfolioType: PortfolioType = "LONGTERM"
+): Promise<Holding[]> {
+  // Get regular transactions filtered by portfolio type
   const result = await db
     .select({
       isin: schema.transactions.isin,
@@ -202,7 +211,12 @@ export async function getHoldings(): Promise<Holding[]> {
       ),
     })
     .from(schema.transactions)
-    .where(eq(schema.transactions.status, "Executed"))
+    .where(
+      and(
+        eq(schema.transactions.status, "Executed"),
+        eq(schema.transactions.portfolioType, portfolioType)
+      )
+    )
     .groupBy(schema.transactions.isin, schema.transactions.symbol);
 
   const holdings: Holding[] = result.map((row) => {
@@ -219,8 +233,11 @@ export async function getHoldings(): Promise<Holding[]> {
     };
   });
 
-  // Merge intraday transactions (temporary manual trades)
-  const intradayTxs = await db.select().from(schema.intradayTransactions);
+  // Merge intraday transactions (temporary manual trades) filtered by portfolio type
+  const intradayTxs = await db
+    .select()
+    .from(schema.intradayTransactions)
+    .where(eq(schema.intradayTransactions.portfolioType, portfolioType));
 
   for (const tx of intradayTxs) {
     const value = tx.quantity * tx.pricePerShare;
@@ -248,6 +265,14 @@ export async function getHoldings(): Promise<Holding[]> {
   }
 
   return holdings.filter((h) => h.quantity > 0);
+}
+
+/**
+ * Get holdings for the catalyst/short-term trading portfolio.
+ * Convenience wrapper for getHoldings("CATALYST").
+ */
+export async function getCatalystHoldings(): Promise<Holding[]> {
+  return getHoldings("CATALYST");
 }
 
 // ============================================================================

@@ -6,7 +6,13 @@
 
 import type { APIRoute } from "astro";
 import { requireAuth } from "../../lib/middleware/requireAuth";
-import { db, getHoldings, isPriceStale, schema } from "../../lib/db";
+import {
+  db,
+  getHoldings,
+  isPriceStale,
+  schema,
+  type PortfolioType,
+} from "../../lib/db";
 import { inArray } from "drizzle-orm";
 import YahooFinance from "yahoo-finance2";
 import {
@@ -66,10 +72,13 @@ export const GET: APIRoute = async ({ request }) => {
 
   const url = new URL(request.url);
   const requestedSymbol = url.searchParams.get("symbol")?.toUpperCase();
+  const portfolioParam = url.searchParams.get("portfolio")?.toUpperCase();
+  const portfolioType: PortfolioType =
+    portfolioParam === "CATALYST" ? "CATALYST" : "LONGTERM";
 
   try {
-    // Fetch holdings from computed view
-    let holdings = await getHoldings();
+    // Fetch holdings from computed view, filtered by portfolio type
+    let holdings = await getHoldings(portfolioType);
 
     if (requestedSymbol) {
       holdings = holdings.filter((h) => h.symbol === requestedSymbol);
@@ -129,7 +138,9 @@ export const GET: APIRoute = async ({ request }) => {
         // Detect BSE scrip codes (5-6 digit numeric codes)
         if (/^\d{5,6}$/.test(symbol)) {
           bseOnlySymbols.push(symbol);
-          console.log(`[Holdings] ${symbol} is BSE scrip code, using Google Finance only`);
+          console.log(
+            `[Holdings] ${symbol} is BSE scrip code, using Google Finance only`
+          );
         } else {
           regularSymbols.push(symbol);
         }
@@ -158,7 +169,9 @@ export const GET: APIRoute = async ({ request }) => {
                   price: gfQuote.price,
                 });
                 console.log(
-                  `[Holdings] ✓ Google Finance (BSE-only): ${yahoo} = ₹${gfQuote.price.toFixed(2)}`
+                  `[Holdings] ✓ Google Finance (BSE-only): ${yahoo} = ₹${gfQuote.price.toFixed(
+                    2
+                  )}`
                 );
               }
               // Small delay to avoid rate limiting
@@ -189,7 +202,10 @@ export const GET: APIRoute = async ({ request }) => {
               });
           }
         } catch (gfError) {
-          console.error("[Holdings] Google Finance for BSE-only symbols failed:", gfError);
+          console.error(
+            "[Holdings] Google Finance for BSE-only symbols failed:",
+            gfError
+          );
         }
       }
 
@@ -199,7 +215,9 @@ export const GET: APIRoute = async ({ request }) => {
           // Try NSE first with retry
           const nseSymbols = regularSymbols.map((s) => `${s}.NS`);
           const nseResults = await fetchQuoteWithRetry(nseSymbols);
-          const nseArray = Array.isArray(nseResults) ? nseResults : [nseResults];
+          const nseArray = Array.isArray(nseResults)
+            ? nseResults
+            : [nseResults];
 
           const pricesToCache: Array<{ symbol: string; price: number }> = [];
 
@@ -260,7 +278,9 @@ export const GET: APIRoute = async ({ request }) => {
           console.error("Yahoo Finance error:", err);
 
           // Try Google Finance as fallback for regular symbols (BSE-only already handled)
-          const remainingSymbols = regularSymbols.filter((s) => !freshPrices[s]);
+          const remainingSymbols = regularSymbols.filter(
+            (s) => !freshPrices[s]
+          );
           if (remainingSymbols.length > 0) {
             console.log(
               `[Holdings] Yahoo Finance failed, trying Google Finance for ${remainingSymbols.length} symbols...`
@@ -271,7 +291,8 @@ export const GET: APIRoute = async ({ request }) => {
                 "../../lib/scrapers/google-finance"
               );
 
-              const pricesToCache: Array<{ symbol: string; price: number }> = [];
+              const pricesToCache: Array<{ symbol: string; price: number }> =
+                [];
 
               for (const yahoo of remainingSymbols) {
                 try {
@@ -283,7 +304,9 @@ export const GET: APIRoute = async ({ request }) => {
                       price: gfQuote.price,
                     });
                     console.log(
-                      `[Holdings] ✓ Google Finance: ${yahoo} = ₹${gfQuote.price.toFixed(2)}`
+                      `[Holdings] ✓ Google Finance: ${yahoo} = ₹${gfQuote.price.toFixed(
+                        2
+                      )}`
                     );
                   }
                   // Small delay to avoid rate limiting
@@ -314,14 +337,19 @@ export const GET: APIRoute = async ({ request }) => {
                   });
               }
             } catch (gfError) {
-              console.error("[Holdings] Google Finance fallback failed:", gfError);
+              console.error(
+                "[Holdings] Google Finance fallback failed:",
+                gfError
+              );
             }
           }
         }
 
         // TRY TECHNICAL DATA TABLE: Use recently refreshed technical data
         console.log(
-          `[Holdings] Checking technical_data table for ${staleSymbols.filter((s) => !freshPrices[s]).length} remaining symbols...`
+          `[Holdings] Checking technical_data table for ${
+            staleSymbols.filter((s) => !freshPrices[s]).length
+          } remaining symbols...`
         );
         const technicalData = await db
           .select()
@@ -332,7 +360,9 @@ export const GET: APIRoute = async ({ request }) => {
           if (tech.currentPrice && !freshPrices[tech.symbol]) {
             freshPrices[tech.symbol] = tech.currentPrice;
             console.log(
-              `[Holdings] ✓ Using technical_data for ${tech.symbol}: ₹${tech.currentPrice.toFixed(2)} (updated: ${tech.updatedAt})`
+              `[Holdings] ✓ Using technical_data for ${
+                tech.symbol
+              }: ₹${tech.currentPrice.toFixed(2)} (updated: ${tech.updatedAt})`
             );
 
             // Also update price cache with this data

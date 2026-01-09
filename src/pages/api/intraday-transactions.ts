@@ -114,7 +114,7 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    // Create intraday transaction
+    // Create intraday transaction with same portfolio type as the suggestion
     const txResult = await db
       .insert(schema.intradayTransactions)
       .values({
@@ -123,6 +123,7 @@ export const POST: APIRoute = async ({ request }) => {
         type: type as "BUY" | "SELL",
         quantity: Number(quantity),
         pricePerShare: Number(pricePerShare),
+        portfolioType: suggestion[0].portfolioType || "LONGTERM",
       })
       .returning();
 

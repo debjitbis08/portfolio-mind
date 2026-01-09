@@ -25,6 +25,7 @@ export const GET: APIRoute = async ({ request }) => {
 
     // Defaults if no settings row exists
     const availableFunds = data?.availableFunds ?? 0;
+    const catalystFunds = data?.catalystFunds ?? 0;
     const riskProfile = data?.riskProfile ?? "balanced";
     const notificationEmail = data?.notificationEmail ?? null;
     const aiEnabled = data?.aiEnabled ?? true;
@@ -77,6 +78,7 @@ export const GET: APIRoute = async ({ request }) => {
       JSON.stringify({
         settings: {
           available_funds: availableFunds,
+          catalyst_funds: catalystFunds,
           risk_profile: riskProfile,
           notification_email: notificationEmail,
           ai_enabled: aiEnabled,
@@ -144,6 +146,9 @@ export const POST: APIRoute = async ({ request }) => {
     }
     if (body.ai_enabled !== undefined) {
       updates.aiEnabled = body.ai_enabled;
+    }
+    if (body.catalyst_funds !== undefined) {
+      updates.catalystFunds = body.catalyst_funds;
     }
 
     // Upsert settings (id=1 is always the single row)

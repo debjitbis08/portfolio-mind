@@ -33,12 +33,18 @@ export const transactions = sqliteTable(
     exchangeOrderId: text("exchange_order_id"),
     executedAt: text("executed_at").notNull(), // ISO string
     status: text("status").default("Executed"),
+    portfolioType: text("portfolio_type", {
+      enum: ["LONGTERM", "CATALYST"],
+    })
+      .notNull()
+      .default("LONGTERM"),
     createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
     updatedAt: text("updated_at").$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
     index("idx_transactions_isin").on(table.isin),
     index("idx_transactions_executed_at").on(table.executedAt),
+    index("idx_transactions_portfolio").on(table.portfolioType),
   ]
 );
 
@@ -117,6 +123,11 @@ export const suggestions = sqliteTable(
     supersededBy: text("superseded_by"), // ID of newer suggestion
     supersededReason: text("superseded_reason"),
     citations: text("citations"), // JSON array of citation objects
+    portfolioType: text("portfolio_type", {
+      enum: ["LONGTERM", "CATALYST"],
+    })
+      .notNull()
+      .default("LONGTERM"),
     createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
     expiresAt: text("expires_at").$defaultFn(() => {
       const d = new Date();
@@ -128,7 +139,10 @@ export const suggestions = sqliteTable(
       enum: ["VALUE", "MOMENTUM", "CORE", "SPECULATIVE", "INCOME"],
     }),
   },
-  (table) => [index("idx_suggestions_pending").on(table.status)]
+  (table) => [
+    index("idx_suggestions_pending").on(table.status),
+    index("idx_suggestions_portfolio").on(table.portfolioType),
+  ]
 );
 
 // ============================================================================
@@ -167,6 +181,7 @@ export const suggestionTransactions = sqliteTable(
 export const settings = sqliteTable("settings", {
   id: integer("id").primaryKey().default(1),
   availableFunds: real("available_funds").default(0),
+  catalystFunds: real("catalyst_funds").default(0), // Short-term catalyst portfolio cash
   riskProfile: text("risk_profile", {
     enum: ["conservative", "balanced", "aggressive"],
   }).default("balanced"),
@@ -615,10 +630,18 @@ export const intradayTransactions = sqliteTable(
     type: text("type", { enum: ["BUY", "SELL"] }).notNull(),
     quantity: integer("quantity").notNull(),
     pricePerShare: real("price_per_share").notNull(),
+    portfolioType: text("portfolio_type", {
+      enum: ["LONGTERM", "CATALYST"],
+    })
+      .notNull()
+      .default("LONGTERM"),
     executedAt: text("executed_at").$defaultFn(() => new Date().toISOString()),
     createdAt: text("created_at").$defaultFn(() => new Date().toISOString()),
   },
-  (table) => [index("idx_intraday_transactions_symbol").on(table.symbol)]
+  (table) => [
+    index("idx_intraday_transactions_symbol").on(table.symbol),
+    index("idx_intraday_transactions_portfolio").on(table.portfolioType),
+  ]
 );
 
 // ============================================================================
@@ -778,10 +801,19 @@ export const potentialCatalysts = sqliteTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
 
-    // AI Analysis
+    // AI Analysis (Pass 1)
     predictedImpact: text("predicted_impact").notNull(), // Summary of what might happen (with inline citations [1], [2], etc.)
     affectedSymbols: text("affected_symbols").notNull(), // JSON array of tickers
     watchCriteria: text("watch_criteria").notNull(), // JSON: { ticker: string, condition: "price_drop_2pct" | "volume_spike", ... }
+
+    // Pass 2: Trading Thesis Generation
+    primaryTicker: text("primary_ticker"), // Main ticker this catalyst applies to
+    shortTermThesis: text("short_term_thesis"), // AI-generated trading thesis for this symbol
+    sentiment: text("sentiment", {
+      enum: ["BULLISH", "BEARISH", "NEUTRAL"],
+    }), // Overall sentiment from thesis
+    potentialScore: integer("potential_score"), // -10 (very bearish) to +10 (very bullish)
+    confidence: integer("confidence"), // 1-10 confidence in thesis
 
     // Source Linkage & Citations
     relatedArticleIds: text("related_article_ids"), // JSON array of processed_articles.id
@@ -893,7 +925,9 @@ export const bseNseMapping = sqliteTable(
     nseSymbol: text("nse_symbol").notNull(), // NSE symbol: "RELIANCE"
     companyName: text("company_name").notNull(), // "Reliance Industries Ltd"
     isin: text("isin"), // ISIN for validation
-    lastVerifiedAt: text("last_verified_at").$defaultFn(() => new Date().toISOString()),
+    lastVerifiedAt: text("last_verified_at").$defaultFn(() =>
+      new Date().toISOString()
+    ),
     source: text("source").default("manual"), // "manual", "api", "scrape"
   },
   (table) => [

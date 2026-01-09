@@ -54,12 +54,14 @@ async function analyzeTickerNewsForDiscovery(
   const newsContext = news
     .map(
       (n, i) =>
-        `[${i + 1}] ${n.title} (${n.pubDate || "Unknown Date"}) - ${n.source} [URL: ${n.link}]`
+        `[${i + 1}] ${n.title} (${n.pubDate || "Unknown Date"}) - ${
+          n.source
+        } [URL: ${n.link}]`
     )
     .join("\n");
 
   // Filter existing catalysts that involve this ticker
-  const relevantExisting = existingCatalysts.filter(cat =>
+  const relevantExisting = existingCatalysts.filter((cat) =>
     cat.affectedSymbols.includes(ticker)
   );
 
@@ -189,91 +191,131 @@ ${existingContext}
 }
 
 /**
- * PASS 2: Synthesize all news for a ticker into a single comprehensive outcome.
- * This takes the Pass 1 analysis results and creates a unified view.
+ * PASS 2: Generate a SHORT-TERM TRADING THESIS for a ticker.
+ *
+ * This synthesizes:
+ * - Current news items (from this scan)
+ * - Past catalyst outcomes (from existing catalysts)
+ * - Pass 1 analysis results
+ *
+ * Output: A trading thesis with explicit +/- potential score for use by Pass 3.
  */
 async function synthesizeTickerOutcome(
   ticker: string,
   news: NewsItem[],
   existingCatalysts: Awaited<ReturnType<typeof getRelevantExistingCatalysts>>,
   pass1Analysis: any
-) {
+): Promise<{
+  shouldUpdate: boolean;
+  shortTermThesis: string;
+  sentiment: "BULLISH" | "BEARISH" | "NEUTRAL";
+  potentialScore: number; // -10 to +10
+  confidence: number; // 1-10
+  keyInsight: string;
+} | null> {
   const newsContext = news
     .map(
       (n, i) =>
-        `[${i + 1}] ${n.title} (${n.pubDate || "Unknown Date"}) - ${n.source} [URL: ${n.link}]`
+        `[${i + 1}] ${n.title} (${n.pubDate || "Unknown Date"}) - ${n.source}`
     )
     .join("\n");
 
   // Filter existing catalysts for this ticker
-  const relevantExisting = existingCatalysts.filter(cat =>
+  const relevantExisting = existingCatalysts.filter((cat) =>
     cat.affectedSymbols.includes(ticker)
   );
 
   const existingContext =
     relevantExisting.length > 0
       ? `
-## EXISTING CATALYSTS FOR ${ticker}
+## PAST CATALYSTS FOR ${ticker} (Last 48h)
+These are previous catalyst events - consider their outcomes when forming your thesis:
+
 ${relevantExisting
   .map(
     (cat, i) =>
-      `${i + 1}. [${cat.id}] ${cat.predictedImpact} (Created ${cat.ageHours}h ago)`
+      `${i + 1}. [${cat.id}] ${cat.predictedImpact}
+   Created: ${cat.ageHours}h ago | Status: Still monitoring`
   )
-  .join("\n")}
+  .join("\n\n")}
 `
-      : "";
+      : `\n## NO PAST CATALYSTS FOR ${ticker}\nThis is a fresh analysis with no prior context.\n`;
 
   const prompt = `
-You are performing COMPREHENSIVE SYNTHESIS for ticker: ${ticker}
+You are a SHORT-TERM SWING TRADER analyzing ${ticker} for a 1-28 day trading opportunity.
 
-PASS 1 RESULTS:
+## YOUR TASK - PASS 2: GENERATE TRADING THESIS
+
+Based on all available information, generate a TRADING THESIS that answers:
+1. **What is happening?** - Synthesize all news into ONE clear narrative
+2. **How will the stock move?** - BULLISH, BEARISH, or NEUTRAL over the next 1-4 weeks
+3. **How strong is the potential?** - Rate from -10 (strong bearish) to +10 (strong bullish)
+4. **How confident are you?** - Rate 1-10 based on source quality and consistency
+
+## PASS 1 ANALYSIS (Individual News Assessment)
 ${JSON.stringify(pass1Analysis, null, 2)}
 
-ALL NEWS FOR ${ticker}:
+## CURRENT NEWS FOR ${ticker}
 ${newsContext}
 
 ${existingContext}
 
-YOUR TASK - PASS 2 SYNTHESIS:
-Now that individual catalysts have been identified or updated in Pass 1, synthesize ALL information into ONE comprehensive assessment:
+## THESIS GENERATION RULES
 
-1. **Unified Narrative**: Combine all news into a single coherent story
-2. **Overall Sentiment**: What is the DOMINANT sentiment across all sources? (BULLISH/BEARISH/NEUTRAL)
-3. **Comprehensive Impact**: Merge all impact descriptions into one comprehensive statement
-4. **Confidence Level**: Based on multiple sources and consistency, rate 1-10
-5. **Key Insights**: What's the single most important takeaway?
+**Scoring Guide (potentialScore):**
+- +8 to +10: Major positive catalyst (big order wins, regulatory approval, sector tailwind)
+- +4 to +7: Moderate positive (good earnings, positive news cluster)
+- +1 to +3: Slight positive (minor news, might move 1-3%)
+- 0: Neutral (no clear direction)
+- -1 to -3: Slight negative (minor headwinds)
+- -4 to -7: Moderate negative (earnings miss, sector concerns)
+- -8 to -10: Major negative catalyst (regulatory action, fraud, major loss)
 
-SYNTHESIS RULES:
-- If multiple articles say the same thing → Increase confidence, merge details
-- If articles contradict → Note uncertainty, lower confidence
-- If articles show progression → Show timeline/evolution
-- Focus on WHAT MATTERS for trading decisions
+**Confidence Guide:**
+- 9-10: Multiple reliable sources confirm the same story
+- 7-8: Clear catalyst from credible source
+- 5-6: Single source or mixed signals
+- 3-4: Speculation or unverified claims
+- 1-2: Very uncertain / contradicting information
 
-🔖 CITATION REQUIREMENT:
-- Include inline citations [1], [2], [3] in your comprehensiveImpact text
-- Use the article numbers from ALL NEWS list above
-- Example: "₹500cr investment announced [1], boosting sector confidence [2][3]."
-- Cite all key facts and claims with their source article numbers
+**Thesis Writing:**
+- Write 2-3 sentences that a trader can act on
+- Include the KEY CATALYST driving the thesis
+- Mention timeframe expectations if applicable
+- Cite sources with [1], [2], etc.
 
-OUTPUT FORMAT (JSON):
+## OUTPUT FORMAT (JSON)
 {
-  "shouldUpdate": true/false,
-  "comprehensiveImpact": "Single unified description with citations [1]. Additional detail [2].",
-  "dominantSentiment": "BULLISH/BEARISH/NEUTRAL",
+  "shouldUpdate": true,
+  "shortTermThesis": "2-3 sentence trading thesis with citations [1][2]. What to expect and why.",
+  "sentiment": "BULLISH" | "BEARISH" | "NEUTRAL",
+  "potentialScore": 7,
   "confidence": 8,
-  "keyInsight": "One-line summary of what traders need to know",
-  "reasoning": "Why this synthesis makes sense given all the information",
-  "citedArticles": [1, 2, 3]
+  "keyInsight": "One-line actionable takeaway for traders"
 }
 
-Set shouldUpdate=true only if synthesis provides meaningful new insight beyond Pass 1.
+Set shouldUpdate=false ONLY if there's genuinely nothing interesting for traders.
 Return ONLY valid JSON.
 `;
 
   const text = await callGeminiForDiscovery(prompt);
 
   try {
-    return JSON.parse(text);
+    const result = JSON.parse(text);
+    // Validate and clamp values
+    return {
+      shouldUpdate: Boolean(result.shouldUpdate),
+      shortTermThesis: result.shortTermThesis || "",
+      sentiment: ["BULLISH", "BEARISH", "NEUTRAL"].includes(result.sentiment)
+        ? result.sentiment
+        : "NEUTRAL",
+      potentialScore: Math.max(
+        -10,
+        Math.min(10, Number(result.potentialScore) || 0)
+      ),
+      confidence: Math.max(1, Math.min(10, Number(result.confidence) || 5)),
+      keyInsight: result.keyInsight || "",
+    };
   } catch (e) {
     console.error(
       `Failed to parse synthesis response for ${ticker}:`,
@@ -306,7 +348,10 @@ function groupNewsByTicker(
 
       // 1. Check keyword (company name) - PRIMARY MATCHING METHOD
       if (asset.keyword) {
-        const keywordPattern = new RegExp(`\\b${asset.keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        const keywordPattern = new RegExp(
+          `\\b${asset.keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+          "i"
+        );
         if (keywordPattern.test(text)) {
           matched = true;
         }
@@ -314,12 +359,12 @@ function groupNewsByTicker(
 
       // 2. Check ticker symbol (fallback)
       if (!matched && asset.ticker) {
-        const base = asset.ticker.replace(/\.(NS|BO)$/, '');
+        const base = asset.ticker.replace(/\.(NS|BO)$/, "");
         const tickerPatterns = [
-          new RegExp(`\\b${base}\\b`, 'i'),
-          new RegExp(`\\b${asset.ticker}\\b`, 'i'),
+          new RegExp(`\\b${base}\\b`, "i"),
+          new RegExp(`\\b${asset.ticker}\\b`, "i"),
         ];
-        if (tickerPatterns.some(p => p.test(text))) {
+        if (tickerPatterns.some((p) => p.test(text))) {
           matched = true;
         }
       }
@@ -327,8 +372,8 @@ function groupNewsByTicker(
       // 3. Check related tickers
       if (!matched && asset.relatedTickers) {
         for (const relatedTicker of asset.relatedTickers) {
-          const base = relatedTicker.replace(/\.(NS|BO)$/, '');
-          const relatedPattern = new RegExp(`\\b${base}\\b`, 'i');
+          const base = relatedTicker.replace(/\.(NS|BO)$/, "");
+          const relatedPattern = new RegExp(`\\b${base}\\b`, "i");
           if (relatedPattern.test(text)) {
             matched = true;
             break;
@@ -376,7 +421,9 @@ export async function discoverCatalysts(
     console.log(`   🗑️  Expired ${expired} old catalyst(s) (>48h)`);
   }
 
-  console.log(`\n🔍 Running Ticker-Grouped AI Discovery on ${newsItems.length} articles...`);
+  console.log(
+    `\n🔍 Running Ticker-Grouped AI Discovery on ${newsItems.length} articles...`
+  );
 
   // Fetch existing catalysts for LLM context (deduplication & updates)
   const existingCatalysts = await getRelevantExistingCatalysts();
@@ -400,15 +447,25 @@ export async function discoverCatalysts(
 
   // FALLBACK: If no ticker groups found, use batch analysis on all news
   if (tickerGroups.size === 0) {
-    console.log(`   ⚠️  No ticker matches found. Falling back to batch analysis...`);
+    console.log(
+      `   ⚠️  No ticker matches found. Falling back to batch analysis...`
+    );
 
     // Chunk news into batches of 10 for analysis
     const chunkSize = 10;
     for (let i = 0; i < newsItems.length; i += chunkSize) {
       const batch = newsItems.slice(i, i + chunkSize);
-      console.log(`\n   🔍 Analyzing batch ${Math.floor(i/chunkSize) + 1} (${batch.length} articles)...`);
+      console.log(
+        `\n   🔍 Analyzing batch ${Math.floor(i / chunkSize) + 1} (${
+          batch.length
+        } articles)...`
+      );
 
-      const analysis = await analyzeBatchForDiscovery(batch, assets, existingCatalysts);
+      const analysis = await analyzeBatchForDiscovery(
+        batch,
+        assets,
+        existingCatalysts
+      );
 
       // Process updates
       if (analysis.updates && analysis.updates.length > 0) {
@@ -416,8 +473,8 @@ export async function discoverCatalysts(
           const idStr = String(update.existingCatalystId).toLowerCase();
           if (!/^[a-f0-9]{8}/.test(idStr)) continue;
 
-          const matchingCatalyst = existingCatalysts.find((c) =>
-            c.id === idStr || c.fullId.startsWith(idStr)
+          const matchingCatalyst = existingCatalysts.find(
+            (c) => c.id === idStr || c.fullId.startsWith(idStr)
           );
 
           if (!matchingCatalyst) continue;
@@ -438,7 +495,9 @@ export async function discoverCatalysts(
 
       // Process new catalysts
       if (analysis.newCatalysts && analysis.newCatalysts.length > 0) {
-        console.log(`      ✨ Found ${analysis.newCatalysts.length} catalyst(s)`);
+        console.log(
+          `      ✨ Found ${analysis.newCatalysts.length} catalyst(s)`
+        );
 
         for (const cat of analysis.newCatalysts) {
           // Build citation metadata from batch
@@ -472,7 +531,9 @@ export async function discoverCatalysts(
 
     // CONSOLIDATION PASS: Ensure ONE entry per ticker symbol
     if (results.newCatalysts > 0) {
-      console.log(`\n   🔄 Running consolidation pass to ensure ONE entry per ticker...`);
+      console.log(
+        `\n   🔄 Running consolidation pass to ensure ONE entry per ticker...`
+      );
 
       // Fetch all monitoring catalysts (including newly created ones)
       const allCatalysts = await db
@@ -484,7 +545,9 @@ export async function discoverCatalysts(
       const tickerCatalystMap = new Map<string, typeof allCatalysts>();
 
       for (const catalyst of allCatalysts) {
-        const symbols = JSON.parse(catalyst.affectedSymbols || "[]") as string[];
+        const symbols = JSON.parse(
+          catalyst.affectedSymbols || "[]"
+        ) as string[];
         for (const ticker of symbols) {
           if (!tickerCatalystMap.has(ticker)) {
             tickerCatalystMap.set(ticker, []);
@@ -500,8 +563,10 @@ export async function discoverCatalysts(
         if (catalysts.length <= 1) continue;
 
         // Sort by creation time (newest first)
-        const sortedCatalysts = catalysts.sort((a, b) =>
-          new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        const sortedCatalysts = catalysts.sort(
+          (a, b) =>
+            new Date(b.createdAt || 0).getTime() -
+            new Date(a.createdAt || 0).getTime()
         );
 
         const newestCatalyst = sortedCatalysts[0];
@@ -515,11 +580,17 @@ export async function discoverCatalysts(
           consolidatedCount++;
         }
 
-        console.log(`      🗑️  ${ticker}: Consolidated ${catalysts.length} entries → 1 [${newestCatalyst.id.slice(0, 8)}]`);
+        console.log(
+          `      🗑️  ${ticker}: Consolidated ${
+            catalysts.length
+          } entries → 1 [${newestCatalyst.id.slice(0, 8)}]`
+        );
       }
 
       if (consolidatedCount > 0) {
-        console.log(`   ✅ Removed ${consolidatedCount} duplicate catalyst(s) to ensure ONE per ticker`);
+        console.log(
+          `   ✅ Removed ${consolidatedCount} duplicate catalyst(s) to ensure ONE per ticker`
+        );
       }
     }
 
@@ -536,7 +607,9 @@ export async function discoverCatalysts(
   // 2. Two-pass analysis for each ticker (when grouping succeeded)
   for (const [ticker, tickerNews] of tickerGroups.entries()) {
     try {
-      console.log(`\n   🔍 Pass 1: Analyzing ${ticker} (${tickerNews.length} articles)...`);
+      console.log(
+        `\n   🔍 Pass 1: Analyzing ${ticker} (${tickerNews.length} articles)...`
+      );
 
       // PASS 1: Individual article analysis
       const analysis = await analyzeTickerNewsForDiscovery(
@@ -551,16 +624,20 @@ export async function discoverCatalysts(
         for (const update of analysis.updates) {
           const idStr = String(update.existingCatalystId).toLowerCase();
           if (!/^[a-f0-9]{8}/.test(idStr)) {
-            console.error(`      ⚠️  Invalid catalyst ID format: ${update.existingCatalystId}`);
+            console.error(
+              `      ⚠️  Invalid catalyst ID format: ${update.existingCatalystId}`
+            );
             continue;
           }
 
-          const matchingCatalyst = existingCatalysts.find((c) =>
-            c.id === idStr || c.fullId.startsWith(idStr)
+          const matchingCatalyst = existingCatalysts.find(
+            (c) => c.id === idStr || c.fullId.startsWith(idStr)
           );
 
           if (!matchingCatalyst) {
-            console.error(`      ⚠️  Cannot find catalyst ${update.existingCatalystId} for update`);
+            console.error(
+              `      ⚠️  Cannot find catalyst ${update.existingCatalystId} for update`
+            );
             continue;
           }
 
@@ -580,7 +657,9 @@ export async function discoverCatalysts(
 
       // Process NEW catalysts from Pass 1
       if (analysis.newCatalysts && analysis.newCatalysts.length > 0) {
-        console.log(`      ✨ Pass 1 found ${analysis.newCatalysts.length} catalyst(s)`);
+        console.log(
+          `      ✨ Pass 1 found ${analysis.newCatalysts.length} catalyst(s)`
+        );
 
         for (const cat of analysis.newCatalysts) {
           // Build citation metadata from news array
@@ -612,8 +691,13 @@ export async function discoverCatalysts(
       }
 
       // PASS 2: Comprehensive synthesis - create ONE unified entry per ticker
-      if (tickerNews.length > 1 || (analysis.updates && analysis.updates.length > 0)) {
-        console.log(`   🔍 Pass 2: Synthesizing comprehensive view for ${ticker}...`);
+      if (
+        tickerNews.length > 1 ||
+        (analysis.updates && analysis.updates.length > 0)
+      ) {
+        console.log(
+          `   🔍 Pass 2: Synthesizing comprehensive view for ${ticker}...`
+        );
 
         const synthesis = await synthesizeTickerOutcome(
           ticker,
@@ -629,25 +713,35 @@ export async function discoverCatalysts(
             .from(potentialCatalysts)
             .where(eq(potentialCatalysts.status, "monitoring"));
 
-          const relevantCatalysts = allTickerCatalysts.filter(c => {
+          const relevantCatalysts = allTickerCatalysts.filter((c) => {
             const symbols = JSON.parse(c.affectedSymbols || "[]") as string[];
             return symbols.includes(ticker);
           });
 
           if (relevantCatalysts.length > 0) {
             // Sort by creation time (newest first)
-            const sortedCatalysts = relevantCatalysts.sort((a, b) =>
-              new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+            const sortedCatalysts = relevantCatalysts.sort(
+              (a, b) =>
+                new Date(b.createdAt || 0).getTime() -
+                new Date(a.createdAt || 0).getTime()
             );
 
             const newestCatalyst = sortedCatalysts[0];
             const olderCatalysts = sortedCatalysts.slice(1);
 
-            // Update the newest catalyst with comprehensive synthesis
+            // Update the newest catalyst with Pass 2 trading thesis
             await db
               .update(potentialCatalysts)
               .set({
-                predictedImpact: synthesis.comprehensiveImpact,
+                // Pass 2 thesis fields
+                primaryTicker: ticker,
+                shortTermThesis: synthesis.shortTermThesis,
+                sentiment: synthesis.sentiment,
+                potentialScore: synthesis.potentialScore,
+                confidence: synthesis.confidence,
+                // Also update predictedImpact with keyInsight for backwards compatibility
+                predictedImpact:
+                  synthesis.keyInsight || newestCatalyst.predictedImpact,
                 updatedAt: new Date().toISOString(),
               })
               .where(eq(potentialCatalysts.id, newestCatalyst.id));
@@ -659,10 +753,28 @@ export async function discoverCatalysts(
                   .delete(potentialCatalysts)
                   .where(eq(potentialCatalysts.id, oldCat.id));
               }
-              console.log(`      🗑️  Removed ${olderCatalysts.length} older catalyst(s) for ${ticker}`);
+              console.log(
+                `      🗑️  Removed ${olderCatalysts.length} older catalyst(s) for ${ticker}`
+              );
             }
 
-            console.log(`      ✅ Pass 2: ONE comprehensive entry for ${ticker} [${newestCatalyst.id.slice(0, 8)}]`);
+            // Log the thesis result
+            const scoreEmoji =
+              synthesis.potentialScore > 0
+                ? "📈"
+                : synthesis.potentialScore < 0
+                ? "📉"
+                : "➖";
+            console.log(
+              `      ✅ Pass 2: ${ticker} [${newestCatalyst.id.slice(
+                0,
+                8
+              )}] ${scoreEmoji} Score: ${
+                synthesis.potentialScore > 0 ? "+" : ""
+              }${synthesis.potentialScore} (${
+                synthesis.sentiment
+              }, confidence ${synthesis.confidence}/10)`
+            );
           }
         }
       }
@@ -765,7 +877,9 @@ async function analyzeBatchForDiscovery(
   const newsContext = news
     .map(
       (n, i) =>
-        `[${i + 1}] ${n.title} (${n.pubDate || "Unknown Date"}) - ${n.source} [URL: ${n.link}]`
+        `[${i + 1}] ${n.title} (${n.pubDate || "Unknown Date"}) - ${
+          n.source
+        } [URL: ${n.link}]`
     )
     .join("\n");
 

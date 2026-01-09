@@ -134,6 +134,20 @@
       "when": 1767963834951,
       "tag": "0018_sweet_lady_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1767966317116,
+      "tag": "0020_magenta_vampiro",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1767971208809,
+      "tag": "0020_careless_titanium_man",
+      "breakpoints": true
     }
   ]
 }
