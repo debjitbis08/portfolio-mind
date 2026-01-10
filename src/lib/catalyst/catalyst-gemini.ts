@@ -52,6 +52,14 @@ export interface CatalystSuggestion {
   catalyst_type?: string; // News, earnings, sector rotation, etc.
   technical_score?: number;
   citations?: Citation[];
+
+  // New catalyst-specific fields
+  risk_reward_ratio?: number; // Calculated RRR (target - entry) / (entry - stop)
+  trailing_stop?: boolean; // Dynamic vs fixed stop
+  entry_trigger?: string; // e.g., "Break of HOD", "Limit at VWAP"
+  exit_condition?: string; // Event-based exit, e.g., "Exit Jan 14 pre-open"
+  volatility_at_entry?: number; // ATR for stop calibration review
+  catalyst_id?: string; // Links to potentialCatalysts.id
 }
 
 export interface CatalystToolCallProgress {
@@ -392,6 +400,12 @@ Return suggestions as JSON:
     "catalyst_type": "NEWS" | "EARNINGS" | "TECHNICAL" | "SECTOR",
     "technical_score": 75,
     "allocation_amount": 25000,
+    "risk_reward_ratio": 2.0,
+    "trailing_stop": false,
+    "entry_trigger": "Break of HOD with volume",
+    "exit_condition": "Exit before earnings or if catalyst invalidated",
+    "volatility_at_entry": 3.5,
+    "catalyst_id": "uuid-if-linked-to-potential-catalyst",
     "citations": [
       { "type": "news", "title": "Headline driving trade", "source": "ET" },
       { "type": "technicals", "title": "RSI 40, near SMA50 support" }
@@ -403,9 +417,15 @@ Return suggestions as JSON:
 **Field Definitions:**
 - \`entry_price\`: Current/target entry price
 - \`target_price\`: Where to take profits
-- \`stop_loss\`: Exit point if trade goes wrong
+- \`stop_loss\`: Exit point if trade goes wrong (REQUIRED)
 - \`max_hold_days\`: Maximum days to hold before re-evaluation
 - \`catalyst_type\`: What's driving this trade
+- \`risk_reward_ratio\`: (target - entry) / (entry - stop), should be >= 2.0
+- \`trailing_stop\`: true for dynamic stop, false for fixed
+- \`entry_trigger\`: Specific condition to enter (e.g., "Break of HOD", "Limit at VWAP")
+- \`exit_condition\`: Event-based exit criteria (e.g., "Exit Jan 14 pre-open")
+- \`volatility_at_entry\`: ATR value for position sizing context
+- \`catalyst_id\`: Link to potential catalyst ID if applicable
 
 If no HIGH CONVICTION setups → return empty array: []
 Better to stay in cash than force a trade.`;
@@ -475,6 +495,13 @@ Better to stay in cash than force a trade.`;
             catalyst_type: s.catalyst_type,
             technical_score: s.technical_score,
             citations,
+            // New catalyst-specific fields
+            risk_reward_ratio: s.risk_reward_ratio,
+            trailing_stop: s.trailing_stop,
+            entry_trigger: s.entry_trigger,
+            exit_condition: s.exit_condition,
+            volatility_at_entry: s.volatility_at_entry,
+            catalyst_id: s.catalyst_id,
           } as CatalystSuggestion;
         });
     } catch (error) {

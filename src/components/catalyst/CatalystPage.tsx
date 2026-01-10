@@ -136,6 +136,15 @@ type CatalystSuggestion = {
   currentPrice: number | null;
   status: "pending" | "approved" | "rejected" | "expired";
   createdAt: string;
+  // Catalyst-specific fields
+  stopLoss: number | null;
+  maxHoldDays: number | null;
+  riskRewardRatio: number | null;
+  trailingStop: boolean | null;
+  entryTrigger: string | null;
+  exitCondition: string | null;
+  volatilityAtEntry: number | null;
+  catalystId: string | null;
 };
 
 export default function CatalystPage() {
@@ -1198,6 +1207,76 @@ export default function CatalystPage() {
 
                         <p class="text-text mb-3">{suggestion.rationale}</p>
 
+                        {/* Catalyst-specific risk management display */}
+                        <div class="grid grid-cols-2 gap-3 mb-3">
+                          <Show when={suggestion.stopLoss}>
+                            <div class="bg-surface1 rounded-lg p-2">
+                              <div class="text-xs text-subtext1">Stop Loss</div>
+                              <div class="text-sm font-medium text-red">
+                                ₹{suggestion.stopLoss?.toLocaleString("en-IN")}
+                              </div>
+                            </div>
+                          </Show>
+                          <Show when={suggestion.riskRewardRatio}>
+                            <div class="bg-surface1 rounded-lg p-2">
+                              <div class="text-xs text-subtext1">
+                                Risk:Reward
+                              </div>
+                              <div
+                                class={`text-sm font-medium ${
+                                  (suggestion.riskRewardRatio || 0) >= 2.0
+                                    ? "text-green"
+                                    : "text-yellow"
+                                }`}
+                              >
+                                1:{suggestion.riskRewardRatio?.toFixed(1)}
+                              </div>
+                            </div>
+                          </Show>
+                          <Show when={suggestion.maxHoldDays}>
+                            <div class="bg-surface1 rounded-lg p-2">
+                              <div class="text-xs text-subtext1">Max Hold</div>
+                              <div class="text-sm font-medium text-text">
+                                {suggestion.maxHoldDays} days
+                              </div>
+                            </div>
+                          </Show>
+                          <Show when={suggestion.trailingStop !== null}>
+                            <div class="bg-surface1 rounded-lg p-2">
+                              <div class="text-xs text-subtext1">
+                                Stop Type
+                              </div>
+                              <div class="text-sm font-medium text-text">
+                                {suggestion.trailingStop
+                                  ? "Trailing"
+                                  : "Fixed"}
+                              </div>
+                            </div>
+                          </Show>
+                        </div>
+
+                        {/* Entry and exit conditions */}
+                        <Show when={suggestion.entryTrigger}>
+                          <div class="mb-2 p-2 bg-blue/10 rounded-lg border-l-2 border-blue">
+                            <div class="text-xs text-blue font-medium mb-1">
+                              Entry Trigger
+                            </div>
+                            <div class="text-sm text-text">
+                              {suggestion.entryTrigger}
+                            </div>
+                          </div>
+                        </Show>
+                        <Show when={suggestion.exitCondition}>
+                          <div class="mb-2 p-2 bg-yellow/10 rounded-lg border-l-2 border-yellow">
+                            <div class="text-xs text-yellow font-medium mb-1">
+                              Exit Condition
+                            </div>
+                            <div class="text-sm text-text">
+                              {suggestion.exitCondition}
+                            </div>
+                          </div>
+                        </Show>
+
                         <div class="flex flex-wrap gap-4 text-sm text-subtext0">
                           <Show when={suggestion.targetPrice}>
                             <span>
@@ -1212,6 +1291,9 @@ export default function CatalystPage() {
                                 "en-IN"
                               )}
                             </span>
+                          </Show>
+                          <Show when={suggestion.volatilityAtEntry}>
+                            <span>ATR: {suggestion.volatilityAtEntry}</span>
                           </Show>
                           <span>
                             Created: {formatDate(suggestion.createdAt)}

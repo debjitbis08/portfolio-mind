@@ -77,6 +77,15 @@ export const GET: APIRoute = async ({ request }) => {
           createdAt: s.createdAt,
           expiresAt: s.expiresAt,
           reviewedAt: s.reviewedAt,
+          // Catalyst-specific fields
+          stopLoss: s.stopLoss,
+          maxHoldDays: s.maxHoldDays,
+          riskRewardRatio: s.riskRewardRatio,
+          trailingStop: s.trailingStop,
+          entryTrigger: s.entryTrigger,
+          exitCondition: s.exitCondition,
+          volatilityAtEntry: s.volatilityAtEntry,
+          catalystId: s.catalystId,
         })),
         count: suggestions.length,
       }),
@@ -226,6 +235,15 @@ export const POST: APIRoute = async ({ request }) => {
           citations: suggestion.citations
             ? JSON.stringify(suggestion.citations)
             : null,
+          // Catalyst-specific fields
+          stopLoss: suggestion.stop_loss,
+          maxHoldDays: suggestion.max_hold_days,
+          riskRewardRatio: suggestion.risk_reward_ratio,
+          trailingStop: suggestion.trailing_stop ? 1 : 0, // Convert boolean to SQLite integer
+          entryTrigger: suggestion.entry_trigger,
+          exitCondition: suggestion.exit_condition,
+          volatilityAtEntry: suggestion.volatility_at_entry,
+          catalystId: suggestion.catalyst_id,
         })
         .returning();
 

@@ -138,6 +138,26 @@ export const suggestions = sqliteTable(
     portfolioRole: text("portfolio_role", {
       enum: ["VALUE", "MOMENTUM", "CORE", "SPECULATIVE", "INCOME"],
     }),
+
+    // ========== Catalyst-Specific Fields (for short-term trading) ==========
+
+    // Catalyst Linkage
+    catalystId: text("catalyst_id").references(() => potentialCatalysts.id, {
+      onDelete: "set null",
+    }), // Links to triggering news event
+
+    // Risk Management
+    stopLoss: real("stop_loss"), // "Thesis invalidated" price point
+    riskRewardRatio: real("risk_reward_ratio"), // Filter setups (e.g., RRR > 2.0)
+    trailingStop: integer("trailing_stop", { mode: "boolean" }), // Dynamic vs fixed stop
+
+    // Execution Strategy
+    entryTrigger: text("entry_trigger"), // e.g., "Break of HOD", "Limit at VWAP"
+    exitCondition: text("exit_condition"), // Event-based exit, e.g., "Exit Jan 14 pre-open"
+    volatilityAtEntry: real("volatility_at_entry"), // ATR for stop calibration review
+
+    // Time-Sensitivity
+    maxHoldDays: integer("max_hold_days"), // If no move in N days, invalidate thesis
   },
   (table) => [
     index("idx_suggestions_pending").on(table.status),
