@@ -38,6 +38,13 @@ export interface NewsIntel {
     date: string;
     url: string;
   }[];
+  articles: Array<{
+    title: string;
+    source: string;
+    date: string;
+    url: string;
+    content: string;
+  }>;
   fetched_at: string;
 }
 
@@ -565,11 +572,13 @@ export async function getNewsIntel(
   }
 
   // Try to fetch content for articles until we hit target or exhaust sources
-  const articlesWithContent: {
+  const articlesWithContent: Array<{
     title: string;
     source: string;
+    date: string;
+    url: string;
     content: string;
-  }[] = [];
+  }> = [];
 
   for (const item of news.items) {
     // Stop once we have enough readable articles
@@ -583,6 +592,8 @@ export async function getNewsIntel(
       articlesWithContent.push({
         title: item.title,
         source: item.source,
+        date: item.pubDate,
+        url: item.link,
         content,
       });
     }
@@ -599,7 +610,14 @@ export async function getNewsIntel(
   let summary: { sentiment_summary: string; key_events: string[] };
 
   if (articlesWithContent.length > 0) {
-    summary = await summarizeWithLLM(query, articlesWithContent);
+    summary = await summarizeWithLLM(
+      query,
+      articlesWithContent.map((item) => ({
+        title: item.title,
+        source: item.source,
+        content: item.content,
+      }))
+    );
   } else {
     // Fallback: summarize just headlines
     summary = await summarizeWithLLM(
@@ -624,6 +642,7 @@ export async function getNewsIntel(
       date: item.pubDate,
       url: item.link,
     })),
+    articles: articlesWithContent,
     fetched_at: news.fetched_at,
   };
 }

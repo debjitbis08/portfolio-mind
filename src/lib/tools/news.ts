@@ -89,6 +89,13 @@ async function getStockNews(
           source: h.source,
           date: h.date,
         })),
+        articles: intel.articles.map((article) => ({
+          title: article.title,
+          source: article.source,
+          date: article.date,
+          url: article.url,
+          content: article.content,
+        })),
         instructions:
           "Use this to understand recent events affecting the stock. Key events may indicate catalysts or risks. Sentiment shows the current market narrative - but remember, market sentiment can be wrong.",
       },

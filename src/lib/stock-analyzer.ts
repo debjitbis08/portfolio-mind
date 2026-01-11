@@ -13,8 +13,11 @@ import { db, getHoldings, schema } from "./db";
 import { eq, inArray, or, desc } from "drizzle-orm";
 import { getStockNews } from "./tools/news";
 import { getStockThesis } from "./tools/valuepickr";
-import { getTechnicals } from "./tools/technicals";
-import { isSymbolAffected } from "./symbol-matcher";
+import { isSymbolAffected, normalizeSymbol } from "./symbol-matcher";
+import { fetchAnnouncementsForSymbol } from "./catalyst/watchlist-tracker";
+import { fetchArticleContent } from "./scrapers/article-content";
+import { getTechnicalData, checkWaitZone } from "./technical-indicators";
+import { getSymbolMappings } from "./mappings";
 
 // ============================================================================
 // Types
@@ -47,6 +50,29 @@ const TTL = {
   NEWS: 0, // Always fresh
   TECHNICALS: 0, // Always fresh
 };
+
+const TECHNICAL_REFRESH_MS = 5 * 60 * 1000; // Align with data-freshness TTL (5 minutes)
+
+function getMissingRequiredInputs(
+  financials: { data?: { financials?: unknown[]; latestConcall?: unknown } | null },
+  technicals: { data?: unknown | null }
+): string[] {
+  const missing: string[] = [];
+
+  if (!financials?.data?.financials || financials.data.financials.length === 0) {
+    missing.push("financials");
+  }
+
+  if (!financials?.data?.latestConcall) {
+    missing.push("concalls");
+  }
+
+  if (!technicals?.data) {
+    missing.push("technicals");
+  }
+
+  return missing;
+}
 
 // ============================================================================
 // Data Gathering Functions
@@ -157,9 +183,81 @@ async function getNewsData(
       sentimentSummary: data.sentiment_summary,
       keyEvents: data.key_events,
       headlines: data.headlines,
+      articles: Array.isArray(data.articles) ? data.articles : [],
     },
     fetchedAt: new Date().toISOString(),
   };
+}
+
+async function getFilingsData(
+  symbol: string
+): Promise<{
+  data: {
+    announcements: Array<{
+      title: string;
+      source: string;
+      date: string;
+      url: string;
+      content: string | null;
+      contentType: "html" | "pdf" | null;
+    }>;
+  } | null;
+  fetchedAt: string;
+}> {
+  const cleanSymbol = normalizeSymbol(symbol);
+  const fetchedAt = new Date().toISOString();
+
+  try {
+    const announcements = await fetchAnnouncementsForSymbol(cleanSymbol, 72);
+    if (!announcements || announcements.length === 0) {
+      return { data: null, fetchedAt };
+    }
+
+    const maxAnnouncements = 6;
+    const enriched: Array<{
+      title: string;
+      source: string;
+      date: string;
+      url: string;
+      content: string | null;
+      contentType: "html" | "pdf" | null;
+    }> = [];
+
+    for (const announcement of announcements.slice(0, maxAnnouncements)) {
+      const contentResult = await fetchArticleContent(
+        announcement.link,
+        announcement.source,
+        {
+          geminiApiKey: GEMINI_API_KEY,
+          maxChars: 2400,
+        }
+      );
+
+      enriched.push({
+        title: announcement.title,
+        source: announcement.source,
+        date: announcement.pubDate,
+        url: contentResult?.sourceUrl || announcement.link,
+        content: contentResult?.content || null,
+        contentType: contentResult?.contentType || null,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    return {
+      data: {
+        announcements: enriched,
+      },
+      fetchedAt,
+    };
+  } catch (error) {
+    console.error(
+      `[StockAnalyzer] Error fetching filings for ${symbol}:`,
+      error
+    );
+    return { data: null, fetchedAt };
+  }
 }
 
 async function getValuePickrData(
@@ -233,14 +331,100 @@ async function getValuePickrData(
 async function getTechnicalsData(symbol: string): Promise<{
   data: any | null;
 }> {
-  const result = await getTechnicals({ symbol });
+  const mappings = await getSymbolMappings();
+  const mappedSymbol = mappings[symbol] || symbol;
+  const now = Date.now();
 
-  if (!result.success) {
+  const existing = await db
+    .select()
+    .from(schema.technicalData)
+    .where(eq(schema.technicalData.symbol, mappedSymbol))
+    .limit(1);
+
+  const existingUpdatedAt = existing[0]?.updatedAt;
+  const existingAgeMs = existingUpdatedAt
+    ? now - new Date(existingUpdatedAt).getTime()
+    : null;
+
+  const shouldRefresh =
+    !existingUpdatedAt ||
+    existingAgeMs === null ||
+    existingAgeMs > TECHNICAL_REFRESH_MS;
+
+  if (shouldRefresh) {
+    console.log(
+      `[StockAnalyzer] Refreshing technicals for ${mappedSymbol} (stale or missing)`
+    );
+    const data = await getTechnicalData(mappedSymbol);
+    if (!data) {
+      return { data: null };
+    }
+
+    await db
+      .insert(schema.technicalData)
+      .values({
+        symbol: mappedSymbol,
+        currentPrice: data.currentPrice,
+        rsi14: data.rsi14,
+        sma50: data.sma50,
+        sma200: data.sma200,
+        priceVsSma50: data.priceVsSma50,
+        priceVsSma200: data.priceVsSma200,
+        updatedAt: new Date().toISOString(),
+      })
+      .onConflictDoUpdate({
+        target: schema.technicalData.symbol,
+        set: {
+          currentPrice: data.currentPrice,
+          rsi14: data.rsi14,
+          sma50: data.sma50,
+          sma200: data.sma200,
+          priceVsSma50: data.priceVsSma50,
+          priceVsSma200: data.priceVsSma200,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+    return {
+      data: {
+        symbol: data.symbol,
+        current_price: data.currentPrice,
+        rsi_14: data.rsi14,
+        sma_50: data.sma50,
+        sma_200: data.sma200,
+        price_vs_sma50_pct: data.priceVsSma50,
+        price_vs_sma200_pct: data.priceVsSma200,
+        zone_status: data.zoneStatus,
+        is_wait_zone: data.isWaitZone,
+        wait_reasons: data.waitReasons,
+      },
+    };
+  }
+
+  if (existing.length === 0) {
     return { data: null };
   }
 
+  const waitCheck = checkWaitZone({
+    currentPrice: existing[0].currentPrice ?? null,
+    rsi14: existing[0].rsi14 ?? null,
+    sma50: existing[0].sma50 ?? null,
+    sma200: existing[0].sma200 ?? null,
+  });
+
   return {
-    data: result.data,
+    data: {
+      symbol: mappedSymbol,
+      current_price: existing[0].currentPrice,
+      rsi_14: existing[0].rsi14,
+      sma_50: existing[0].sma50,
+      sma_200: existing[0].sma200,
+      price_vs_sma50_pct: existing[0].priceVsSma50,
+      price_vs_sma200_pct: existing[0].priceVsSma200,
+      zone_status: waitCheck.zoneStatus,
+      is_wait_zone: waitCheck.isWaitZone,
+      wait_reasons: waitCheck.reasons,
+    },
   };
 }
 
@@ -350,7 +534,8 @@ async function runLLMAnalysis(
   news: any,
   valuepickr: any,
   technicals: any,
-  catalysts: any
+  catalysts: any,
+  filings: any
 ): Promise<StockAnalysisResult> {
   // Dynamic import to bypass build issues
   let GoogleGenAI: any;
@@ -373,7 +558,8 @@ async function runLLMAnalysis(
     news,
     valuepickr,
     technicals,
-    catalysts
+    catalysts,
+    filings
   );
 
   try {
@@ -422,7 +608,8 @@ function buildAnalysisPrompt(
   news: any,
   valuepickr: any,
   technicals: any,
-  catalysts: any
+  catalysts: any,
+  filings: any
 ): string {
   let prompt = `You are evaluating a single stock for investment potential.
 
@@ -510,6 +697,20 @@ ${
     .join("\n") || "No headlines"
 }
 
+### Readable Articles (Full Content Excerpts)
+${
+  news.data.articles?.length
+    ? news.data.articles
+        .map(
+          (article: any, idx: number) =>
+            `${idx + 1}. ${article.title} (${article.source}${
+              article.date ? `, ${article.date}` : ""
+            })\nURL: ${article.url}\n${article.content}`
+        )
+        .join("\n\n---\n\n")
+    : "No full-article content could be retrieved."
+}
+
 `;
   } else {
     prompt += `## NEWS (as of ${newsDate}): No recent news found\n\n`;
@@ -535,6 +736,28 @@ ${
 `;
   } else {
     prompt += `## Technicals: Not available\n\n`;
+  }
+
+  // Official Filings / Exchange Announcements
+  if (filings?.data?.announcements?.length) {
+    const filingsDate = filings.fetchedAt
+      ? new Date(filings.fetchedAt).toLocaleString()
+      : new Date().toLocaleString();
+    prompt += `## 🧾 OFFICIAL EXCHANGE ANNOUNCEMENTS (BSE) (Fetched: ${filingsDate})
+These are primary-source corporate filings and should be treated as HIGH TRUST.
+
+${filings.data.announcements
+  .map((item: any, idx: number) => {
+    const contentBlock = item.content ? `\n${item.content}` : "\n(No content extracted)";
+    return `${idx + 1}. ${item.title} (${item.source}${
+      item.date ? `, ${item.date}` : ""
+    })\nURL: ${item.url}${contentBlock}`;
+  })
+  .join("\n\n---\n\n")}
+
+`;
+  } else {
+    prompt += `## 🧾 OFFICIAL EXCHANGE ANNOUNCEMENTS: None found in last 72h\n\n`;
   }
 
   // Catalyst Section (NEW)
@@ -615,6 +838,7 @@ You are evaluating this stock for a LONG-TERM VALUE INVESTOR who:
 **OPINIONS (Treat with Skepticism):**
 - ValuePickr forum posts = retail investor opinions, NOT facts
 - News headlines = often sensationalized, verify from primary sources
+- Broker/analyst ratings and target prices = OPINION, not verified data
 - Reddit/social media = sentiment indicator only, high noise
 
 **KEY RULE**: Never treat an anonymous internet opinion as investment thesis.
@@ -650,6 +874,14 @@ A cigarette excise duty hike is THESIS-TESTING, not THESIS-BREAKING:
 3. **Apply contrarian lens** - Does panic selling create opportunity for patient investors?
 4. **Assess timing** - RSI < 30 + thesis intact = contrarian buy zone
 5. **Score** the opportunity (0-100)
+6. **Evidence discipline** - Separate FACTS from OPINIONS and document conflicts.
+
+## Evidence Checklist (Mandatory)
+- FACTS (from filings, financials, concalls): list 3-5 concrete facts.
+- OPINIONS (broker/analyst/media views): list and label as OPINION.
+- CONTRADICTIONS: note any conflicts between sources.
+- MISSING DATA: list 2 specific items that would improve conviction.
+- Catalyst linkage: connect any catalyst signals to facts (not opinions).
 
 ## Output Format (JSON only, no markdown):
 
@@ -659,7 +891,14 @@ A cigarette excise duty hike is THESIS-TESTING, not THESIS-BREAKING:
   "risks_summary": "Key risks in 1-2 sentences",
   "timing_signal": "accumulate" | "wait" | "avoid",
   "news_alert": true | false,
-  "news_alert_reason": "Only if news_alert is true - explain: is this THESIS-BREAKING or THESIS-TESTING?"
+  "news_alert_reason": "Only if news_alert is true - explain: is this THESIS-BREAKING or THESIS-TESTING?",
+  "evidence_checklist": {
+    "facts": ["..."],
+    "opinions": ["..."],
+    "contradictions": ["..."],
+    "missing_data": ["..."],
+    "catalyst_links": ["..."]
+  }
 }
 
 ## Scoring Guide (Long-Term Perspective):
@@ -701,14 +940,23 @@ export async function analyzeStock(
     // Gather all data
     console.log(`[StockAnalyzer] Gathering data for ${symbol}...`);
 
-    const [vrs, financials, news, valuepickr, technicals, catalysts] = await Promise.all([
+    const [vrs, financials, news, valuepickr, technicals, catalysts, filings] = await Promise.all([
       getVRSData(symbol),
       getFinancialsData(symbol),
       getNewsData(symbol, stockName),
       getValuePickrData(symbol, stockName),
       getTechnicalsData(symbol),
       getCatalystData(symbol),
+      getFilingsData(symbol),
     ]);
+
+    const missingInputs = getMissingRequiredInputs(financials, technicals);
+    if (missingInputs.length > 0) {
+      console.warn(
+        `[StockAnalyzer] Skipping ${symbol}: missing required inputs (${missingInputs.join(", ")})`
+      );
+      return null;
+    }
 
     console.log(`[StockAnalyzer] Running LLM analysis for ${symbol}...`);
 
@@ -721,7 +969,8 @@ export async function analyzeStock(
       news,
       valuepickr,
       technicals,
-      catalysts
+      catalysts,
+      filings
     );
 
     // Calculate expiry (7 days from now)
