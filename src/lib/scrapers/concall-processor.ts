@@ -33,6 +33,17 @@ export interface DocumentLink {
   quarter?: string;
 }
 
+const MAX_MANUAL_TEXT_CHARS = 20000;
+
+function normalizeManualText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function truncateManualText(text: string): string {
+  if (text.length <= MAX_MANUAL_TEXT_CHARS) return text;
+  return text.slice(0, MAX_MANUAL_TEXT_CHARS);
+}
+
 // ============================================================================
 // Screener Document Scraper
 // ============================================================================
@@ -346,6 +357,62 @@ export async function processConcallPDF(
     quarter,
     callDate: parsed.callDate || new Date().toISOString().split("T")[0],
     sourceUrl: pdfUrl,
+    managementGuidance: parsed.managementGuidance || "",
+    keyNumbers: parsed.keyNumbers || {},
+    positives: parsed.positives || [],
+    risksDiscussed: parsed.risksDiscussed || [],
+    analystConcerns: parsed.analystConcerns || [],
+  };
+}
+
+/**
+ * Process manually provided concall text using Gemini.
+ */
+export async function processConcallText(
+  transcript: string,
+  quarter: string,
+  callDateOverride?: string | null
+): Promise<ConcallHighlights> {
+  if (!GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY not configured");
+  }
+
+  const normalized = normalizeManualText(transcript);
+  if (normalized.length < 200) {
+    throw new Error("Manual concall text is too short to analyze");
+  }
+
+  const trimmed = truncateManualText(normalized);
+  const genai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+
+  const result = await genai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: CONCALL_EXTRACTION_PROMPT },
+          { text: `SOURCE TEXT (Manual Input):\n${trimmed}` },
+        ],
+      },
+    ],
+  });
+
+  const responseText = result.text || "";
+  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error("Failed to extract JSON from Gemini response");
+  }
+
+  const parsed = JSON.parse(jsonMatch[0]);
+
+  return {
+    quarter,
+    callDate:
+      callDateOverride ||
+      parsed.callDate ||
+      new Date().toISOString().split("T")[0],
+    sourceUrl: "manual-input",
     managementGuidance: parsed.managementGuidance || "",
     keyNumbers: parsed.keyNumbers || {},
     positives: parsed.positives || [],

@@ -8,7 +8,9 @@
 
 import { registerToolExecutor, type ToolResponse } from "./registry";
 import { getNewsIntel } from "../scrapers/news";
-import { getHoldings } from "../db";
+import { db, getHoldings, schema } from "../db";
+import { eq } from "drizzle-orm";
+import { getSymbolMappings } from "../mappings";
 
 interface GetStockNewsArgs {
   symbol: string;
@@ -20,9 +22,42 @@ interface GetStockNewsArgs {
  */
 async function getCompanyName(symbol: string): Promise<string | null> {
   try {
+    const mappings = await getSymbolMappings();
+    const mappedSymbol = mappings[symbol] || symbol;
+
     const holdings = await getHoldings();
-    const holding = holdings.find((h) => h.symbol === symbol);
-    return holding?.stockName || null;
+    const holding = holdings.find((h) => h.symbol === mappedSymbol);
+    if (holding?.stockName) {
+      return holding.stockName;
+    }
+
+    const watchlist = await db
+      .select({ name: schema.watchlist.name })
+      .from(schema.watchlist)
+      .where(eq(schema.watchlist.symbol, mappedSymbol))
+      .limit(1);
+
+    if (watchlist[0]?.name) {
+      return watchlist[0].name;
+    }
+
+    const isBseCode = /^\d{5,6}$/.test(mappedSymbol);
+    const mapping = await db
+      .select({ companyName: schema.bseNseMapping.companyName })
+      .from(schema.bseNseMapping)
+      .where(
+        eq(
+          isBseCode ? schema.bseNseMapping.bseScripCode : schema.bseNseMapping.nseSymbol,
+          mappedSymbol
+        )
+      )
+      .limit(1);
+
+    if (mapping[0]?.companyName) {
+      return mapping[0].companyName;
+    }
+
+    return null;
   } catch (error) {
     console.warn(`[News Tool] Failed to lookup company name for ${symbol}:`, error);
     return null;

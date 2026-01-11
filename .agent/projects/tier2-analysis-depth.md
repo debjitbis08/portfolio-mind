@@ -21,6 +21,10 @@
 - Added explicit downgrade of broker/analyst opinion notes in prompt.
 - Added BSE corporate announcements fetch and content extraction for Tier 2 evidence.
 - Tier 2 now refreshes technical indicators if cached data is older than 5 minutes before analysis.
+- Added company knowledge base (user research) and Reddit sentiment sections to Tier 2 prompt.
+- News tool now resolves company name from holdings, watchlist, or BSE mapping before searching.
+- Added manual concall text input in earnings UI and API support for text-based processing.
+- Tier 2 deep analysis now warns about missing/stale financials, concalls, and technicals and requires user confirmation before proceeding.
 
 ## Next Steps
 - Validate new Tier 2 prompt output shape (evidence_checklist included in JSON).

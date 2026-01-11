@@ -7,7 +7,7 @@
 
 import type { APIRoute } from "astro";
 import { db, schema, getHoldings } from "../../../lib/db";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   analyzeInterestingStocks,
   analyzeStock,
@@ -25,17 +25,207 @@ const activeJobs = new Map<
     completedAt?: string;
     error?: string;
     freshnessWarnings?: string[];
+    dataWarnings?: Array<{
+      symbol: string;
+      missing: string[];
+      stale: string[];
+      details: Record<string, string | null>;
+    }>;
   }
 >();
+
+const FINANCIALS_STALE_DAYS = 30;
+const CONCALL_STALE_DAYS = 180;
+const TECHNICALS_STALE_MINUTES = 5;
+
+function formatAgeDays(ageDays: number): string {
+  return `${Math.round(ageDays)}d`;
+}
+
+function formatAgeMinutes(ageMinutes: number): string {
+  if (ageMinutes < 60) return `${Math.round(ageMinutes)}m`;
+  const hours = ageMinutes / 60;
+  return `${Math.round(hours)}h`;
+}
 
 // POST - Start deep analysis job
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json().catch(() => ({}));
-    const { symbols, forceRefresh } = body as {
+    const { symbols, forceRefresh, confirmMissingData } = body as {
       symbols?: string[];
       forceRefresh?: boolean;
+      confirmMissingData?: boolean;
     };
+
+    const resolveSymbols = async (): Promise<string[]> => {
+      if (symbols && symbols.length > 0) {
+        return symbols;
+      }
+
+      const interesting = await db
+        .select({ symbol: schema.watchlist.symbol })
+        .from(schema.watchlist)
+        .where(eq(schema.watchlist.interesting, true));
+
+      const delistedStocks = await db
+        .select({ symbol: schema.watchlist.symbol })
+        .from(schema.watchlist)
+        .where(eq(schema.watchlist.delisted, true));
+      const delistedSymbols = new Set(delistedStocks.map((s) => s.symbol));
+
+      const holdings = await getHoldings();
+
+      const interestingSymbols = new Set(
+        interesting.map((s) => s.symbol).filter((s) => !delistedSymbols.has(s))
+      );
+      const holdingSymbols = new Set(
+        holdings.map((h) => h.symbol).filter((s) => !delistedSymbols.has(s))
+      );
+      return Array.from(new Set([...interestingSymbols, ...holdingSymbols]));
+    };
+
+    const getMissingDataWarnings = async (
+      targetSymbols: string[]
+    ): Promise<
+      Array<{
+        symbol: string;
+        missing: string[];
+        stale: string[];
+        details: Record<string, string | null>;
+      }>
+    > => {
+      if (targetSymbols.length === 0) return [];
+
+      const now = Date.now();
+
+      const financialRows = await db
+        .select({
+          symbol: schema.companyFinancials.symbol,
+          updatedAt: schema.companyFinancials.updatedAt,
+        })
+        .from(schema.companyFinancials)
+        .where(inArray(schema.companyFinancials.symbol, targetSymbols));
+
+      const financialsMap = new Map<string, string>();
+      for (const row of financialRows) {
+        if (!row.updatedAt) continue;
+        const current = financialsMap.get(row.symbol);
+        if (!current || new Date(row.updatedAt) > new Date(current)) {
+          financialsMap.set(row.symbol, row.updatedAt);
+        }
+      }
+
+      const concallRows = await db
+        .select({
+          symbol: schema.concallHighlights.symbol,
+          callDate: schema.concallHighlights.callDate,
+          createdAt: schema.concallHighlights.createdAt,
+        })
+        .from(schema.concallHighlights)
+        .where(inArray(schema.concallHighlights.symbol, targetSymbols));
+
+      const concallMap = new Map<string, string>();
+      for (const row of concallRows) {
+        const candidate = row.callDate || row.createdAt;
+        if (!candidate) continue;
+        const current = concallMap.get(row.symbol);
+        if (!current || new Date(candidate) > new Date(current)) {
+          concallMap.set(row.symbol, candidate);
+        }
+      }
+
+      const technicalRows = await db
+        .select({
+          symbol: schema.technicalData.symbol,
+          updatedAt: schema.technicalData.updatedAt,
+        })
+        .from(schema.technicalData)
+        .where(inArray(schema.technicalData.symbol, targetSymbols));
+
+      const technicalMap = new Map(
+        technicalRows.map((row) => [row.symbol, row.updatedAt || null])
+      );
+
+      const issues: Array<{
+        symbol: string;
+        missing: string[];
+        stale: string[];
+        details: Record<string, string | null>;
+      }> = [];
+
+      for (const symbol of targetSymbols) {
+        const missing: string[] = [];
+        const stale: string[] = [];
+        const details: Record<string, string | null> = {
+          financials_updated_at: financialsMap.get(symbol) || null,
+          concall_updated_at: concallMap.get(symbol) || null,
+          technicals_updated_at: technicalMap.get(symbol) || null,
+        };
+
+        const financialsUpdated = financialsMap.get(symbol) || null;
+        if (!financialsUpdated) {
+          missing.push("Financials missing");
+        } else {
+          const ageDays =
+            (now - new Date(financialsUpdated).getTime()) /
+            (1000 * 60 * 60 * 24);
+          if (ageDays > FINANCIALS_STALE_DAYS) {
+            stale.push(
+              `Financials stale (${formatAgeDays(ageDays)} old, > ${FINANCIALS_STALE_DAYS}d)`
+            );
+          }
+        }
+
+        const concallUpdated = concallMap.get(symbol) || null;
+        if (!concallUpdated) {
+          missing.push("Concall highlights missing");
+        } else {
+          const ageDays =
+            (now - new Date(concallUpdated).getTime()) /
+            (1000 * 60 * 60 * 24);
+          if (ageDays > CONCALL_STALE_DAYS) {
+            stale.push(
+              `Concall highlights old (${formatAgeDays(ageDays)} old, > ${CONCALL_STALE_DAYS}d)`
+            );
+          }
+        }
+
+        const technicalUpdated = technicalMap.get(symbol) || null;
+        if (!technicalUpdated) {
+          missing.push("Technicals missing");
+        } else {
+          const ageMinutes =
+            (now - new Date(technicalUpdated).getTime()) / (1000 * 60);
+          if (ageMinutes > TECHNICALS_STALE_MINUTES) {
+            stale.push(
+              `Technicals stale (${formatAgeMinutes(ageMinutes)} old, > ${TECHNICALS_STALE_MINUTES}m)`
+            );
+          }
+        }
+
+        if (missing.length > 0 || stale.length > 0) {
+          issues.push({ symbol, missing, stale, details });
+        }
+      }
+
+      return issues;
+    };
+
+    const targetSymbols = await resolveSymbols();
+    const dataWarnings = await getMissingDataWarnings(targetSymbols);
+
+    if (dataWarnings.length > 0 && !confirmMissingData) {
+      return new Response(
+        JSON.stringify({
+          needsConfirmation: true,
+          issues: dataWarnings,
+          message:
+            "Tier 2 analysis has missing or stale inputs. Review issues and re-run with confirmMissingData=true to proceed.",
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     // Generate job ID
     const jobId = crypto.randomUUID();
@@ -51,6 +241,7 @@ export const POST: APIRoute = async ({ request }) => {
         results: [],
       },
       startedAt: new Date().toISOString(),
+      dataWarnings: dataWarnings.length > 0 ? dataWarnings : undefined,
     });
 
     // Start analysis in background (non-blocking)
@@ -85,7 +276,9 @@ export const POST: APIRoute = async ({ request }) => {
             job.progress.current = symbol;
 
             try {
-              const result = await analyzeStock(symbol);
+              const result = await analyzeStock(symbol, {
+                allowMissingInputs: Boolean(confirmMissingData),
+              });
               job.progress.results.push({
                 symbol,
                 score: result?.opportunityScore ?? null,
@@ -111,9 +304,14 @@ export const POST: APIRoute = async ({ request }) => {
           }
         } else {
           // Analyze all interesting stocks
-          const progress = await analyzeInterestingStocks((p) => {
-            job.progress = p;
-          });
+          const progress = await analyzeInterestingStocks(
+            (p) => {
+              job.progress = p;
+            },
+            2000,
+            true,
+            Boolean(confirmMissingData)
+          );
           job.progress = progress;
         }
 
@@ -128,34 +326,7 @@ export const POST: APIRoute = async ({ request }) => {
     })();
 
     // Get estimated time
-    let estimatedStocks = 0;
-    if (symbols && symbols.length > 0) {
-      estimatedStocks = symbols.length;
-    } else {
-      // Count must match analyzeInterestingStocks() logic exactly
-      const interesting = await db
-        .select({ symbol: schema.watchlist.symbol })
-        .from(schema.watchlist)
-        .where(eq(schema.watchlist.interesting, true));
-
-      const delistedStocks = await db
-        .select({ symbol: schema.watchlist.symbol })
-        .from(schema.watchlist)
-        .where(eq(schema.watchlist.delisted, true));
-      const delistedSymbols = new Set(delistedStocks.map((s) => s.symbol));
-
-      // Use getHoldings() to get actual holdings with qty > 0
-      const holdings = await getHoldings();
-
-      const interestingSymbols = new Set(
-        interesting.map((s) => s.symbol).filter((s) => !delistedSymbols.has(s))
-      );
-      const holdingSymbols = new Set(
-        holdings.map((h) => h.symbol).filter((s) => !delistedSymbols.has(s))
-      );
-      const allSymbols = new Set([...interestingSymbols, ...holdingSymbols]);
-      estimatedStocks = allSymbols.size;
-    }
+    const estimatedStocks = targetSymbols.length;
 
     // ~30 seconds per stock (data gathering + LLM)
     const estimatedMinutes = Math.ceil((estimatedStocks * 30) / 60);
@@ -165,6 +336,7 @@ export const POST: APIRoute = async ({ request }) => {
         jobId,
         stocksQueued: estimatedStocks,
         estimatedMinutes,
+        dataWarnings: dataWarnings.length > 0 ? dataWarnings : undefined,
         message: `Deep analysis started for ${estimatedStocks} stocks. Poll /api/analysis/deep/${jobId} for progress.`,
       }),
       {

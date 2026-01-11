@@ -107,11 +107,41 @@ export default function PortfolioFreshnessCard() {
     setRefreshing(true);
 
     try {
-      const response = await fetch("/api/analysis/deep", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols }),
-      });
+      const buildWarningMessage = (issues: any[]) => {
+        return issues
+          .map((issue) => {
+            const parts: string[] = [];
+            if (issue.missing?.length) {
+              parts.push(`Missing: ${issue.missing.join(", ")}`);
+            }
+            if (issue.stale?.length) {
+              parts.push(`Stale: ${issue.stale.join(", ")}`);
+            }
+            return `${issue.symbol}: ${parts.join(" | ")}`;
+          })
+          .join("\n");
+      };
+      const requestAnalysis = async (confirmMissingData: boolean) => {
+        return fetch("/api/analysis/deep", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbols, confirmMissingData }),
+        });
+      };
+
+      let response = await requestAnalysis(false);
+      if (response.status === 409) {
+        const data = await response.json();
+        const warningMessage = buildWarningMessage(data.issues || []);
+        const proceed = window.confirm(
+          `Tier 2 analysis has missing/stale data:\n\n${warningMessage}\n\nProceed anyway?`
+        );
+        if (!proceed) {
+          setRefreshing(false);
+          return;
+        }
+        response = await requestAnalysis(true);
+      }
 
       if (!response.ok) {
         throw new Error(`Failed to start refresh: ${response.statusText}`);

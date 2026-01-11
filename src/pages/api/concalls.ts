@@ -9,6 +9,7 @@ import { db, schema } from "../../lib/db";
 import { eq, desc } from "drizzle-orm";
 import {
   processConcallPDF,
+  processConcallText,
   saveConcallHighlights,
   getConcallHighlights,
   scrapeScreenerDocuments,
@@ -23,13 +24,48 @@ import { getSymbolForStock } from "../../lib/mappings";
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
-    let { symbol, pdfUrl, quarter, screenerUrl, email, password } = body;
+    let {
+      symbol,
+      pdfUrl,
+      quarter,
+      screenerUrl,
+      email,
+      password,
+      manualText,
+      callDate,
+    } = body;
 
     if (!symbol) {
       return new Response(JSON.stringify({ error: "Symbol is required" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    if (manualText) {
+      if (!quarter) {
+        return new Response(JSON.stringify({ error: "Quarter is required" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const highlights = await processConcallText(
+        String(manualText),
+        String(quarter),
+        callDate ? String(callDate) : null
+      );
+      await saveConcallHighlights(symbol, highlights);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          symbol,
+          quarter,
+          highlights,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
     }
 
     // If screenerUrl provided but no credentials, fetch from database

@@ -12,6 +12,8 @@ import { GEMINI_API_KEY } from "astro:env/server";
 import { db, getHoldings, schema } from "./db";
 import { eq, inArray, or, desc } from "drizzle-orm";
 import { getStockNews } from "./tools/news";
+import { getCompanyKnowledge } from "./tools/knowledge";
+import { getRedditSentiment } from "./tools/reddit";
 import { getStockThesis } from "./tools/valuepickr";
 import { isSymbolAffected, normalizeSymbol } from "./symbol-matcher";
 import { fetchAnnouncementsForSymbol } from "./catalyst/watchlist-tracker";
@@ -72,6 +74,11 @@ function getMissingRequiredInputs(
   }
 
   return missing;
+}
+
+function truncateText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}…`;
 }
 
 // ============================================================================
@@ -258,6 +265,42 @@ async function getFilingsData(
     );
     return { data: null, fetchedAt };
   }
+}
+
+async function getCompanyKnowledgeData(symbol: string): Promise<{
+  data: any | null;
+  fetchedAt: string;
+}> {
+  const result = await getCompanyKnowledge({ symbol });
+
+  if (!result.success) {
+    return { data: null, fetchedAt: new Date().toISOString() };
+  }
+
+  return {
+    data: result.data,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+async function getRedditData(
+  symbol: string,
+  stockName: string | null
+): Promise<{
+  data: any | null;
+  fetchedAt: string;
+}> {
+  const query = stockName || symbol;
+  const result = await getRedditSentiment({ query });
+
+  if (!result.success || !result.data?.found) {
+    return { data: null, fetchedAt: new Date().toISOString() };
+  }
+
+  return {
+    data: result.data,
+    fetchedAt: new Date().toISOString(),
+  };
 }
 
 async function getValuePickrData(
@@ -535,7 +578,9 @@ async function runLLMAnalysis(
   valuepickr: any,
   technicals: any,
   catalysts: any,
-  filings: any
+  filings: any,
+  knowledge: any,
+  reddit: any
 ): Promise<StockAnalysisResult> {
   // Dynamic import to bypass build issues
   let GoogleGenAI: any;
@@ -559,7 +604,9 @@ async function runLLMAnalysis(
     valuepickr,
     technicals,
     catalysts,
-    filings
+    filings,
+    knowledge,
+    reddit
   );
 
   try {
@@ -609,7 +656,9 @@ function buildAnalysisPrompt(
   valuepickr: any,
   technicals: any,
   catalysts: any,
-  filings: any
+  filings: any,
+  knowledge: any,
+  reddit: any
 ): string {
   let prompt = `You are evaluating a single stock for investment potential.
 
@@ -678,6 +727,79 @@ Recent Sentiment: ${valuepickr.data.recentSentiment || "N/A"}
     prompt += `## ValuePickr: No discussion found\n\n`;
   }
 
+  // Company Knowledge Base (User-Contributed)
+  if (knowledge?.data) {
+    prompt += `## 📚 COMPANY KNOWLEDGE BASE (User-Contributed)
+Treat as user research. Verify critical claims with filings or financials.
+
+Summary:
+${knowledge.data.summary || "No summary available."}
+
+Research Docs:
+${
+  knowledge.data.research?.length
+    ? knowledge.data.research
+        .slice(0, 3)
+        .map(
+          (doc: any) =>
+            `- [${doc.id}] ${doc.title}\n${truncateText(
+              doc.content || "",
+              1200
+            )}`
+        )
+        .join("\n\n")
+    : "None."
+}
+
+Notes:
+${
+  knowledge.data.notes?.length
+    ? knowledge.data.notes
+        .slice(0, 5)
+        .map(
+          (note: any) =>
+            `- [${note.id}] ${truncateText(note.content || "", 400)}`
+        )
+        .join("\n")
+    : "None."
+}
+
+Links:
+${
+  knowledge.data.links?.length
+    ? knowledge.data.links
+        .slice(0, 5)
+        .map(
+          (link: any) =>
+            `- [${link.id}] ${link.title} (${link.url})\n${truncateText(
+              link.description || link.content || "",
+              500
+            )}`
+        )
+        .join("\n")
+    : "None."
+}
+
+Tables:
+${
+  knowledge.data.tables?.length
+    ? knowledge.data.tables
+        .slice(0, 2)
+        .map(
+          (table: any) =>
+            `- ${table.name} (${table.rows?.length || 0} rows): ${table.columns?.join(
+              ", "
+            )}`
+        )
+        .join("\n")
+    : "None."
+}
+
+`;
+  } else {
+    prompt += `## 📚 COMPANY KNOWLEDGE BASE: None available\n\n`;
+  }
+
   // News Section (always fresh)
   const newsDate = news?.fetchedAt
     ? new Date(news.fetchedAt).toLocaleDateString()
@@ -714,6 +836,41 @@ ${
 `;
   } else {
     prompt += `## NEWS (as of ${newsDate}): No recent news found\n\n`;
+  }
+
+  // Reddit Section (Retail Sentiment - Low Trust)
+  if (reddit?.data) {
+    const redditDate = reddit.fetchedAt
+      ? new Date(reddit.fetchedAt).toLocaleDateString()
+      : new Date().toLocaleDateString();
+    prompt += `## 🧠 REDDIT SENTIMENT (Low Trust) (Fetched: ${redditDate})
+Use only as a CONTRARIAN indicator. Treat as opinion, not evidence.
+
+Sentiment Summary: ${reddit.data.sentiment_summary || "N/A"}
+Key Points: ${
+      reddit.data.key_points?.length
+        ? reddit.data.key_points.join(" | ")
+        : "N/A"
+    }
+Discussion Quality: ${reddit.data.discussion_quality || "N/A"}
+Subreddits: ${reddit.data.subreddits?.join(", ") || "N/A"}
+Sample Discussions:
+${
+  reddit.data.sample_discussions?.length
+    ? reddit.data.sample_discussions
+        .slice(0, 3)
+        .map((post: any, idx: number) => {
+          const title = post.title || "Untitled";
+          const snippet = truncateText(post.content || "", 600);
+          return `${idx + 1}. ${title}\n${snippet}`;
+        })
+        .join("\n\n")
+    : "None."
+}
+
+`;
+  } else {
+    prompt += `## 🧠 REDDIT SENTIMENT: No recent discussions found\n\n`;
   }
 
   // Technicals Section
@@ -923,7 +1080,10 @@ Important: If no VRS data exists, rely more heavily on ValuePickr and news. Be c
  * Analyze a single stock and cache the results
  */
 export async function analyzeStock(
-  symbol: string
+  symbol: string,
+  options?: {
+    allowMissingInputs?: boolean;
+  }
 ): Promise<StockAnalysisResult | null> {
   console.log(`[StockAnalyzer] Starting analysis for ${symbol}`);
 
@@ -940,7 +1100,7 @@ export async function analyzeStock(
     // Gather all data
     console.log(`[StockAnalyzer] Gathering data for ${symbol}...`);
 
-    const [vrs, financials, news, valuepickr, technicals, catalysts, filings] = await Promise.all([
+    const [vrs, financials, news, valuepickr, technicals, catalysts, filings, knowledge, reddit] = await Promise.all([
       getVRSData(symbol),
       getFinancialsData(symbol),
       getNewsData(symbol, stockName),
@@ -948,14 +1108,21 @@ export async function analyzeStock(
       getTechnicalsData(symbol),
       getCatalystData(symbol),
       getFilingsData(symbol),
+      getCompanyKnowledgeData(symbol),
+      getRedditData(symbol, stockName),
     ]);
 
     const missingInputs = getMissingRequiredInputs(financials, technicals);
-    if (missingInputs.length > 0) {
+    if (missingInputs.length > 0 && !options?.allowMissingInputs) {
       console.warn(
         `[StockAnalyzer] Skipping ${symbol}: missing required inputs (${missingInputs.join(", ")})`
       );
       return null;
+    }
+    if (missingInputs.length > 0 && options?.allowMissingInputs) {
+      console.warn(
+        `[StockAnalyzer] Proceeding despite missing inputs for ${symbol}: ${missingInputs.join(", ")}`
+      );
     }
 
     console.log(`[StockAnalyzer] Running LLM analysis for ${symbol}...`);
@@ -970,7 +1137,9 @@ export async function analyzeStock(
       valuepickr,
       technicals,
       catalysts,
-      filings
+      filings,
+      knowledge,
+      reddit
     );
 
     // Calculate expiry (7 days from now)
@@ -1035,7 +1204,8 @@ export async function analyzeStock(
 export async function analyzeInterestingStocks(
   onProgress?: (progress: AnalysisJobProgress) => void,
   delayBetweenStocks: number = 2000, // 2 seconds between stocks to avoid rate limits
-  skipFreshAnalysis: boolean = true // Skip stocks analyzed within 6 hours
+  skipFreshAnalysis: boolean = true, // Skip stocks analyzed within 6 hours
+  allowMissingInputs: boolean = false
 ): Promise<AnalysisJobProgress> {
   // Get all interesting stocks from watchlist (excluding delisted)
   const interestingStocks = await db
@@ -1118,7 +1288,7 @@ export async function analyzeInterestingStocks(
     onProgress?.(progress);
 
     try {
-      const result = await analyzeStock(symbol);
+      const result = await analyzeStock(symbol, { allowMissingInputs });
 
       progress.results.push({
         symbol,

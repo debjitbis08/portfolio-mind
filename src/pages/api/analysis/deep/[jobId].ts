@@ -41,6 +41,7 @@ export const GET: APIRoute = async ({ params }) => {
     errors: job.progress.errors,
     results: job.progress.results,
     freshnessWarnings: job.freshnessWarnings,
+    dataWarnings: job.dataWarnings,
     startedAt: job.startedAt,
     completedAt: job.completedAt,
     error: job.error,

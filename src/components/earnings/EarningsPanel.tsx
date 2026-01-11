@@ -62,6 +62,10 @@ export default function EarningsPanel(props: Props) {
     message: string;
   } | null>(null);
   const [loadError, setLoadError] = createSignal<string | null>(null);
+  const [manualQuarter, setManualQuarter] = createSignal("");
+  const [manualCallDate, setManualCallDate] = createSignal("");
+  const [manualText, setManualText] = createSignal("");
+  const [savingManual, setSavingManual] = createSignal(false);
 
   // Format number with Indian locale
   const formatNum = (val: number | null) => {
@@ -249,6 +253,64 @@ export default function EarningsPanel(props: Props) {
       });
     } finally {
       setSyncingFinancials(false);
+      setTimeout(() => setSyncStatus(null), 5000);
+    }
+  };
+
+  const saveManualConcall = async () => {
+    if (!manualQuarter().trim() || !manualText().trim()) {
+      setSyncStatus({
+        type: "error",
+        message: "Quarter and concall text are required.",
+      });
+      return;
+    }
+
+    setSavingManual(true);
+    setSyncStatus({
+      type: "info",
+      message: "Analyzing manual concall text...",
+    });
+
+    try {
+      const res = await fetch("/api/concalls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: props.symbol,
+          quarter: manualQuarter().trim(),
+          callDate: manualCallDate().trim() || null,
+          manualText: manualText().trim(),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setSyncStatus({
+          type: "success",
+          message: "Manual concall saved.",
+        });
+        setManualQuarter("");
+        setManualCallDate("");
+        setManualText("");
+
+        const concallsRes = await fetch(`/api/concalls?symbol=${props.symbol}`);
+        const concallsData = await concallsRes.json();
+        setConcalls(concallsData.highlights || []);
+      } else {
+        setSyncStatus({
+          type: "error",
+          message: data.error || "Failed to save manual concall",
+        });
+      }
+    } catch (err) {
+      setSyncStatus({
+        type: "error",
+        message: "Network error - please try again",
+      });
+    } finally {
+      setSavingManual(false);
       setTimeout(() => setSyncStatus(null), 5000);
     }
   };
@@ -458,6 +520,46 @@ export default function EarningsPanel(props: Props) {
                 {syncingConcalls() ? "Syncing..." : "Sync Concalls"}
               </button>
             </Show>
+          </div>
+
+          <div class="mb-4 rounded-lg border border-surface1 bg-surface1/40 p-3">
+            <div class="text-xs text-subtext0 mb-2">
+              Add manual concall text (paste transcript or summary)
+            </div>
+            <div class="grid gap-2 sm:grid-cols-2">
+              <input
+                class="w-full rounded-md border border-surface1 bg-surface0 px-2 py-1 text-xs text-text placeholder:text-subtext0"
+                placeholder="Quarter (e.g., Q2 FY25)"
+                value={manualQuarter()}
+                onInput={(e) => setManualQuarter(e.currentTarget.value)}
+              />
+              <input
+                class="w-full rounded-md border border-surface1 bg-surface0 px-2 py-1 text-xs text-text placeholder:text-subtext0"
+                placeholder="Call date (YYYY-MM-DD, optional)"
+                value={manualCallDate()}
+                onInput={(e) => setManualCallDate(e.currentTarget.value)}
+              />
+            </div>
+            <textarea
+              class="mt-2 w-full rounded-md border border-surface1 bg-surface0 px-2 py-2 text-xs text-text placeholder:text-subtext0"
+              rows={6}
+              placeholder="Paste concall transcript or detailed notes..."
+              value={manualText()}
+              onInput={(e) => setManualText(e.currentTarget.value)}
+            />
+            <div class="mt-2 flex justify-end">
+              <button
+                class={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                  savingManual()
+                    ? "bg-surface1 text-subtext0"
+                    : "bg-mauve text-base hover:bg-mauve/80"
+                }`}
+                onClick={saveManualConcall}
+                disabled={savingManual()}
+              >
+                {savingManual() ? "Saving..." : "Save Manual Concall"}
+              </button>
+            </div>
           </div>
 
           <Show

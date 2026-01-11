@@ -78,11 +78,41 @@ export default function AnalysisOverview() {
     setIsRefreshing(true);
     setJobProgress(null);
     try {
-      const res = await fetch("/api/analysis/deep", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
+      const buildWarningMessage = (issues: any[]) => {
+        return issues
+          .map((issue) => {
+            const parts: string[] = [];
+            if (issue.missing?.length) {
+              parts.push(`Missing: ${issue.missing.join(", ")}`);
+            }
+            if (issue.stale?.length) {
+              parts.push(`Stale: ${issue.stale.join(", ")}`);
+            }
+            return `${issue.symbol}: ${parts.join(" | ")}`;
+          })
+          .join("\n");
+      };
+      const requestAnalysis = async (confirmMissingData: boolean) => {
+        return fetch("/api/analysis/deep", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirmMissingData }),
+        });
+      };
+
+      let res = await requestAnalysis(false);
+      if (res.status === 409) {
+        const data = await res.json();
+        const warningMessage = buildWarningMessage(data.issues || []);
+        const proceed = window.confirm(
+          `Tier 2 analysis has missing/stale data:\n\n${warningMessage}\n\nProceed anyway?`
+        );
+        if (!proceed) {
+          setIsRefreshing(false);
+          return;
+        }
+        res = await requestAnalysis(true);
+      }
 
       if (res.ok) {
         const result = await res.json();
@@ -148,11 +178,41 @@ export default function AnalysisOverview() {
   const refreshSingleStock = async (symbol: string) => {
     setRefreshingSymbol(symbol);
     try {
-      const res = await fetch("/api/analysis/deep", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols: [symbol] }),
-      });
+      const buildWarningMessage = (issues: any[]) => {
+        return issues
+          .map((issue) => {
+            const parts: string[] = [];
+            if (issue.missing?.length) {
+              parts.push(`Missing: ${issue.missing.join(", ")}`);
+            }
+            if (issue.stale?.length) {
+              parts.push(`Stale: ${issue.stale.join(", ")}`);
+            }
+            return `${issue.symbol}: ${parts.join(" | ")}`;
+          })
+          .join("\n");
+      };
+      const requestAnalysis = async (confirmMissingData: boolean) => {
+        return fetch("/api/analysis/deep", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbols: [symbol], confirmMissingData }),
+        });
+      };
+
+      let res = await requestAnalysis(false);
+      if (res.status === 409) {
+        const data = await res.json();
+        const warningMessage = buildWarningMessage(data.issues || []);
+        const proceed = window.confirm(
+          `Tier 2 analysis has missing/stale data:\n\n${warningMessage}\n\nProceed anyway?`
+        );
+        if (!proceed) {
+          setRefreshingSymbol(null);
+          return;
+        }
+        res = await requestAnalysis(true);
+      }
 
       if (res.ok) {
         const result = await res.json();
