@@ -57,6 +57,9 @@ export interface NewsItem {
   source: string;
   sourceId?: string; // ID from source registry (e.g., "pib-rss", "rbi-rss")
   sourcePriority?: number; // 0=Official, 1=Media, 2=Social, 3=Aggregator
+  content?: string;
+  contentType?: "html" | "pdf";
+  contentUrl?: string;
 }
 
 // ============================================================================

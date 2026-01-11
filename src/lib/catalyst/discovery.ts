@@ -140,12 +140,7 @@ async function analyzeTickerNewsForDiscovery(
   existingCatalysts: Awaited<ReturnType<typeof getRelevantExistingCatalysts>>
 ) {
   const newsContext = news
-    .map(
-      (n, i) =>
-        `[${i + 1}] ${n.title} (${n.pubDate || "Unknown Date"}) - ${
-          n.source
-        } [URL: ${n.link}]`
-    )
+    .map((n, i) => formatNewsItemForPrompt(n, i + 1))
     .join("\n");
 
   // Filter existing catalysts that involve this ticker
@@ -223,6 +218,7 @@ ${existingContext}
   3. Determine overall BULLISH/BEARISH sentiment and predicted direction
   4. If UPDATE: provide reevaluated impact considering all information
   5. If NEW: create a new catalyst with watch criteria
+  6. Return AT MOST ONE new catalyst for this ticker
 
   🔖 CITATION REQUIREMENT:
   - Include inline citations [1], [2], [3] etc. in your impact descriptions
@@ -302,10 +298,7 @@ async function synthesizeTickerOutcome(
   keyInsight: string;
 } | null> {
   const newsContext = news
-    .map(
-      (n, i) =>
-        `[${i + 1}] ${n.title} (${n.pubDate || "Unknown Date"}) - ${n.source}`
-    )
+    .map((n, i) => formatNewsItemForPrompt(n, i + 1))
     .join("\n");
 
   // Filter existing catalysts for this ticker
@@ -371,6 +364,7 @@ ${existingContext}
 - Include the KEY CATALYST driving the thesis
 - Mention timeframe expectations if applicable
 - Cite sources with [1], [2], etc.
+- If multiple articles or existing catalysts are present, ALWAYS return shouldUpdate=true and produce a single unified narrative (even if neutral).
 
 ## OUTPUT FORMAT (JSON)
 {
@@ -555,6 +549,9 @@ export async function discoverCatalysts(
         existingCatalysts
       );
 
+      const batchCitations = buildSourceCitations(batch);
+      const batchRelatedArticleIds = buildRelatedArticleIds(batch);
+
       // Process updates
       if (analysis.updates && analysis.updates.length > 0) {
         for (const update of analysis.updates) {
@@ -572,6 +569,8 @@ export async function discoverCatalysts(
             .set({
               predictedImpact: update.updatedImpact,
               affectedSymbols: JSON.stringify(update.updatedSymbols),
+              relatedArticleIds: JSON.stringify(batchRelatedArticleIds),
+              sourceCitations: JSON.stringify(batchCitations),
               updatedAt: new Date().toISOString(),
             })
             .where(eq(potentialCatalysts.id, matchingCatalyst.fullId));
@@ -588,21 +587,12 @@ export async function discoverCatalysts(
         );
 
         for (const cat of analysis.newCatalysts) {
-          // Build citation metadata from batch
-          const citations = batch.map((n, idx) => ({
-            index: idx + 1,
-            title: n.title,
-            url: n.link,
-            source: n.source || "Unknown",
-            pubDate: n.pubDate || "Unknown Date",
-          }));
-
           await db.insert(potentialCatalysts).values({
             predictedImpact: cat.impactSummary,
             affectedSymbols: JSON.stringify(cat.affectedTickers),
             watchCriteria: JSON.stringify(cat.watchCriteria),
-            relatedArticleIds: JSON.stringify(batch.map((n) => n.link)),
-            sourceCitations: JSON.stringify(citations),
+            relatedArticleIds: JSON.stringify(batchRelatedArticleIds),
+            sourceCitations: JSON.stringify(batchCitations),
             status: "monitoring",
             validationLog: "[]",
           });
@@ -695,6 +685,8 @@ export async function discoverCatalysts(
   // 2. Two-pass analysis for each ticker (when grouping succeeded)
   for (const [ticker, tickerNews] of tickerGroups.entries()) {
     try {
+      const tickerCitations = buildSourceCitations(tickerNews);
+      const tickerRelatedArticleIds = buildRelatedArticleIds(tickerNews);
       console.log(
         `\n   🔍 Pass 1: Analyzing ${ticker} (${tickerNews.length} articles)...`
       );
@@ -734,6 +726,8 @@ export async function discoverCatalysts(
             .set({
               predictedImpact: update.updatedImpact,
               affectedSymbols: JSON.stringify(update.updatedSymbols),
+              relatedArticleIds: JSON.stringify(tickerRelatedArticleIds),
+              sourceCitations: JSON.stringify(tickerCitations),
               updatedAt: new Date().toISOString(),
             })
             .where(eq(potentialCatalysts.id, matchingCatalyst.fullId));
@@ -743,44 +737,45 @@ export async function discoverCatalysts(
         }
       }
 
-      // Process NEW catalysts from Pass 1
+      // Process NEW catalysts from Pass 1 (keep only the primary entry per ticker)
       if (analysis.newCatalysts && analysis.newCatalysts.length > 0) {
+        const [primary, ...extra] = analysis.newCatalysts;
         console.log(
           `      ✨ Pass 1 found ${analysis.newCatalysts.length} catalyst(s)`
         );
-
-        for (const cat of analysis.newCatalysts) {
-          // Build citation metadata from news array
-          const citations = tickerNews.map((n, idx) => ({
-            index: idx + 1,
-            title: n.title,
-            url: n.link,
-            source: n.source || "Unknown",
-            pubDate: n.pubDate || "Unknown Date",
-          }));
-
-          await db.insert(potentialCatalysts).values({
-            predictedImpact: cat.impactSummary,
-            affectedSymbols: JSON.stringify(cat.affectedTickers),
-            watchCriteria: JSON.stringify(cat.watchCriteria),
-            relatedArticleIds: JSON.stringify(tickerNews.map((n) => n.link)),
-            sourceCitations: JSON.stringify(citations),
-            status: "monitoring",
-            validationLog: "[]",
-          });
-
-          results.newCatalysts++;
-          results.catalysts.push({
-            predictedImpact: cat.impactSummary,
-            affectedSymbols: cat.affectedTickers,
-            watchCriteria: cat.watchCriteria,
-          });
+        if (extra.length > 0) {
+          console.log(
+            `      🧩 Consolidating ${extra.length} extra catalyst(s) into primary narrative`
+          );
         }
+
+        await db.insert(potentialCatalysts).values({
+          predictedImpact: primary.impactSummary,
+          affectedSymbols: JSON.stringify(primary.affectedTickers),
+          watchCriteria: JSON.stringify(primary.watchCriteria),
+          relatedArticleIds: JSON.stringify(tickerRelatedArticleIds),
+          sourceCitations: JSON.stringify(tickerCitations),
+          status: "monitoring",
+          validationLog: "[]",
+        });
+
+        results.newCatalysts++;
+        results.catalysts.push({
+          predictedImpact: primary.impactSummary,
+          affectedSymbols: primary.affectedTickers,
+          watchCriteria: primary.watchCriteria,
+        });
       }
+
+      const hasExistingCatalysts = existingCatalysts.some((cat) =>
+        cat.affectedSymbols.includes(ticker)
+      );
 
       // PASS 2: Comprehensive synthesis - create ONE unified entry per ticker
       if (
         tickerNews.length > 1 ||
+        hasExistingCatalysts ||
+        (analysis.newCatalysts && analysis.newCatalysts.length > 1) ||
         (analysis.updates && analysis.updates.length > 0)
       ) {
         console.log(
@@ -794,7 +789,9 @@ export async function discoverCatalysts(
           analysis
         );
 
-        if (synthesis && synthesis.shouldUpdate) {
+        if (synthesis) {
+          const shouldPersistSynthesis = synthesis.shouldUpdate;
+
           // Find ALL catalysts for this ticker (both existing and newly created)
           const allTickerCatalysts = await db
             .select()
@@ -806,17 +803,21 @@ export async function discoverCatalysts(
             return symbols.includes(ticker);
           });
 
-          if (relevantCatalysts.length > 0) {
-            // Sort by creation time (newest first)
-            const sortedCatalysts = relevantCatalysts.sort(
-              (a, b) =>
-                new Date(b.createdAt || 0).getTime() -
-                new Date(a.createdAt || 0).getTime()
-            );
+          if (relevantCatalysts.length === 0) {
+            continue;
+          }
 
-            const newestCatalyst = sortedCatalysts[0];
-            const olderCatalysts = sortedCatalysts.slice(1);
+          // Sort by creation time (newest first)
+          const sortedCatalysts = relevantCatalysts.sort(
+            (a, b) =>
+              new Date(b.createdAt || 0).getTime() -
+              new Date(a.createdAt || 0).getTime()
+          );
 
+          const newestCatalyst = sortedCatalysts[0];
+          const olderCatalysts = sortedCatalysts.slice(1);
+
+          if (shouldPersistSynthesis) {
             // Update the newest catalyst with Pass 2 trading thesis
             await db
               .update(potentialCatalysts)
@@ -830,22 +831,26 @@ export async function discoverCatalysts(
                 // Also update predictedImpact with keyInsight for backwards compatibility
                 predictedImpact:
                   synthesis.keyInsight || newestCatalyst.predictedImpact,
+                relatedArticleIds: JSON.stringify(tickerRelatedArticleIds),
+                sourceCitations: JSON.stringify(tickerCitations),
                 updatedAt: new Date().toISOString(),
               })
               .where(eq(potentialCatalysts.id, newestCatalyst.id));
+          }
 
-            // Delete all older catalysts for this ticker to ensure ONE entry per symbol
-            if (olderCatalysts.length > 0) {
-              for (const oldCat of olderCatalysts) {
-                await db
-                  .delete(potentialCatalysts)
-                  .where(eq(potentialCatalysts.id, oldCat.id));
-              }
-              console.log(
-                `      🗑️  Removed ${olderCatalysts.length} older catalyst(s) for ${ticker}`
-              );
+          // Delete all older catalysts for this ticker to ensure ONE entry per symbol
+          if (olderCatalysts.length > 0) {
+            for (const oldCat of olderCatalysts) {
+              await db
+                .delete(potentialCatalysts)
+                .where(eq(potentialCatalysts.id, oldCat.id));
             }
+            console.log(
+              `      🗑️  Removed ${olderCatalysts.length} older catalyst(s) for ${ticker}`
+            );
+          }
 
+          if (shouldPersistSynthesis) {
             // Log the thesis result
             const scoreEmoji =
               synthesis.potentialScore > 0
@@ -863,11 +868,11 @@ export async function discoverCatalysts(
                 synthesis.sentiment
               }, confidence ${synthesis.confidence}/10)`
             );
+          }
 
-            // Capture base price if not already recorded
-            if (!newestCatalyst.basePrice) {
-              await captureBasePrice(newestCatalyst.id, ticker);
-            }
+          // Capture base price if not already recorded
+          if (!newestCatalyst.basePrice) {
+            await captureBasePrice(newestCatalyst.id, ticker);
           }
         }
       }
@@ -887,6 +892,33 @@ export async function discoverCatalysts(
 }
 
 // -- Helpers --
+
+function buildRelatedArticleIds(news: NewsItem[]): string[] {
+  return news.map((item) => item.link);
+}
+
+function formatNewsItemForPrompt(item: NewsItem, index: number): string {
+  const contentLabel = item.contentType ? `Content (${item.contentType})` : null;
+  const contentBlock =
+    item.content && item.content.length > 0
+      ? `\n${contentLabel ?? "Content"}: ${item.content}`
+      : "";
+  const link = item.contentUrl || item.link;
+
+  return `[${index}] ${item.title} (${item.pubDate || "Unknown Date"}) - ${
+    item.source
+  } [URL: ${link}]${contentBlock}`;
+}
+
+function buildSourceCitations(news: NewsItem[]) {
+  return news.map((item, idx) => ({
+    index: idx + 1,
+    title: item.title,
+    url: item.contentUrl || item.link,
+    source: item.source || "Unknown",
+    pubDate: item.pubDate || "Unknown Date",
+  }));
+}
 
 /**
  * Expires old potential catalysts that have been monitoring for > 48 hours.
@@ -968,12 +1000,7 @@ async function analyzeBatchForDiscovery(
     .join(", ");
 
   const newsContext = news
-    .map(
-      (n, i) =>
-        `[${i + 1}] ${n.title} (${n.pubDate || "Unknown Date"}) - ${
-          n.source
-        } [URL: ${n.link}]`
-    )
+    .map((n, i) => formatNewsItemForPrompt(n, i + 1))
     .join("\n");
 
   // Format existing catalysts for LLM context

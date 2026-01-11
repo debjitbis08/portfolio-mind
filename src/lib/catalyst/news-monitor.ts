@@ -10,6 +10,7 @@ import { db } from "../db";
 import { processedArticles, catalystWatchlist } from "../db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import type { NewsItem, CatalystAsset } from "./types";
+import { fetchArticleContent } from "../scrapers/article-content";
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -18,6 +19,7 @@ const parser = new XMLParser({
 
 // Google News RSS base URL (no geo filter for global coverage)
 const GOOGLE_NEWS_RSS_BASE = "https://news.google.com/rss/search";
+const DEFAULT_CONTENT_FETCH_LIMIT = 20;
 
 // ============================================================================
 // India-Focused News Sources
@@ -77,6 +79,39 @@ function parseRssItem(item: any): NewsItem {
     pubDate: item.pubDate || new Date().toISOString(),
     source: source || "Unknown",
   };
+}
+
+/**
+ * Enrich a subset of news items with full content (HTML or PDF).
+ */
+export async function enrichNewsItemsWithContent(
+  items: NewsItem[],
+  maxItems: number = DEFAULT_CONTENT_FETCH_LIMIT
+): Promise<NewsItem[]> {
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  const enriched: NewsItem[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (i < maxItems && item.link) {
+      const result = await fetchArticleContent(item.link, item.source, {
+        geminiApiKey,
+      });
+      if (result) {
+        enriched.push({
+          ...item,
+          content: result.content,
+          contentType: result.contentType,
+          contentUrl: result.sourceUrl,
+        });
+        continue;
+      }
+    }
+
+    enriched.push(item);
+  }
+
+  return enriched;
 }
 
 /**
@@ -148,7 +183,8 @@ export async function markAsProcessed(
 export async function fetchCatalystNews(
   keyword: string,
   maxResults: number = 5,
-  hoursAgo: number = 2
+  hoursAgo: number = 2,
+  includeContent: boolean = true
 ): Promise<NewsItem[]> {
   const url = buildRssUrl(keyword, hoursAgo);
 
@@ -192,7 +228,11 @@ export async function fetchCatalystNews(
       }
     }
 
-    return newItems;
+    if (!includeContent || newItems.length === 0) {
+      return newItems;
+    }
+
+    return enrichNewsItemsWithContent(newItems, maxResults);
   } catch (error) {
     console.error(`[NewsMonitor] Error fetching news for "${keyword}":`, error);
     return [];
@@ -358,7 +398,8 @@ async function fetchFromRssFeed(
  */
 export async function fetchIndianMarketNews(
   maxPerSource: number = 20,
-  hoursAgo: number = 4
+  hoursAgo: number = 4,
+  includeContent: boolean = true
 ): Promise<NewsItem[]> {
   console.log("\n📰 Fetching broad Indian market news...");
 
@@ -392,5 +433,13 @@ export async function fetchIndianMarketNews(
   }
 
   console.log(`   📊 Total unique articles: ${allNews.length}`);
-  return allNews;
+
+  if (!includeContent || allNews.length === 0) {
+    return allNews;
+  }
+
+  return enrichNewsItemsWithContent(
+    allNews,
+    Math.min(DEFAULT_CONTENT_FETCH_LIMIT, allNews.length)
+  );
 }
