@@ -296,6 +296,137 @@ function parseGrowwDateTime(dateStr: string): Date {
 // ICICI Direct CSV Import Support
 // ============================================================================
 
+function parseCsvRows(csvText: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i];
+    const nextChar = csvText[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        cell += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        i++;
+      }
+      row.push(cell);
+      if (row.some((value) => value.trim() !== "")) {
+        rows.push(row);
+      }
+      row = [];
+      cell = "";
+      continue;
+    }
+
+    cell += char;
+  }
+
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    if (row.some((value) => value.trim() !== "")) {
+      rows.push(row);
+    }
+  }
+
+  return rows;
+}
+
+function normalizeHeaderName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function parseNumberValue(value: string): number {
+  const cleaned = value.replace(/[,\s]/g, "").replace(/[()]/g, "");
+  if (!cleaned) return 0;
+  const parsed = Number(cleaned);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function parseICICIDateTime(dateStr: string, timeStr?: string): Date {
+  const trimmedDate = dateStr.trim();
+  if (!trimmedDate) return new Date(dateStr);
+
+  let baseDate: Date | null = null;
+  const monthMatch = trimmedDate.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
+  if (monthMatch) {
+    baseDate = parseICICIDate(trimmedDate);
+  } else {
+    const numericMatch = trimmedDate.match(/(\d{2})[/-](\d{2})[/-](\d{4})/);
+    if (numericMatch) {
+      const [, day, month, year] = numericMatch;
+      baseDate = new Date(
+        parseInt(year, 10),
+        parseInt(month, 10) - 1,
+        parseInt(day, 10)
+      );
+    } else {
+      baseDate = new Date(trimmedDate);
+    }
+  }
+
+  if (!timeStr) return baseDate;
+
+  const timeMatch = timeStr.trim().match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+  if (!timeMatch) return baseDate;
+
+  let hour = parseInt(timeMatch[1], 10);
+  const minute = parseInt(timeMatch[2], 10);
+  const second = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
+  const ampm = timeMatch[4]?.toUpperCase();
+
+  if (ampm === "PM" && hour < 12) hour += 12;
+  if (ampm === "AM" && hour === 12) hour = 0;
+
+  baseDate.setHours(hour, minute, second, 0);
+  return baseDate;
+}
+
+function parseICICIAction(value: string): "BUY" | "SELL" | null {
+  const normalized = value.trim().toUpperCase();
+  if (!normalized) return null;
+  if (normalized === "BUY" || normalized === "B") return "BUY";
+  if (normalized === "SELL" || normalized === "S") return "SELL";
+  if (normalized.includes("BUY")) return "BUY";
+  if (normalized.includes("SELL")) return "SELL";
+  return null;
+}
+
+function extractSymbolCandidate(value: string, series?: string): string {
+  let symbol = value.trim();
+  if (!symbol) return symbol;
+
+  const seriesTrimmed = series?.trim();
+  if (seriesTrimmed && symbol.endsWith(` ${seriesTrimmed}`)) {
+    symbol = symbol.slice(0, -(seriesTrimmed.length + 1)).trim();
+  }
+
+  if (symbol.includes(" ")) {
+    const firstToken = symbol.split(/\s+/)[0];
+    if (firstToken.length >= 2 && firstToken === firstToken.toUpperCase()) {
+      symbol = firstToken;
+    }
+  }
+
+  return symbol.replace(/[^A-Za-z0-9]/g, "");
+}
+
 export interface ICICIDirectTransaction {
   stockSymbol: string;
   companyName: string;
@@ -403,6 +534,152 @@ export function parseICICIDirectTransactions(
       sttPaid: sttStatus.trim() === "STT Paid",
       transactionDate: parseICICIDate(transactionDate.trim()),
       exchange: exchange.trim(),
+    });
+  }
+
+  return transactions;
+}
+
+/**
+ * Parse ICICI Direct Tradebook report CSV (transactions)
+ */
+export function parseICICIDirectTradebookTransactions(
+  csvText: string
+): ICICIDirectTransaction[] {
+  const rows = parseCsvRows(csvText);
+  if (rows.length === 0) return [];
+
+  const headerAliases = {
+    stockSymbol: [
+      "stock",
+      "stocksymbol",
+      "symbol",
+      "securitysymbol",
+      "scripsymbol",
+      "tradingsymbol",
+      "scripcode",
+    ],
+    companyName: [
+      "companyname",
+      "securityname",
+      "scripname",
+      "stockname",
+      "security",
+      "scrip",
+    ],
+    isinCode: ["isin", "isincode"],
+    action: ["action", "buysell", "buysellflag", "tradetype", "transactiontype"],
+    quantity: ["quantity", "qty", "tradeqty", "tradequantity", "tradedquantity"],
+    transactionPrice: ["tradeprice", "price", "rate", "traderate", "executedrate"],
+    transactionDate: ["tradedate", "transactiondate", "date"],
+    transactionTime: ["tradetime", "time"],
+    exchange: ["exchange", "exch"],
+    segment: ["segment", "segmenttype", "product"],
+    brokerage: ["brokerage", "brokerageamount", "brokeragecharges"],
+    transactionCharges: ["transactioncharges", "transactioncharge", "exchangecharges", "othercharges"],
+    stampDuty: ["stampduty"],
+    sttPaid: ["stt", "sttpaid", "sttstatus"],
+    series: ["series"],
+  } as const;
+
+  const findHeaderIndex = (headers: string[], aliases: readonly string[]) => {
+    const normalizedHeaders = headers.map(normalizeHeaderName);
+    const normalizedAliases = aliases.map(normalizeHeaderName);
+    for (let i = 0; i < normalizedHeaders.length; i++) {
+      const header = normalizedHeaders[i];
+      for (const alias of normalizedAliases) {
+        if (header === alias || header.includes(alias)) {
+          return i;
+        }
+      }
+    }
+    return -1;
+  };
+
+  let headerRowIndex = -1;
+  let headerRow: string[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const candidate = rows[i];
+    const actionIdx = findHeaderIndex(candidate, headerAliases.action);
+    const qtyIdx = findHeaderIndex(candidate, headerAliases.quantity);
+    const priceIdx = findHeaderIndex(candidate, headerAliases.transactionPrice);
+    const dateIdx = findHeaderIndex(candidate, headerAliases.transactionDate);
+
+    if (actionIdx >= 0 && qtyIdx >= 0 && priceIdx >= 0 && dateIdx >= 0) {
+      headerRowIndex = i;
+      headerRow = candidate;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) {
+    throw new Error(
+      "Could not find header row in ICICI Direct Tradebook file. Please ensure you're uploading a valid tradebook report."
+    );
+  }
+
+  const headerIndex = {
+    stockSymbol: findHeaderIndex(headerRow, headerAliases.stockSymbol),
+    companyName: findHeaderIndex(headerRow, headerAliases.companyName),
+    isinCode: findHeaderIndex(headerRow, headerAliases.isinCode),
+    action: findHeaderIndex(headerRow, headerAliases.action),
+    quantity: findHeaderIndex(headerRow, headerAliases.quantity),
+    transactionPrice: findHeaderIndex(headerRow, headerAliases.transactionPrice),
+    transactionDate: findHeaderIndex(headerRow, headerAliases.transactionDate),
+    transactionTime: findHeaderIndex(headerRow, headerAliases.transactionTime),
+    exchange: findHeaderIndex(headerRow, headerAliases.exchange),
+    segment: findHeaderIndex(headerRow, headerAliases.segment),
+    brokerage: findHeaderIndex(headerRow, headerAliases.brokerage),
+    transactionCharges: findHeaderIndex(headerRow, headerAliases.transactionCharges),
+    stampDuty: findHeaderIndex(headerRow, headerAliases.stampDuty),
+    sttPaid: findHeaderIndex(headerRow, headerAliases.sttPaid),
+    series: findHeaderIndex(headerRow, headerAliases.series),
+  };
+
+  const transactions: ICICIDirectTransaction[] = [];
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length === 0) continue;
+
+    const getValue = (index: number) => (index >= 0 ? row[index]?.trim() ?? "" : "");
+
+    const actionValue = getValue(headerIndex.action);
+    const action = parseICICIAction(actionValue);
+    if (!action) continue;
+
+    const quantity = parseNumberValue(getValue(headerIndex.quantity));
+    if (quantity <= 0) continue;
+
+    const transactionPrice = parseNumberValue(getValue(headerIndex.transactionPrice));
+    const transactionDate = parseICICIDateTime(
+      getValue(headerIndex.transactionDate),
+      getValue(headerIndex.transactionTime)
+    );
+
+    const series = getValue(headerIndex.series);
+    const rawSymbol = getValue(headerIndex.stockSymbol);
+    const rawName = getValue(headerIndex.companyName);
+    const stockSymbol = rawSymbol
+      ? extractSymbolCandidate(rawSymbol, series)
+      : extractSymbolCandidate(rawName, series);
+    const companyName = rawName || stockSymbol || rawSymbol || "";
+
+    transactions.push({
+      stockSymbol:
+        stockSymbol ||
+        companyName.slice(0, 10).replace(/\s+/g, "").toUpperCase(),
+      companyName: companyName || stockSymbol || rawSymbol || "",
+      isinCode: getValue(headerIndex.isinCode),
+      action,
+      quantity,
+      transactionPrice,
+      brokerage: parseNumberValue(getValue(headerIndex.brokerage)),
+      transactionCharges: parseNumberValue(getValue(headerIndex.transactionCharges)),
+      stampDuty: parseNumberValue(getValue(headerIndex.stampDuty)),
+      segment: getValue(headerIndex.segment),
+      sttPaid: getValue(headerIndex.sttPaid).toLowerCase().includes("paid"),
+      transactionDate,
+      exchange: getValue(headerIndex.exchange),
     });
   }
 

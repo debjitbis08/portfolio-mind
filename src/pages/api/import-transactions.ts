@@ -12,6 +12,7 @@ import {
   parseHoldingsStatement,
   reconcile,
   parseICICIDirectTransactions,
+  parseICICIDirectTradebookTransactions,
   parseICICIDirectHoldings,
   convertICICIToGrowwFormat,
   type GrowwTransaction,
@@ -30,18 +31,38 @@ function isValidFile(file: File | null): file is File {
 }
 
 /**
- * Detect if a file is an ICICI Direct CSV based on filename or content
+ * Detect ICICI Direct CSV type based on filename or content
  */
+function detectICICIDirectCsvType(
+  filename: string,
+  content?: string
+): "portfolio" | "tradebook" | null {
+  const lowerName = filename.toLowerCase();
+  if (lowerName.includes("portfolioeqt") && lowerName.endsWith(".csv")) {
+    return "portfolio";
+  }
+  if (
+    (lowerName.includes("tradebook") || lowerName.includes("trade_book")) &&
+    lowerName.endsWith(".csv")
+  ) {
+    return "tradebook";
+  }
+
+  if (content?.includes("Stock Symbol,Company Name,ISIN Code")) {
+    return "portfolio";
+  }
+  if (
+    content &&
+    content.includes("Trade Date") &&
+    (content.includes("Buy/Sell") || content.includes("Buy Sell"))
+  ) {
+    return "tradebook";
+  }
+  return null;
+}
+
 function isICICIDirectFile(filename: string, content?: string): boolean {
-  // Check filename pattern: 8503558265_PortFolioEqtAll.csv
-  if (filename.includes("PortFolioEqt") && filename.endsWith(".csv")) {
-    return true;
-  }
-  // Check content for ICICI-specific header
-  if (content && content.includes("Stock Symbol,Company Name,ISIN Code")) {
-    return true;
-  }
-  return false;
+  return detectICICIDirectCsvType(filename, content) !== null;
 }
 
 export const POST: APIRoute = async ({ request }) => {
@@ -80,7 +101,14 @@ export const POST: APIRoute = async ({ request }) => {
     if (iciciTransactionsFile) {
       isICICIImport = true;
       const csvText = await iciciTransactionsFile.text();
-      const iciciTxs = parseICICIDirectTransactions(csvText);
+      const iciciType = detectICICIDirectCsvType(
+        iciciTransactionsFile.name,
+        csvText
+      );
+      const iciciTxs =
+        iciciType === "tradebook"
+          ? parseICICIDirectTradebookTransactions(csvText)
+          : parseICICIDirectTransactions(csvText);
       transactions = await convertICICIToGrowwFormat(iciciTxs);
 
       if (isValidFile(iciciHoldingsFile)) {
@@ -106,10 +134,17 @@ export const POST: APIRoute = async ({ request }) => {
       if (isICICIDirectFile(filename)) {
         isICICIImport = true;
         const csvText = await orderHistoryFile.text();
-        const iciciTxs = parseICICIDirectTransactions(csvText);
+        const iciciType = detectICICIDirectCsvType(filename, csvText);
+        const iciciTxs =
+          iciciType === "tradebook"
+            ? parseICICIDirectTradebookTransactions(csvText)
+            : parseICICIDirectTransactions(csvText);
         transactions = await convertICICIToGrowwFormat(iciciTxs);
 
-        if (isValidFile(holdingsFile) && isICICIDirectFile(holdingsFile.name)) {
+        if (
+          isValidFile(holdingsFile) &&
+          isICICIDirectFile(holdingsFile.name)
+        ) {
           const holdingsCsv = await holdingsFile.text();
           const iciciHoldings = parseICICIDirectHoldings(holdingsCsv);
           holdings = iciciHoldings.map((h) => ({
