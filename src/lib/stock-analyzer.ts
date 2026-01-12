@@ -8,7 +8,7 @@
  * Results are cached in stock_analysis_cache table.
  */
 
-import { GEMINI_API_KEY } from "astro:env/server";
+import { getRequiredEnv } from "./env";
 import { db, getHoldings, schema } from "./db";
 import { eq, inArray, or, desc } from "drizzle-orm";
 import { getStockNews } from "./tools/news";
@@ -20,6 +20,10 @@ import { fetchAnnouncementsForSymbol } from "./catalyst/watchlist-tracker";
 import { fetchArticleContent } from "./scrapers/article-content";
 import { getTechnicalData, checkWaitZone } from "./technical-indicators";
 import { getSymbolMappings } from "./mappings";
+
+function getGeminiApiKey(): string {
+  return getRequiredEnv("GEMINI_API_KEY");
+}
 
 // ============================================================================
 // Types
@@ -235,7 +239,7 @@ async function getFilingsData(
         announcement.link,
         announcement.source,
         {
-          geminiApiKey: GEMINI_API_KEY,
+          geminiApiKey: getGeminiApiKey(),
           maxChars: 2400,
         }
       );
@@ -592,7 +596,7 @@ async function runLLMAnalysis(
     throw new Error("LLM SDK not available");
   }
 
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
   // Build the analysis prompt
   const prompt = buildAnalysisPrompt(

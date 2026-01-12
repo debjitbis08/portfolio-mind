@@ -1,11 +1,13 @@
 import {
   createSignal,
   createResource,
+  onMount,
   For,
   Show,
   Switch,
   Match,
 } from "solid-js";
+import IntradayTransactionForm from "../discovery/IntradayTransactionForm";
 
 type Signal = {
   id: string;
@@ -312,6 +314,15 @@ export default function CatalystPage() {
     refetchSignals();
   };
 
+  const updateSuggestionStatus = async (id: string, status: string) => {
+    await fetch(`${getBaseUrl()}/api/catalyst/suggestions`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status }),
+    });
+    refetchSuggestions();
+  };
+
   const toggleWatchlistItem = async (id: string, enabled: boolean) => {
     await fetch(`${getBaseUrl()}/api/catalyst/watchlist`, {
       method: "PATCH",
@@ -338,6 +349,38 @@ export default function CatalystPage() {
     });
     refetchPotentials();
   };
+
+  const [isRunningAnalysis, setIsRunningAnalysis] = createSignal(false);
+  const [analysisError, setAnalysisError] = createSignal<string | null>(null);
+
+  const runCatalystAnalysis = async () => {
+    setIsRunningAnalysis(true);
+    setAnalysisError(null);
+
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/catalyst/suggestions`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to run catalyst analysis");
+      }
+      await refetchSuggestions();
+    } catch (error) {
+      setAnalysisError(
+        error instanceof Error ? error.message : "Failed to run analysis"
+      );
+    } finally {
+      setIsRunningAnalysis(false);
+    }
+  };
+
+  onMount(() => {
+    refetchSignals();
+    refetchWatchlist();
+    refetchPotentials();
+    refetchSuggestions();
+  });
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -1130,6 +1173,27 @@ export default function CatalystPage() {
 
         <Match when={activeTab() === "suggestions"}>
           <div class="space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <p class="text-sm text-subtext0">
+                Generate trade recommendations from active catalyst signals.
+              </p>
+              <button
+                onClick={runCatalystAnalysis}
+                disabled={isRunningAnalysis()}
+                class={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  isRunningAnalysis()
+                    ? "bg-overlay0 text-subtext0 cursor-not-allowed"
+                    : "bg-mauve/20 text-mauve hover:bg-mauve/30"
+                }`}
+              >
+                {isRunningAnalysis()
+                  ? "Running catalyst analysis..."
+                  : "Run catalyst analysis"}
+              </button>
+            </div>
+            <Show when={analysisError()}>
+              <div class="text-sm text-red">{analysisError()}</div>
+            </Show>
             <Show
               when={!catalystSuggestions.loading}
               fallback={<div class="text-subtext0">Loading suggestions...</div>}
@@ -1206,6 +1270,56 @@ export default function CatalystPage() {
                         </div>
 
                         <p class="text-text mb-3">{suggestion.rationale}</p>
+
+                        <Show when={suggestion.status === "pending"}>
+                          <div class="flex flex-wrap gap-2 mb-4">
+                            <button
+                              onClick={() =>
+                                updateSuggestionStatus(
+                                  suggestion.id,
+                                  "approved"
+                                )
+                              }
+                              class="px-3 py-1 bg-green/20 text-green rounded-lg text-sm hover:bg-green/30 transition-colors"
+                            >
+                              Mark Executed
+                            </button>
+                            <button
+                              onClick={() =>
+                                updateSuggestionStatus(
+                                  suggestion.id,
+                                  "rejected"
+                                )
+                              }
+                              class="px-3 py-1 bg-red/20 text-red rounded-lg text-sm hover:bg-red/30 transition-colors"
+                            >
+                              Reject
+                            </button>
+                            <button
+                              onClick={() =>
+                                updateSuggestionStatus(
+                                  suggestion.id,
+                                  "expired"
+                                )
+                              }
+                              class="px-3 py-1 bg-overlay0 text-subtext0 rounded-lg text-sm hover:bg-overlay1 transition-colors"
+                            >
+                              Expire
+                            </button>
+                          </div>
+                        </Show>
+
+                        <IntradayTransactionForm
+                          suggestionId={suggestion.id}
+                          symbol={suggestion.symbol}
+                          stockName={suggestion.stockName || undefined}
+                          suggestedAction={
+                            suggestion.action === "BUY" ||
+                            suggestion.action === "SELL"
+                              ? suggestion.action
+                              : undefined
+                          }
+                        />
 
                         {/* Catalyst-specific risk management display */}
                         <div class="grid grid-cols-2 gap-3 mb-3">

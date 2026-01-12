@@ -10,11 +10,11 @@ import {
   randomBytes,
   createHash,
 } from "crypto";
-import { APP_SECRET } from "astro:env/server";
+import { getRequiredEnv } from "./env";
 
 // Derive a 32-byte key from the app secret
 const ALGORITHM = "aes-256-gcm";
-const KEY = createHash("sha256").update(APP_SECRET).digest();
+const KEY = createHash("sha256").update(getRequiredEnv("APP_SECRET")).digest();
 
 export function encrypt(text: string): string {
   const iv = randomBytes(16);

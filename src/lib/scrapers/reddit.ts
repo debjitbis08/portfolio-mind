@@ -13,7 +13,7 @@
  * - r/IndianStreetBets (more speculative, meme-ish)
  */
 
-import { GEMINI_API_KEY } from "astro:env/server";
+import { getRequiredEnv } from "../env";
 
 interface RedditComment {
   body: string;
@@ -75,6 +75,10 @@ const SUBREDDITS = ["IndiaInvestments", "IndianStreetBets"];
 const HEADERS = {
   "User-Agent": "portfolio-mind/1.0 (portfolio analysis tool)",
 };
+
+function getGeminiApiKey(): string {
+  return getRequiredEnv("GEMINI_API_KEY");
+}
 
 /**
  * Fetch top comments for a post
@@ -226,7 +230,7 @@ async function summarizeWithLLM(discussions: RedditDiscussions): Promise<{
 
   try {
     const { GoogleGenAI } = await import("@google/genai");
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
     // Build the prompt with full content
     const postsText = discussions.posts

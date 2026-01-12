@@ -5,7 +5,7 @@
  * Tier 3 support: analyzeWithCachedData uses pre-analyzed Tier 2 summaries.
  */
 
-import { GEMINI_API_KEY } from "astro:env/server";
+import { getRequiredEnv } from "./env";
 import {
   getToolDeclarations,
   getEnabledToolDeclarations,
@@ -30,6 +30,10 @@ export enum ThinkingLevel {
   high = "HIGH",
 }
 
+function getGeminiApiKey(): string {
+  return getRequiredEnv("GEMINI_API_KEY");
+}
+
 // Helper to get a configured model instance
 export function getGeminiModel(config: {
   thinkingConfig?: { thinkingLevel: ThinkingLevel };
@@ -39,7 +43,7 @@ export function getGeminiModel(config: {
     generateContent: async (prompt: string) => {
       const module = await import("@google/genai");
       const GoogleGenAI = module.GoogleGenAI;
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
       const genConfig: any = {};
 
@@ -153,7 +157,7 @@ export class GeminiService {
       return [];
     }
 
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
     // Build initial context
     const holdingsContext = holdings.map((h) => ({
@@ -542,7 +546,7 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
       return [];
     }
 
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
     // Fetch previous suggestions context
     progress(15, "Fetching suggestion history...");

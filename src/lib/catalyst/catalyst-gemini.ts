@@ -6,7 +6,6 @@
  * Operates on the CATALYST portfolio, separate from the long-term portfolio.
  */
 
-import { GEMINI_API_KEY } from "astro:env/server";
 import {
   getEnabledToolDeclarations,
   getMergedToolConfig,
@@ -17,7 +16,12 @@ import {
   type Citation,
 } from "../tools";
 import { db, schema, getCatalystHoldings, type Holding } from "../db";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and, gte } from "drizzle-orm";
+import { getRequiredEnv } from "../env";
+
+function getGeminiApiKey(): string {
+  return getRequiredEnv("GEMINI_API_KEY");
+}
 
 // ============================================================================
 // Types
@@ -115,7 +119,7 @@ export class CatalystGeminiService {
       return [];
     }
 
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
     // Build system prompt for short-term trading
     const systemPrompt = this.buildCatalystSystemPrompt(availableFunds);
@@ -154,6 +158,34 @@ export class CatalystGeminiService {
     const pendingContext = pendingSuggestions.filter(
       (s) => s.status === "pending"
     );
+
+    const recentCutoff = new Date();
+    recentCutoff.setDate(recentCutoff.getDate() - 7);
+
+    const approvedSuggestions = await db
+      .select()
+      .from(schema.suggestions)
+      .where(
+        and(
+          eq(schema.suggestions.portfolioType, "CATALYST"),
+          eq(schema.suggestions.status, "approved"),
+          gte(schema.suggestions.createdAt, recentCutoff.toISOString())
+        )
+      )
+      .orderBy(desc(schema.suggestions.createdAt))
+      .limit(10);
+
+    const recentTrades = await db
+      .select()
+      .from(schema.intradayTransactions)
+      .where(
+        and(
+          eq(schema.intradayTransactions.portfolioType, "CATALYST"),
+          gte(schema.intradayTransactions.executedAt, recentCutoff.toISOString())
+        )
+      )
+      .orderBy(desc(schema.intradayTransactions.executedAt))
+      .limit(15);
 
     // Build user message
     let userMessage = `## Catalyst Portfolio Analysis
@@ -215,6 +247,36 @@ ${pendingContext
 `;
     }
 
+    if (approvedSuggestions.length > 0) {
+      userMessage += `### ✅ Recently Executed Suggestions (Last 7 Days)
+These were marked as executed. Avoid duplicating trades unless new info changes the thesis.
+
+${approvedSuggestions
+  .map(
+    (s) =>
+      `- **${s.symbol}**: ${s.action} - ${s.rationale}
+  Created: ${new Date(s.createdAt || "").toLocaleDateString()}`
+  )
+  .join("\n\n")}
+
+`;
+    }
+
+    if (recentTrades.length > 0) {
+      userMessage += `### 🧾 Recent Manual Trades (Last 7 Days)
+These trades were entered manually. Do not recommend the same trade again unless thesis changes.
+
+${recentTrades
+  .map(
+    (t) =>
+      `- **${t.symbol}**: ${t.type} ${t.quantity} @ ₹${t.pricePerShare}
+  Executed: ${new Date(t.executedAt || "").toLocaleDateString()}`
+  )
+  .join("\n\n")}
+
+`;
+    }
+
     userMessage += `## Your Task
 
 1. **PRIORITIZE BY SCORE**: Focus on catalysts with high potential scores (±7 or higher)
@@ -223,7 +285,8 @@ ${pendingContext
    - \`get_technicals\`: Check if entry timing is favorable (RSI, SMA levels)
    - \`get_financials\`: Quick earnings quality check before committing
 3. **EVALUATE EXISTING POSITIONS**: Should any be exited based on catalyst updates?
-4. **OUTPUT**: 1-3 actionable recommendations prioritized by potential score.
+4. **AVOID DUPLICATES**: Do not repeat trades already executed in the last 7 days unless the thesis materially changed.
+5. **OUTPUT**: 1-3 actionable recommendations prioritized by potential score.
 
 **Scoring Guide:**
 - ±8 to ±10: High priority - validate and act quickly

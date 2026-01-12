@@ -6,7 +6,7 @@
  */
 
 import { db, schema } from "./db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 // ============================================================================
 // Types
@@ -308,6 +308,35 @@ export async function checkPortfolioDataFreshness(
     };
   }
 
+  const delistedStocks = await db
+    .select({ symbol: schema.watchlist.symbol })
+    .from(schema.watchlist)
+    .where(
+      and(
+        inArray(schema.watchlist.symbol, symbols),
+        eq(schema.watchlist.delisted, true)
+      )
+    );
+  const delistedSymbols = new Set(delistedStocks.map((s) => s.symbol));
+  const eligibleSymbols = symbols.filter((s) => !delistedSymbols.has(s));
+
+  if (eligibleSymbols.length === 0) {
+    return {
+      overall_status: "missing",
+      stock_reports: [],
+      summary: {
+        total_stocks: 0,
+        fresh: 0,
+        aging: 0,
+        stale: 0,
+        missing_analysis: 0,
+      },
+      recommendation: "No stocks to analyze",
+      can_proceed: false,
+      warnings: ["No eligible stocks for portfolio analysis"],
+    };
+  }
+
   // Get cached analysis for all symbols
   const cachedAnalysis = await db
     .select({
@@ -316,7 +345,7 @@ export async function checkPortfolioDataFreshness(
       expiresAt: schema.stockAnalysisCache.expiresAt,
     })
     .from(schema.stockAnalysisCache)
-    .where(inArray(schema.stockAnalysisCache.symbol, symbols));
+    .where(inArray(schema.stockAnalysisCache.symbol, eligibleSymbols));
 
   const analysisMap = new Map(
     cachedAnalysis.map((a) => [a.symbol, a])
@@ -329,7 +358,7 @@ export async function checkPortfolioDataFreshness(
       updatedAt: schema.technicalData.updatedAt,
     })
     .from(schema.technicalData)
-    .where(inArray(schema.technicalData.symbol, symbols));
+    .where(inArray(schema.technicalData.symbol, eligibleSymbols));
 
   const technicalMap = new Map(
     technicalData.map((t) => [t.symbol, t])
@@ -338,14 +367,14 @@ export async function checkPortfolioDataFreshness(
   // Build per-stock reports
   const stockReports: StockFreshnessReport[] = [];
   const summary = {
-    total_stocks: symbols.length,
+    total_stocks: eligibleSymbols.length,
     fresh: 0,
     aging: 0,
     stale: 0,
     missing_analysis: 0,
   };
 
-  for (const symbol of symbols) {
+  for (const symbol of eligibleSymbols) {
     const checks: DataFreshnessCheck[] = [];
 
     // Check cached analysis

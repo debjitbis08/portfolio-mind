@@ -33,6 +33,9 @@ export const GET: APIRoute = async () => {
       (h) => watchlistMap.get(h.symbol)?.delisted !== true
     );
     const holdingSymbols = new Set(activeHoldings.map((h) => h.symbol));
+    const holdingsNameMap = new Map(
+      holdingsList.map((holding) => [holding.symbol, holding.stockName])
+    );
 
     // Filter for interesting and not delisted
     const interestingStocks = allWatchlistStocks.filter(
@@ -58,10 +61,10 @@ export const GET: APIRoute = async () => {
     // Build response with holdings and watchlist sections
     const holdings = Array.from(holdingSymbols).map((symbol) => {
       const cached = eligibleCached.find((c) => c.symbol === symbol);
-      const watchlistEntry = interestingStocks.find((s) => s.symbol === symbol);
+      const watchlistEntry = watchlistMap.get(symbol);
       return {
         symbol,
-        name: watchlistEntry?.name || symbol,
+        name: holdingsNameMap.get(symbol) || watchlistEntry?.name || symbol,
         isHolding: true,
         isInteresting: interestingSymbols.has(symbol),
         analysis: cached

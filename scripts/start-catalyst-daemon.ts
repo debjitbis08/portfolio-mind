@@ -2,6 +2,7 @@ import {
   runBroadIndianScan,
   runCatalystTracker,
 } from "../src/lib/catalyst";
+import { runCatalystSuggestions } from "../src/lib/catalyst/suggestions-runner";
 
 // Configuration
 const SCAN_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
@@ -29,6 +30,17 @@ async function main() {
         newsMaxAgeHours: NEWS_LOOKBACK_HOURS,
         paperMode: false, // Live mode - save signals to database
       });
+
+      console.log("\n" + "─".repeat(60));
+      console.log("🧠 Generating catalyst suggestions...");
+      try {
+        await runCatalystSuggestions({
+          onProgress: (pct, msg) =>
+            console.log(`[Catalyst Suggestions] ${pct}% - ${msg}`),
+        });
+      } catch (error) {
+        console.error("[Catalyst Suggestions] Failed:", error);
+      }
 
       const duration = Date.now() - cycleStart;
       console.log(

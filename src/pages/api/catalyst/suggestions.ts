@@ -7,17 +7,9 @@
 
 import type { APIRoute } from "astro";
 import { requireAuth } from "../../../lib/middleware/requireAuth";
-import { db, schema, getCatalystHoldings, isPriceStale } from "../../../lib/db";
-import { eq, desc, inArray, and } from "drizzle-orm";
-import {
-  CatalystGeminiService,
-  type CatalystHoldingForAnalysis,
-  type CatalystSuggestion,
-} from "../../../lib/catalyst/catalyst-gemini";
-import YahooFinance from "yahoo-finance2";
-import { getSymbolMappings } from "../../../lib/mappings";
-
-const yahooFinance = new YahooFinance();
+import { db, schema } from "../../../lib/db";
+import { eq, desc, and } from "drizzle-orm";
+import { runCatalystSuggestions } from "../../../lib/catalyst/suggestions-runner";
 
 /**
  * GET: Retrieve catalyst portfolio suggestions
@@ -117,150 +109,15 @@ export const POST: APIRoute = async ({ request }) => {
 
   try {
     console.log("[Catalyst Suggestions] Starting analysis...");
-
-    // Get catalyst holdings
-    const holdings = await getCatalystHoldings();
-    const symbols = holdings.map((h) => h.symbol);
-
-    // Fetch prices for holdings
-    const mappings = await getSymbolMappings();
-    const mapSymbol = (s: string) => mappings[s] || s;
-    const uniqueYahooSymbols = [...new Set(symbols.map(mapSymbol))];
-
-    let quotes: Record<string, number> = {};
-
-    if (uniqueYahooSymbols.length > 0) {
-      // Check cache first
-      const cachedPrices = await db
-        .select()
-        .from(schema.priceCache)
-        .where(inArray(schema.priceCache.symbol, uniqueYahooSymbols));
-
-      for (const cached of cachedPrices) {
-        if (!isPriceStale(cached.updatedAt)) {
-          quotes[cached.symbol] = cached.price;
-        }
-      }
-
-      // Fetch missing from Yahoo
-      const missingSymbols = uniqueYahooSymbols.filter((s) => !quotes[s]);
-      if (missingSymbols.length > 0) {
-        try {
-          const nseSymbols = missingSymbols.map((s) => `${s}.NS`);
-          const results = await yahooFinance.quote(nseSymbols);
-          const arr = Array.isArray(results) ? results : [results];
-          for (const q of arr) {
-            if (q?.symbol && q.regularMarketPrice) {
-              quotes[q.symbol.replace(".NS", "")] = q.regularMarketPrice;
-            }
-          }
-        } catch (e) {
-          console.warn("[Catalyst Suggestions] Yahoo fetch failed:", e);
-        }
-      }
-    }
-
-    // Fetch technical data
-    const technicalData = await db.select().from(schema.technicalData);
-    const techMap = new Map<string, (typeof technicalData)[0]>();
-    for (const t of technicalData) {
-      techMap.set(t.symbol, t);
-    }
-
-    // Build holdings for analysis
-    const holdingsForAnalysis: CatalystHoldingForAnalysis[] = holdings.map(
-      (h) => {
-        const yahooSymbol = mapSymbol(h.symbol);
-        const currentPrice = quotes[yahooSymbol] || quotes[h.symbol] || 0;
-        const tech = techMap.get(yahooSymbol) || techMap.get(h.symbol);
-        const investedValue = h.investedValue;
-        const currentValue = currentPrice * h.quantity;
-        const returnsPercent =
-          investedValue > 0
-            ? ((currentValue - investedValue) / investedValue) * 100
-            : 0;
-
-        return {
-          symbol: h.symbol,
-          stock_name: h.stockName,
-          quantity: h.quantity,
-          avg_buy_price: h.avgBuyPrice,
-          current_price: currentPrice,
-          returns_percent: returnsPercent,
-          rsi_14: tech?.rsi14 ?? null,
-          price_vs_sma50: tech?.priceVsSma50 ?? null,
-          price_vs_sma200: tech?.priceVsSma200 ?? null,
-        };
-      }
-    );
-
-    // Get catalyst funds from settings
-    const [settings] = await db.select().from(schema.settings).limit(1);
-    const catalystFunds = settings?.catalystFunds ?? 0;
-
-    console.log(
-      `[Catalyst Suggestions] Analyzing ${holdingsForAnalysis.length} holdings with ₹${catalystFunds} available`
-    );
-
-    // Run catalyst analysis
-    const suggestions = await CatalystGeminiService.analyzeCatalystPortfolio(
-      holdingsForAnalysis,
-      catalystFunds,
-      (pct, msg) => console.log(`[Catalyst] ${pct}% - ${msg}`)
-    );
-
-    console.log(
-      `[Catalyst Suggestions] Generated ${suggestions.length} suggestions`
-    );
-
-    // Save suggestions to database
-    const savedSuggestions: any[] = [];
-
-    for (const suggestion of suggestions) {
-      const [saved] = await db
-        .insert(schema.suggestions)
-        .values({
-          symbol: suggestion.symbol,
-          stockName: suggestion.stock_name,
-          action: suggestion.action as any,
-          rationale: suggestion.rationale,
-          confidence: suggestion.confidence,
-          quantity: suggestion.quantity,
-          allocationAmount: suggestion.allocation_amount,
-          currentPrice: suggestion.entry_price,
-          targetPrice: suggestion.target_price,
-          technicalScore: suggestion.technical_score,
-          portfolioType: "CATALYST",
-          status: "pending",
-          citations: suggestion.citations
-            ? JSON.stringify(suggestion.citations)
-            : null,
-          // Catalyst-specific fields
-          stopLoss: suggestion.stop_loss,
-          maxHoldDays: suggestion.max_hold_days,
-          riskRewardRatio: suggestion.risk_reward_ratio,
-          trailingStop: suggestion.trailing_stop ? 1 : 0, // Convert boolean to SQLite integer
-          entryTrigger: suggestion.entry_trigger,
-          exitCondition: suggestion.exit_condition,
-          volatilityAtEntry: suggestion.volatility_at_entry,
-          catalystId: suggestion.catalyst_id,
-        })
-        .returning();
-
-      savedSuggestions.push(saved);
-    }
+    const result = await runCatalystSuggestions({
+      onProgress: (pct, msg) => console.log(`[Catalyst] ${pct}% - ${msg}`),
+    });
 
     return new Response(
       JSON.stringify({
         success: true,
-        count: savedSuggestions.length,
-        suggestions: savedSuggestions.map((s) => ({
-          id: s.id,
-          symbol: s.symbol,
-          action: s.action,
-          rationale: s.rationale,
-          confidence: s.confidence,
-        })),
+        count: result.count,
+        suggestions: result.suggestions,
       }),
       {
         status: 200,

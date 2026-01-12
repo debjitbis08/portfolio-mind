@@ -5,7 +5,7 @@
  * Gemini's multimodal capabilities to extract structured highlights.
  */
 
-import { GEMINI_API_KEY } from "astro:env/server";
+import { getRequiredEnv } from "../env";
 import { GoogleGenAI } from "@google/genai";
 import puppeteer from "puppeteer";
 import { db, schema } from "../db";
@@ -34,6 +34,10 @@ export interface DocumentLink {
 }
 
 const MAX_MANUAL_TEXT_CHARS = 20000;
+
+function getGeminiApiKey(): string {
+  return getRequiredEnv("GEMINI_API_KEY");
+}
 
 function normalizeManualText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -311,16 +315,12 @@ export async function processConcallPDF(
 ): Promise<ConcallHighlights> {
   console.log(`[ConcallProcessor] Processing PDF: ${pdfUrl}`);
 
-  if (!GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY not configured");
-  }
-
   // Download the PDF with retry logic
   const pdfBuffer = await downloadPDFWithRetry(pdfUrl);
   const pdfBase64 = Buffer.from(pdfBuffer).toString("base64");
 
   // Initialize Gemini
-  const genai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const genai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
   // Use Gemini to analyze the PDF
   const result = await genai.models.generateContent({
@@ -373,17 +373,13 @@ export async function processConcallText(
   quarter: string,
   callDateOverride?: string | null
 ): Promise<ConcallHighlights> {
-  if (!GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY not configured");
-  }
-
   const normalized = normalizeManualText(transcript);
   if (normalized.length < 200) {
     throw new Error("Manual concall text is too short to analyze");
   }
 
   const trimmed = truncateManualText(normalized);
-  const genai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const genai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
   const result = await genai.models.generateContent({
     model: "gemini-3-flash-preview",

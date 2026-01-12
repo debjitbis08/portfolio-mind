@@ -10,6 +10,8 @@ const MARKET_OPEN_HOUR = 9;
 const MARKET_OPEN_MINUTE = 15;
 const MARKET_CLOSE_HOUR = 15;
 const MARKET_CLOSE_MINUTE = 30;
+const IST_OFFSET_MINUTES = 330;
+const IST_OFFSET_MS = IST_OFFSET_MINUTES * 60 * 1000;
 
 // NSE holidays for 2026 (extend this list as needed)
 // Source: NSE website - https://www.nseindia.com/
@@ -55,9 +57,8 @@ export function isIndianMarketOpen(now?: Date): boolean {
   const date = now || new Date();
 
   // Convert to IST (UTC+5:30)
-  const istOffset = 5.5 * 60; // minutes
   const utcMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
-  const istMinutes = utcMinutes + istOffset;
+  const istMinutes = utcMinutes + IST_OFFSET_MINUTES;
 
   // Handle day rollover
   let istHour = Math.floor(istMinutes / 60) % 24;
@@ -65,7 +66,7 @@ export function isIndianMarketOpen(now?: Date): boolean {
 
   // Get IST day of week (0 = Sunday, 6 = Saturday)
   // If IST time rolled over to next day, also adjust the day
-  const istDate = new Date(date.getTime() + istOffset * 60 * 1000);
+  const istDate = new Date(date.getTime() + IST_OFFSET_MS);
   const dayOfWeek = istDate.getUTCDay();
 
   // Weekend check
@@ -89,6 +90,34 @@ export function isIndianMarketOpen(now?: Date): boolean {
   );
 }
 
+function isTradingDay(istDate: Date): boolean {
+  const dayOfWeek = istDate.getUTCDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return false;
+  }
+  return !isHoliday(istDate);
+}
+
+function getMarketOpenUtcDate(istDate: Date): Date {
+  const istMidnightUtc = new Date(
+    Date.UTC(
+      istDate.getUTCFullYear(),
+      istDate.getUTCMonth(),
+      istDate.getUTCDate(),
+      0,
+      0,
+      0,
+      0
+    )
+  );
+  const openMinutesFromUtcMidnight =
+    MARKET_OPEN_HOUR * 60 + MARKET_OPEN_MINUTE - IST_OFFSET_MINUTES;
+
+  return new Date(
+    istMidnightUtc.getTime() + openMinutesFromUtcMidnight * 60 * 1000
+  );
+}
+
 /**
  * Get the next market open time.
  * Useful for logging and display purposes.
@@ -99,26 +128,30 @@ export function isIndianMarketOpen(now?: Date): boolean {
 export function getNextMarketOpen(now?: Date): Date {
   const date = now || new Date();
 
-  // Start from tomorrow if market is closed today after close time
-  const istOffset = 5.5 * 60 * 60 * 1000; // milliseconds
+  const istDateNow = new Date(date.getTime() + IST_OFFSET_MS);
+  const currentTimeMinutes =
+    istDateNow.getUTCHours() * 60 + istDateNow.getUTCMinutes();
+  const openTimeMinutes = MARKET_OPEN_HOUR * 60 + MARKET_OPEN_MINUTE;
+  const closeTimeMinutes = MARKET_CLOSE_HOUR * 60 + MARKET_CLOSE_MINUTE;
   let checkDate = new Date(date.getTime());
 
-  // If we're past market close today, start checking from tomorrow
-  if (!isIndianMarketOpen(date)) {
+  if (isTradingDay(istDateNow) && currentTimeMinutes < openTimeMinutes) {
+    return getMarketOpenUtcDate(istDateNow);
+  }
+
+  // If we're past market close or not a trading day, start checking from tomorrow
+  if (!isTradingDay(istDateNow) || currentTimeMinutes >= closeTimeMinutes) {
+    checkDate = new Date(checkDate.getTime() + 24 * 60 * 60 * 1000);
+  } else {
+    // Market hours or just closed: next open is the next trading day
     checkDate = new Date(checkDate.getTime() + 24 * 60 * 60 * 1000);
   }
 
   // Find next trading day
   for (let i = 0; i < 10; i++) {
-    const istDate = new Date(checkDate.getTime() + istOffset);
-    const dayOfWeek = istDate.getUTCDay();
-
-    // Skip weekends
-    if (dayOfWeek !== 0 && dayOfWeek !== 6 && !isHoliday(istDate)) {
-      // Set to market open time (9:15 AM IST)
-      const openDate = new Date(istDate);
-      openDate.setUTCHours(MARKET_OPEN_HOUR - 5, MARKET_OPEN_MINUTE - 30, 0, 0); // Convert IST to UTC
-      return openDate;
+    const istDate = new Date(checkDate.getTime() + IST_OFFSET_MS);
+    if (isTradingDay(istDate)) {
+      return getMarketOpenUtcDate(istDate);
     }
 
     checkDate = new Date(checkDate.getTime() + 24 * 60 * 60 * 1000);

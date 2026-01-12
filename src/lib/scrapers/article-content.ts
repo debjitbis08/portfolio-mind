@@ -23,6 +23,7 @@ const PAYWALL_INDICATORS = [
 const MIN_CONTENT_CHARS = 200;
 const DEFAULT_MAX_CONTENT_CHARS = 3000;
 const DEFAULT_MAX_PDF_BYTES = 5 * 1024 * 1024;
+const GOOGLE_NEWS_DECODE_FAILURES = new Set<string>();
 
 type ArticleContentType = "html" | "pdf";
 
@@ -267,6 +268,51 @@ async function extractPdfTextWithGemini(
   return text ? text.slice(0, maxChars) : null;
 }
 
+async function resolveGoogleNewsUrlViaRedirect(
+  url: string
+): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (response.url && !response.url.includes("news.google.com")) {
+      return response.url;
+    }
+
+    const html = await response.text();
+    const metaRefreshMatch = html.match(
+      /http-equiv=["']refresh["'][^>]*content=["'][^"']*url=([^"']+)/i
+    );
+    if (metaRefreshMatch && metaRefreshMatch[1]) {
+      const decoded = metaRefreshMatch[1].trim();
+      if (!decoded.includes("news.google.com")) {
+        return decoded;
+      }
+    }
+
+    const canonicalMatch = html.match(
+      /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i
+    );
+    if (canonicalMatch && canonicalMatch[1]) {
+      const decoded = canonicalMatch[1].trim();
+      if (!decoded.includes("news.google.com")) {
+        return decoded;
+      }
+    }
+  } catch {
+    // Ignore and fall back to no content.
+  }
+
+  return null;
+}
+
 export async function fetchArticleContent(
   url: string,
   source: string,
@@ -283,10 +329,20 @@ export async function fetchArticleContent(
     ) {
       const resolvedUrl = await resolveGoogleNewsUrl(url);
       if (!resolvedUrl) {
-        console.warn(`[News] Failed to decode Google News URL for ${source}`);
-        return null;
+        const fallbackUrl = await resolveGoogleNewsUrlViaRedirect(url);
+        if (!fallbackUrl) {
+          if (!GOOGLE_NEWS_DECODE_FAILURES.has(source)) {
+            GOOGLE_NEWS_DECODE_FAILURES.add(source);
+            console.info(
+              `[News] Skipping Google News decode for ${source} (unable to resolve)`
+            );
+          }
+          return null;
+        }
+        targetUrl = fallbackUrl;
+      } else {
+        targetUrl = resolvedUrl;
       }
-      targetUrl = resolvedUrl;
     }
 
     const response = await fetch(targetUrl, {

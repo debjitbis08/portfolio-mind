@@ -8,7 +8,7 @@
  * Uses Discourse API endpoints (ValuePickr is Discourse-based).
  */
 
-import { GEMINI_API_KEY } from "astro:env/server";
+import { getRequiredEnv } from "../env";
 
 interface ValuePickrPost {
   id: number;
@@ -57,6 +57,10 @@ export interface QualitativeIntel {
 
 // We just filter out very short junk like "Thanks" or emojis
 const MIN_POST_LENGTH = 15;
+
+function getGeminiApiKey(): string {
+  return getRequiredEnv("GEMINI_API_KEY");
+}
 
 export class ValuePickrService {
   private static BASE_URL = "https://forum.valuepickr.com";
@@ -235,7 +239,7 @@ export class ValuePickrService {
     try {
       // Dynamic import to avoid build issues
       const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
       // Build the prompt with full content
       const initialPostsText = discussion.initial_posts

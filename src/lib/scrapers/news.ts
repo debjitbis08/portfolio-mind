@@ -9,7 +9,7 @@
  */
 
 import { XMLParser } from "fast-xml-parser";
-import { GEMINI_API_KEY } from "astro:env/server";
+import { getRequiredEnv } from "../env";
 
 export interface NewsItem {
   title: string;
@@ -48,6 +48,10 @@ export interface NewsIntel {
   fetched_at: string;
 }
 
+function getGeminiApiKey(): string {
+  return getRequiredEnv("GEMINI_API_KEY");
+}
+
 // Known paywall indicators - more specific phrases to avoid false positives
 // from site-wide "subscribe" buttons in nav/footer
 const PAYWALL_INDICATORS = [
@@ -82,6 +86,8 @@ const FREE_SOURCES = [
   "yahoo finance",
 ];
 
+const GOOGLE_NEWS_DECODE_FAILURES = new Set<string>();
+
 /**
  * Extract base64 string from Google News URL
  */
@@ -115,6 +121,51 @@ function extractBase64FromGoogleNewsUrl(
       }`,
     };
   }
+}
+
+async function resolveGoogleNewsUrlViaRedirect(
+  url: string
+): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (response.url && !response.url.includes("news.google.com")) {
+      return response.url;
+    }
+
+    const html = await response.text();
+    const metaRefreshMatch = html.match(
+      /http-equiv=["']refresh["'][^>]*content=["'][^"']*url=([^"']+)/i
+    );
+    if (metaRefreshMatch && metaRefreshMatch[1]) {
+      const decoded = metaRefreshMatch[1].trim();
+      if (!decoded.includes("news.google.com")) {
+        return decoded;
+      }
+    }
+
+    const canonicalMatch = html.match(
+      /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i
+    );
+    if (canonicalMatch && canonicalMatch[1]) {
+      const decoded = canonicalMatch[1].trim();
+      if (!decoded.includes("news.google.com")) {
+        return decoded;
+      }
+    }
+  } catch {
+    // Ignore and fall back to no content.
+  }
+
+  return null;
 }
 
 /**
@@ -473,7 +524,7 @@ async function summarizeWithLLM(
 
   try {
     const { GoogleGenAI } = await import("@google/genai");
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
     const articlesText = articles
       .map(
