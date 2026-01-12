@@ -23,22 +23,30 @@ export interface GoogleFinanceQuote {
 export async function getGoogleFinanceQuote(
   symbol: string
 ): Promise<GoogleFinanceQuote | null> {
+  const normalizedSymbol = symbol
+    .trim()
+    .toUpperCase()
+    .replace(/\.(NS|BO|NSE|BSE)$/, "");
+
   // Check if symbol already has exchange suffix (e.g., "522195:BOM")
-  if (symbol.includes(":")) {
+  if (normalizedSymbol.includes(":")) {
     try {
-      const quote = await scrapeGoogleFinance(symbol);
+      const quote = await scrapeGoogleFinance(normalizedSymbol);
       if (quote) {
         // Return original symbol without suffix for consistency
-        const baseSymbol = symbol.split(":")[0];
+        const baseSymbol = normalizedSymbol.split(":")[0];
         return { ...quote, symbol: baseSymbol };
       }
     } catch (error) {
-      console.error(`[GoogleFinance] Failed for pre-suffixed ${symbol}:`, error);
+      console.error(
+        `[GoogleFinance] Failed for pre-suffixed ${normalizedSymbol}:`,
+        error
+      );
     }
     return null; // If pre-suffixed symbol fails, don't try alternatives
   }
 
-  const isBseCode = /^\d{5,6}$/.test(symbol);
+  const isBseCode = /^\d{5,6}$/.test(normalizedSymbol);
 
   // HEURISTIC: If symbol is all digits (BSE scrip code), it's BSE-only
   // Rationale:
@@ -48,27 +56,35 @@ export async function getGoogleFinanceQuote(
   // - Therefore, a numeric symbol can ONLY exist on BSE, never on NSE
   // - Trying NSE with numeric codes often returns wrong/stale data from unrelated securities
   if (isBseCode) {
-    console.log(`[GoogleFinance] ${symbol} is numeric (BSE scrip code), skipping NSE`);
+    console.log(
+      `[GoogleFinance] ${normalizedSymbol} is numeric (BSE scrip code), skipping NSE`
+    );
     try {
-      const quote = await scrapeGoogleFinance(`${symbol}:BOM`);
+      const quote = await scrapeGoogleFinance(`${normalizedSymbol}:BOM`);
       if (quote) {
-        return { ...quote, symbol };
+        return { ...quote, symbol: normalizedSymbol };
       }
     } catch (error) {
-      console.error(`[GoogleFinance] Failed for BSE scrip code ${symbol}:`, error);
+      console.error(
+        `[GoogleFinance] Failed for BSE scrip code ${normalizedSymbol}:`,
+        error
+      );
     }
     return null;
   }
 
   // For alphabetic symbols, try both exchanges
   // NSE first (more liquid), then BSE as fallback
-  const suffixes = [`${symbol}:NSE`, `${symbol}:BOM`];
+  const suffixes = [
+    `${normalizedSymbol}:NSE`,
+    `${normalizedSymbol}:BOM`,
+  ];
 
   for (const gfSymbol of suffixes) {
     try {
       const quote = await scrapeGoogleFinance(gfSymbol);
       if (quote) {
-        return { ...quote, symbol };
+        return { ...quote, symbol: normalizedSymbol };
       }
     } catch (error) {
       console.error(`[GoogleFinance] Failed for ${gfSymbol}:`, error);
