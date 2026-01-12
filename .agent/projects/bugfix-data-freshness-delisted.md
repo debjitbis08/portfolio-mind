@@ -13,6 +13,7 @@
 
 ## Progress
 - Updated `src/lib/data-freshness.ts` to exclude delisted symbols when building portfolio freshness reports.
+- Updated `src/pages/api/holdings.ts` to exclude delisted symbols from holdings listings.
 
 ## Next Steps
 - Validate dashboard Data Freshness Status response if needed.

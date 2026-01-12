@@ -156,6 +156,8 @@ export default function CatalystPage() {
   const [statusFilter, setStatusFilter] = createSignal<string>("active");
   const [potentialFilter, setPotentialFilter] =
     createSignal<string>("monitoring");
+  const [suggestionFilter, setSuggestionFilter] =
+    createSignal<string>("all");
 
   // Helper to render text with clickable citations
   const renderTextWithCitations = (
@@ -296,10 +298,16 @@ export default function CatalystPage() {
 
   // Fetch catalyst suggestions (from Pass 3)
   const [catalystSuggestions, { refetch: refetchSuggestions }] = createResource(
-    () => ({ enabled: typeof window !== "undefined" }),
-    async ({ enabled }) => {
+    () => ({
+      filter: suggestionFilter(),
+      enabled: typeof window !== "undefined",
+    }),
+    async ({ filter, enabled }) => {
       if (!enabled) return [];
-      const res = await fetch(`${getBaseUrl()}/api/catalyst/suggestions`);
+      const url = filter
+        ? `${getBaseUrl()}/api/catalyst/suggestions?status=${filter}`
+        : `${getBaseUrl()}/api/catalyst/suggestions`;
+      const res = await fetch(url);
       const data = await res.json();
       return data.suggestions as CatalystSuggestion[];
     }
@@ -1194,6 +1202,58 @@ export default function CatalystPage() {
             <Show when={analysisError()}>
               <div class="text-sm text-red">{analysisError()}</div>
             </Show>
+            <div class="flex flex-wrap gap-2">
+              <button
+                onClick={() => setSuggestionFilter("all")}
+                class={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  suggestionFilter() === "all"
+                    ? "bg-mauve/20 text-mauve"
+                    : "bg-surface1 text-subtext0 hover:text-text"
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setSuggestionFilter("pending")}
+                class={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  suggestionFilter() === "pending"
+                    ? "bg-mauve/20 text-mauve"
+                    : "bg-surface1 text-subtext0 hover:text-text"
+                }`}
+              >
+                Pending
+              </button>
+              <button
+                onClick={() => setSuggestionFilter("approved")}
+                class={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  suggestionFilter() === "approved"
+                    ? "bg-mauve/20 text-mauve"
+                    : "bg-surface1 text-subtext0 hover:text-text"
+                }`}
+              >
+                Executed
+              </button>
+              <button
+                onClick={() => setSuggestionFilter("rejected")}
+                class={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  suggestionFilter() === "rejected"
+                    ? "bg-mauve/20 text-mauve"
+                    : "bg-surface1 text-subtext0 hover:text-text"
+                }`}
+              >
+                Rejected
+              </button>
+              <button
+                onClick={() => setSuggestionFilter("expired")}
+                class={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  suggestionFilter() === "expired"
+                    ? "bg-mauve/20 text-mauve"
+                    : "bg-surface1 text-subtext0 hover:text-text"
+                }`}
+              >
+                Expired
+              </button>
+            </div>
             <Show
               when={!catalystSuggestions.loading}
               fallback={<div class="text-subtext0">Loading suggestions...</div>}
@@ -1243,7 +1303,9 @@ export default function CatalystPage() {
                                     : "bg-overlay0 text-subtext0"
                                 }`}
                               >
-                                {suggestion.status}
+                                {suggestion.status === "approved"
+                                  ? "executed"
+                                  : suggestion.status}
                               </span>
                             </div>
                             <Show when={suggestion.stockName}>

@@ -13,7 +13,7 @@ import {
   schema,
   type PortfolioType,
 } from "../../lib/db";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import YahooFinance from "yahoo-finance2";
 import {
   getZoneStatus,
@@ -82,6 +82,23 @@ export const GET: APIRoute = async ({ request }) => {
 
     if (requestedSymbol) {
       holdings = holdings.filter((h) => h.symbol === requestedSymbol);
+    }
+
+    if (holdings.length > 0) {
+      const delisted = await db
+        .select({ symbol: schema.watchlist.symbol })
+        .from(schema.watchlist)
+        .where(
+          and(
+            inArray(
+              schema.watchlist.symbol,
+              holdings.map((h) => h.symbol)
+            ),
+            eq(schema.watchlist.delisted, true)
+          )
+        );
+      const delistedSymbols = new Set(delisted.map((d) => d.symbol));
+      holdings = holdings.filter((h) => !delistedSymbols.has(h.symbol));
     }
 
     if (holdings.length === 0) {
