@@ -50,6 +50,20 @@ if (!session) {
                 />
               </div>
             </div>
+            <div>
+              <label class="block text-sm text-subtext0 mb-2"
+                >Short-Term Trading Cash Available</label
+              >
+              <div class="relative">
+                <span class="absolute left-3 top-2 text-subtext0">₹</span>
+                <input
+                  type="number"
+                  id="catalyst-funds"
+                  class="w-full bg-surface1 border border-surface1 rounded-lg py-2 pl-7 pr-3 text-text focus:outline-none focus:border-mauve transition-colors"
+                  placeholder="0"
+                />
+              </div>
+            </div>
           </div>
         </section>
 
@@ -266,6 +280,9 @@ if (!session) {
   const fundsInput = document.getElementById(
     "available-funds"
   ) as HTMLInputElement;
+  const catalystFundsInput = document.getElementById(
+    "catalyst-funds"
+  ) as HTMLInputElement;
   const screenerEmailInput = document.getElementById(
     "screener-email"
   ) as HTMLInputElement;
@@ -360,8 +377,10 @@ if (!session) {
       const { settings } = await res.json();
 
       if (settings) {
-        if (settings.available_funds)
+        if (settings.available_funds !== undefined)
           fundsInput.value = settings.available_funds;
+        if (settings.catalyst_funds !== undefined)
+          catalystFundsInput.value = settings.catalyst_funds;
         if (settings.screener_email)
           screenerEmailInput.value = settings.screener_email;
         if (settings.has_screener_password) {
@@ -537,6 +556,7 @@ if (!session) {
 
     const payload: any = {
       available_funds: parseFloat(fundsInput.value) || 0,
+      catalyst_funds: parseFloat(catalystFundsInput.value) || 0,
       screener_email: screenerEmailInput.value,
       screener_urls: urls,
     };
