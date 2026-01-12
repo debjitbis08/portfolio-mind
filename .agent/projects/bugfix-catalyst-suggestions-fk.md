@@ -11,9 +11,12 @@
 
 ## Changes
 - Added validation for `catalyst_id` before insert; unknown IDs are stored as `null` with a warning.
+- Include catalyst IDs in AI context and require exact ID usage to avoid invented slugs.
 
 ## Files
 - `src/pages/api/catalyst/suggestions.ts`
+- `src/lib/catalyst/catalyst-gemini.ts`
 
 ## Next Steps
 - Re-run catalyst analysis and confirm suggestions insert succeeds.
+- Verify `catalyst_id` matches actual UUIDs in `potential_catalysts`.

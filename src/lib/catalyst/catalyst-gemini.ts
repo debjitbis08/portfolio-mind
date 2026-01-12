@@ -18,6 +18,7 @@ import {
 import { db, schema, getCatalystHoldings, type Holding } from "../db";
 import { eq, desc, inArray, and, gte } from "drizzle-orm";
 import { getRequiredEnv } from "../env";
+import { getMarketStatusMessage } from "./market-hours";
 
 function getGeminiApiKey(): string {
   return getRequiredEnv("GEMINI_API_KEY");
@@ -200,6 +201,9 @@ ${
 ### Available Cash
 ₹${availableFunds.toLocaleString("en-IN")}
 
+### Market Status
+${getMarketStatusMessage()}
+
 `;
 
     // Add potential catalysts with thesis (from Pass 2)
@@ -221,6 +225,7 @@ ${potentialCatalystsData
     return `- **${
       c.primaryTicker || symbols[0] || "Unknown"
     }** ${scoreEmoji} Score: ${score > 0 ? "+" : ""}${score}/10
+  **ID**: ${c.id}
   **Thesis**: ${c.shortTermThesis}
   **Sentiment**: ${c.sentiment || "NEUTRAL"} | **Confidence**: ${
       c.confidence || 5
@@ -488,7 +493,7 @@ Return suggestions as JSON:
 - \`entry_trigger\`: Specific condition to enter (e.g., "Break of HOD", "Limit at VWAP")
 - \`exit_condition\`: Event-based exit criteria (e.g., "Exit Jan 14 pre-open")
 - \`volatility_at_entry\`: ATR value for position sizing context
-- \`catalyst_id\`: Link to potential catalyst ID if applicable
+- \`catalyst_id\`: Link to potential catalyst ID if applicable. Use the exact ID listed in "Active Catalyst Opportunities" and never invent or guess.
 
 If no HIGH CONVICTION setups → return empty array: []
 Better to stay in cash than force a trade.`;
