@@ -1,5 +1,5 @@
 import YahooFinance from "yahoo-finance2";
-import { inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import {
   db,
   schema,
@@ -123,6 +123,35 @@ export async function runCatalystSuggestions(options?: {
     `[Catalyst Suggestions] Generated ${suggestions.length} suggestions`
   );
 
+  const suggestionSymbols = [
+    ...new Set(suggestions.map((s) => s.symbol).filter(Boolean)),
+  ];
+
+  const pendingBySymbol = new Map<string, { id: string }>();
+  if (suggestionSymbols.length > 0) {
+    const pendingSuggestions = await db
+      .select({
+        id: schema.suggestions.id,
+        symbol: schema.suggestions.symbol,
+        createdAt: schema.suggestions.createdAt,
+      })
+      .from(schema.suggestions)
+      .where(
+        and(
+          eq(schema.suggestions.portfolioType, "CATALYST"),
+          eq(schema.suggestions.status, "pending"),
+          inArray(schema.suggestions.symbol, suggestionSymbols)
+        )
+      )
+      .orderBy(desc(schema.suggestions.createdAt));
+
+    for (const pending of pendingSuggestions) {
+      if (!pendingBySymbol.has(pending.symbol)) {
+        pendingBySymbol.set(pending.symbol, { id: pending.id });
+      }
+    }
+  }
+
   const requestedCatalystIds = suggestions
     .map((s) => s.catalyst_id)
     .filter((id): id is string => Boolean(id));
@@ -160,35 +189,70 @@ export async function runCatalystSuggestions(options?: {
       );
     }
 
-    const [saved] = await db
-      .insert(schema.suggestions)
-      .values({
-        symbol: suggestion.symbol,
-        stockName: suggestion.stock_name,
-        action: suggestion.action as any,
-        rationale: suggestion.rationale,
-        confidence: suggestion.confidence,
-        quantity: suggestion.quantity,
-        allocationAmount: suggestion.allocation_amount,
-        currentPrice: suggestion.entry_price,
-        targetPrice: suggestion.target_price,
-        technicalScore: suggestion.technical_score,
-        portfolioType: "CATALYST",
-        status: "pending",
-        citations: suggestion.citations
-          ? JSON.stringify(suggestion.citations)
-          : null,
-        // Catalyst-specific fields
-        stopLoss: suggestion.stop_loss,
-        maxHoldDays: suggestion.max_hold_days,
-        riskRewardRatio: suggestion.risk_reward_ratio,
-        trailingStop: suggestion.trailing_stop ? 1 : 0,
-        entryTrigger: suggestion.entry_trigger,
-        exitCondition: suggestion.exit_condition,
-        volatilityAtEntry: suggestion.volatility_at_entry,
-        catalystId,
-      })
-      .returning();
+    const existingPending = pendingBySymbol.get(suggestion.symbol);
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    const [saved] = existingPending
+      ? await db
+          .update(schema.suggestions)
+          .set({
+            stockName: suggestion.stock_name,
+            action: suggestion.action as any,
+            rationale: suggestion.rationale,
+            confidence: suggestion.confidence,
+            quantity: suggestion.quantity,
+            allocationAmount: suggestion.allocation_amount,
+            currentPrice: suggestion.entry_price,
+            targetPrice: suggestion.target_price,
+            technicalScore: suggestion.technical_score,
+            status: "pending",
+            citations: suggestion.citations
+              ? JSON.stringify(suggestion.citations)
+              : null,
+            // Catalyst-specific fields
+            stopLoss: suggestion.stop_loss,
+            maxHoldDays: suggestion.max_hold_days,
+            riskRewardRatio: suggestion.risk_reward_ratio,
+            trailingStop: suggestion.trailing_stop ? 1 : 0,
+            entryTrigger: suggestion.entry_trigger,
+            exitCondition: suggestion.exit_condition,
+            volatilityAtEntry: suggestion.volatility_at_entry,
+            catalystId,
+            createdAt: new Date().toISOString(),
+            expiresAt: expiresAt.toISOString(),
+          })
+          .where(eq(schema.suggestions.id, existingPending.id))
+          .returning()
+      : await db
+          .insert(schema.suggestions)
+          .values({
+            symbol: suggestion.symbol,
+            stockName: suggestion.stock_name,
+            action: suggestion.action as any,
+            rationale: suggestion.rationale,
+            confidence: suggestion.confidence,
+            quantity: suggestion.quantity,
+            allocationAmount: suggestion.allocation_amount,
+            currentPrice: suggestion.entry_price,
+            targetPrice: suggestion.target_price,
+            technicalScore: suggestion.technical_score,
+            portfolioType: "CATALYST",
+            status: "pending",
+            citations: suggestion.citations
+              ? JSON.stringify(suggestion.citations)
+              : null,
+            // Catalyst-specific fields
+            stopLoss: suggestion.stop_loss,
+            maxHoldDays: suggestion.max_hold_days,
+            riskRewardRatio: suggestion.risk_reward_ratio,
+            trailingStop: suggestion.trailing_stop ? 1 : 0,
+            entryTrigger: suggestion.entry_trigger,
+            exitCondition: suggestion.exit_condition,
+            volatilityAtEntry: suggestion.volatility_at_entry,
+            catalystId,
+          })
+          .returning();
 
     savedSuggestions.push({
       id: saved.id,
