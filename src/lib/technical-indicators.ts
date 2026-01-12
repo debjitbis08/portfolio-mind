@@ -38,14 +38,20 @@ export async function fetchHistoricalPrices(
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  // Determine if symbol is a BSE numeric code (try BSE first)
-  const isBseCode = /^\d{5,6}$/.test(symbol);
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  const yahooSymbol = normalizedSymbol
+    .replace(/\.NSE$/, ".NS")
+    .replace(/\.BSE$/, ".BO");
+  const hasYahooSuffix = /\.(NS|BO)$/.test(yahooSymbol);
+  const baseSymbol = yahooSymbol.replace(/\.(NS|BO)$/, "");
 
-  const tryFetch = async (suffix: string, timeoutMs: number = 8000) => {
-    const yahooSymbol = `${symbol}${suffix}`;
+  // Determine if symbol is a BSE numeric code (try BSE first)
+  const isBseCode = /^\d{5,6}$/.test(baseSymbol);
+
+  const tryFetch = async (fullSymbol: string, timeoutMs: number = 8000) => {
 
     // Wrap in timeout promise
-    const fetchPromise = yahooFinance.chart(yahooSymbol, {
+    const fetchPromise = yahooFinance.chart(fullSymbol, {
       period1: startDate,
       period2: endDate,
       interval: "1d",
@@ -68,15 +74,28 @@ export async function fetchHistoricalPrices(
       }));
   };
 
-  // Try primary exchange first, then fallback
-  const [primary, fallback] = isBseCode ? [".BO", ".NS"] : [".NS", ".BO"];
+  let tickersToTry: string[] = [];
+  if (hasYahooSuffix) {
+    tickersToTry = [yahooSymbol];
+    if (yahooSymbol.endsWith(".NS")) {
+      tickersToTry.push(`${baseSymbol}.BO`);
+    } else if (yahooSymbol.endsWith(".BO")) {
+      tickersToTry.push(`${baseSymbol}.NS`);
+    }
+  } else {
+    const [primary, fallback] = isBseCode ? [".BO", ".NS"] : [".NS", ".BO"];
+    tickersToTry = [`${baseSymbol}${primary}`, `${baseSymbol}${fallback}`];
+  }
 
   try {
-    return await tryFetch(primary);
+    return await tryFetch(tickersToTry[0]);
   } catch (primaryError) {
     // Primary failed, try fallback
     try {
-      return await tryFetch(fallback);
+      if (tickersToTry.length < 2) {
+        throw primaryError;
+      }
+      return await tryFetch(tickersToTry[1]);
     } catch (error) {
       // Log the actual error type for debugging
       const errorMsg =
