@@ -23,9 +23,25 @@ type Lot = {
   stopLoss: number | null;
 };
 
+type PerformanceTransaction = {
+  id: string;
+  symbol: string;
+  type: "BUY" | "SELL" | "OPENING_BALANCE";
+  quantity: number;
+  value: number;
+  executedAt: string | null;
+};
+
 export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPerformanceMetrics> {
-  const transactions = await db
-    .select()
+  const brokerTransactions = await db
+    .select({
+      id: schema.transactions.id,
+      symbol: schema.transactions.symbol,
+      type: schema.transactions.type,
+      quantity: schema.transactions.quantity,
+      value: schema.transactions.value,
+      executedAt: schema.transactions.executedAt,
+    })
     .from(schema.transactions)
     .where(
       and(
@@ -34,6 +50,35 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       )
     )
     .orderBy(asc(schema.transactions.executedAt));
+
+  const intradayTransactions = await db
+    .select({
+      id: schema.intradayTransactions.id,
+      symbol: schema.intradayTransactions.symbol,
+      type: schema.intradayTransactions.type,
+      quantity: schema.intradayTransactions.quantity,
+      pricePerShare: schema.intradayTransactions.pricePerShare,
+      executedAt: schema.intradayTransactions.executedAt,
+      createdAt: schema.intradayTransactions.createdAt,
+    })
+    .from(schema.intradayTransactions)
+    .where(eq(schema.intradayTransactions.portfolioType, "CATALYST"));
+
+  const transactions: PerformanceTransaction[] = [
+    ...brokerTransactions,
+    ...intradayTransactions.map((tx) => ({
+      id: tx.id,
+      symbol: tx.symbol,
+      type: tx.type,
+      quantity: tx.quantity,
+      value: tx.quantity * tx.pricePerShare,
+      executedAt: tx.executedAt || tx.createdAt,
+    })),
+  ].sort((a, b) => {
+    const aTime = new Date(a.executedAt || 0).getTime();
+    const bTime = new Date(b.executedAt || 0).getTime();
+    return aTime - bTime;
+  });
 
   if (transactions.length === 0) {
     return {
@@ -50,17 +95,41 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
     };
   }
 
-  const transactionIds = transactions.map((t) => t.id);
-  const suggestionLinks =
-    transactionIds.length > 0
+  const brokerTransactionIds = brokerTransactions.map((t) => t.id);
+  const intradayTransactionIds = intradayTransactions.map((t) => t.id);
+  const brokerSuggestionLinks =
+    brokerTransactionIds.length > 0
       ? await db
           .select({
             transactionId: schema.suggestionTransactions.transactionId,
             suggestionId: schema.suggestionTransactions.suggestionId,
           })
           .from(schema.suggestionTransactions)
-          .where(inArray(schema.suggestionTransactions.transactionId, transactionIds))
+          .where(
+            inArray(schema.suggestionTransactions.transactionId, brokerTransactionIds)
+          )
       : [];
+
+  const intradaySuggestionLinks =
+    intradayTransactionIds.length > 0
+      ? await db
+          .select({
+            transactionId: schema.intradaySuggestionLinks.intradayTransactionId,
+            suggestionId: schema.intradaySuggestionLinks.suggestionId,
+          })
+          .from(schema.intradaySuggestionLinks)
+          .where(
+            inArray(
+              schema.intradaySuggestionLinks.intradayTransactionId,
+              intradayTransactionIds
+            )
+          )
+      : [];
+
+  const suggestionLinks = [
+    ...brokerSuggestionLinks,
+    ...intradaySuggestionLinks,
+  ];
 
   const linkedSuggestionIds = [
     ...new Set(suggestionLinks.map((l) => l.suggestionId)),

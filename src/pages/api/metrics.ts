@@ -55,6 +55,15 @@ export const GET: APIRoute = async ({ request, url }) => {
   if (authError) return authError;
 
   try {
+    type MetricsTransaction = {
+      id: string;
+      symbol: string;
+      type: "BUY" | "SELL" | "OPENING_BALANCE";
+      quantity: number;
+      value: number;
+      executedAt: string;
+    };
+
     const daysBack = parseInt(url.searchParams.get("days") || "365", 10);
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysBack);
@@ -66,27 +75,90 @@ export const GET: APIRoute = async ({ request, url }) => {
       .where(
         and(
           inArray(schema.suggestions.status, ["approved", "rejected"]),
+          eq(schema.suggestions.portfolioType, "LONGTERM"),
           gte(schema.suggestions.createdAt, cutoffDate.toISOString())
         )
       );
 
-    // Get all suggestion-transaction links
-    const allLinks = await db.select().from(schema.suggestionTransactions);
+    // Get all suggestion-transaction links (broker + intraday)
+    const suggestionLinks = await db
+      .select({
+        suggestionId: schema.suggestionTransactions.suggestionId,
+        transactionId: schema.suggestionTransactions.transactionId,
+        createdAt: schema.suggestionTransactions.createdAt,
+      })
+      .from(schema.suggestionTransactions);
+    const intradayLinks = await db
+      .select({
+        suggestionId: schema.intradaySuggestionLinks.suggestionId,
+        transactionId: schema.intradaySuggestionLinks.intradayTransactionId,
+        createdAt: schema.intradaySuggestionLinks.createdAt,
+      })
+      .from(schema.intradaySuggestionLinks);
+    const approvedSuggestionIds = new Set(
+      approvedSuggestions.map((s) => s.id)
+    );
+    const allLinks = [...suggestionLinks, ...intradayLinks].filter((link) =>
+      approvedSuggestionIds.has(link.suggestionId)
+    );
 
     // Get suggestion IDs that have links
     const linkedSuggestionIds = new Set(allLinks.map((l) => l.suggestionId));
 
     // Get transaction details for all linked transactions
     const transactionIds = allLinks.map((l) => l.transactionId);
-    const transactions =
+    const brokerTransactionsRaw =
       transactionIds.length > 0
         ? await db
             .select()
             .from(schema.transactions)
-            .where(inArray(schema.transactions.id, transactionIds))
+            .where(
+              and(
+                inArray(schema.transactions.id, transactionIds),
+                eq(schema.transactions.portfolioType, "LONGTERM")
+              )
+            )
+        : [];
+    const intradayTransactionsRaw =
+      transactionIds.length > 0
+        ? await db
+            .select()
+            .from(schema.intradayTransactions)
+            .where(
+              and(
+                inArray(schema.intradayTransactions.id, transactionIds),
+                eq(schema.intradayTransactions.portfolioType, "LONGTERM")
+              )
+            )
         : [];
 
-    const transactionsById = new Map(transactions.map((t) => [t.id, t]));
+    const brokerTransactions: MetricsTransaction[] = brokerTransactionsRaw.map(
+      (tx) => ({
+        id: tx.id,
+        symbol: tx.symbol,
+        type: tx.type,
+        quantity: tx.quantity,
+        value: tx.value,
+        executedAt: tx.executedAt,
+      })
+    );
+    const intradayTransactions: MetricsTransaction[] =
+      intradayTransactionsRaw.map((tx) => ({
+        id: tx.id,
+        symbol: tx.symbol,
+        type: tx.type,
+        quantity: tx.quantity,
+        value: tx.quantity * tx.pricePerShare,
+        executedAt: tx.executedAt || tx.createdAt || "",
+      }));
+
+    const transactionsById = new Map<string, MetricsTransaction>();
+    for (const tx of brokerTransactions) {
+      transactionsById.set(tx.id, tx);
+    }
+    for (const tx of intradayTransactions) {
+      transactionsById.set(tx.id, tx);
+    }
 
     // Get current prices for all linked symbols
     const linkedSymbols = [
@@ -113,13 +185,52 @@ export const GET: APIRoute = async ({ request, url }) => {
     const priceBySymbol = new Map(priceData.map((p) => [p.symbol, p.price]));
 
     // Get all transactions for the linked symbols to find SELL matches
-    const allSymbolTransactions =
+    const brokerSymbolTransactionsRaw =
       linkedSymbols.length > 0
         ? await db
             .select()
             .from(schema.transactions)
-            .where(inArray(schema.transactions.symbol, linkedSymbols))
+            .where(
+              and(
+                inArray(schema.transactions.symbol, linkedSymbols),
+                eq(schema.transactions.portfolioType, "LONGTERM")
+              )
+            )
         : [];
+    const intradaySymbolTransactionsRaw =
+      linkedSymbols.length > 0
+        ? await db
+            .select()
+            .from(schema.intradayTransactions)
+            .where(
+              and(
+                inArray(schema.intradayTransactions.symbol, linkedSymbols),
+                eq(schema.intradayTransactions.portfolioType, "LONGTERM")
+              )
+            )
+        : [];
+    const brokerSymbolTransactions: MetricsTransaction[] =
+      brokerSymbolTransactionsRaw.map((tx) => ({
+        id: tx.id,
+        symbol: tx.symbol,
+        type: tx.type,
+        quantity: tx.quantity,
+        value: tx.value,
+        executedAt: tx.executedAt,
+      }));
+    const intradaySymbolTransactions: MetricsTransaction[] =
+      intradaySymbolTransactionsRaw.map((tx) => ({
+        id: tx.id,
+        symbol: tx.symbol,
+        type: tx.type,
+        quantity: tx.quantity,
+        value: tx.quantity * tx.pricePerShare,
+        executedAt: tx.executedAt || tx.createdAt || "",
+      }));
+    const allSymbolTransactions = [
+      ...brokerSymbolTransactions,
+      ...intradaySymbolTransactions,
+    ];
 
     // Group transactions by symbol for finding matching SELLs
     const transactionsBySymbol = new Map<
