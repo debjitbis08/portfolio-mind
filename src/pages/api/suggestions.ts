@@ -17,6 +17,7 @@ export const GET: APIRoute = async ({ request, url }) => {
   try {
     const statusFilter = url.searchParams.get("status") || "pending";
     const symbol = url.searchParams.get("symbol");
+    const portfolioType = url.searchParams.get("portfolio_type");
 
     // Build query conditions
     const conditions = [];
@@ -36,6 +37,12 @@ export const GET: APIRoute = async ({ request, url }) => {
 
     if (symbol) {
       conditions.push(eq(schema.suggestions.symbol, symbol.toUpperCase()));
+    }
+
+    if (portfolioType && ["LONGTERM", "CATALYST"].includes(portfolioType)) {
+      conditions.push(
+        eq(schema.suggestions.portfolioType, portfolioType as any)
+      );
     }
 
     const whereCondition =

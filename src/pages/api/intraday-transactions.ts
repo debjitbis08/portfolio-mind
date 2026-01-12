@@ -12,7 +12,7 @@
 import type { APIRoute } from "astro";
 import { requireAuth } from "../../lib/middleware/requireAuth";
 import { db, schema } from "../../lib/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 export const GET: APIRoute = async ({ request }) => {
   const authError = await requireAuth(request);
@@ -20,9 +20,21 @@ export const GET: APIRoute = async ({ request }) => {
 
   const url = new URL(request.url);
   const suggestionId = url.searchParams.get("suggestionId");
+  const portfolioTypeParam = url.searchParams.get("portfolioType");
+  const portfolioType =
+    portfolioTypeParam === "LONGTERM" || portfolioTypeParam === "CATALYST"
+      ? portfolioTypeParam
+      : null;
 
   try {
     if (suggestionId) {
+      const whereClause = portfolioType
+        ? and(
+            eq(schema.intradaySuggestionLinks.suggestionId, suggestionId),
+            eq(schema.intradayTransactions.portfolioType, portfolioType)
+          )
+        : eq(schema.intradaySuggestionLinks.suggestionId, suggestionId);
+
       // Get intraday transactions for a specific suggestion
       const links = await db
         .select({
@@ -34,6 +46,7 @@ export const GET: APIRoute = async ({ request }) => {
           pricePerShare: schema.intradayTransactions.pricePerShare,
           executedAt: schema.intradayTransactions.executedAt,
           createdAt: schema.intradayTransactions.createdAt,
+          portfolioType: schema.intradayTransactions.portfolioType,
           suggestionId: schema.intradaySuggestionLinks.suggestionId,
         })
         .from(schema.intradaySuggestionLinks)
@@ -44,7 +57,7 @@ export const GET: APIRoute = async ({ request }) => {
             schema.intradayTransactions.id
           )
         )
-        .where(eq(schema.intradaySuggestionLinks.suggestionId, suggestionId));
+        .where(whereClause);
 
       return new Response(JSON.stringify({ transactions: links }), {
         status: 200,
@@ -53,10 +66,55 @@ export const GET: APIRoute = async ({ request }) => {
     }
 
     // Get all intraday transactions
-    const transactions = await db
-      .select()
-      .from(schema.intradayTransactions)
-      .orderBy(schema.intradayTransactions.createdAt);
+    let transactions = portfolioType
+      ? await db
+          .select()
+          .from(schema.intradayTransactions)
+          .where(eq(schema.intradayTransactions.portfolioType, portfolioType))
+          .orderBy(schema.intradayTransactions.createdAt)
+      : await db
+          .select()
+          .from(schema.intradayTransactions)
+          .orderBy(schema.intradayTransactions.createdAt);
+
+    if (portfolioType) {
+      const linkedTransactions = await db
+        .select({
+          id: schema.intradayTransactions.id,
+          symbol: schema.intradayTransactions.symbol,
+          stockName: schema.intradayTransactions.stockName,
+          type: schema.intradayTransactions.type,
+          quantity: schema.intradayTransactions.quantity,
+          pricePerShare: schema.intradayTransactions.pricePerShare,
+          executedAt: schema.intradayTransactions.executedAt,
+          createdAt: schema.intradayTransactions.createdAt,
+          portfolioType: schema.intradayTransactions.portfolioType,
+        })
+        .from(schema.intradaySuggestionLinks)
+        .innerJoin(
+          schema.intradayTransactions,
+          eq(
+            schema.intradaySuggestionLinks.intradayTransactionId,
+            schema.intradayTransactions.id
+          )
+        )
+        .innerJoin(
+          schema.suggestions,
+          eq(schema.intradaySuggestionLinks.suggestionId, schema.suggestions.id)
+        )
+        .where(eq(schema.suggestions.portfolioType, portfolioType));
+
+      if (linkedTransactions.length > 0) {
+        const merged = new Map<string, (typeof linkedTransactions)[0]>();
+        for (const tx of transactions) merged.set(tx.id, tx);
+        for (const tx of linkedTransactions) merged.set(tx.id, tx);
+        transactions = Array.from(merged.values()).sort((a, b) => {
+          const aTime = new Date(a.createdAt || 0).getTime();
+          const bTime = new Date(b.createdAt || 0).getTime();
+          return aTime - bTime;
+        });
+      }
+    }
 
     return new Response(JSON.stringify({ transactions }), {
       status: 200,

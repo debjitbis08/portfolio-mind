@@ -28,7 +28,9 @@ interface AIDiscoveryProps {
 type FilterStatus = "pending" | "history";
 
 async function fetchSuggestions(status: FilterStatus): Promise<Suggestion[]> {
-  const response = await fetch(`/api/suggestions?status=${status}`);
+  const response = await fetch(
+    `/api/suggestions?status=${status}&portfolio_type=LONGTERM`
+  );
   if (!response.ok) throw new Error("Failed to fetch suggestions");
   const data = await response.json();
   return data.suggestions || [];
@@ -71,7 +73,9 @@ export default function AIDiscovery(props: AIDiscoveryProps) {
   const loadSuggestions = async (status: FilterStatus) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/suggestions?status=${status}`);
+      const response = await fetch(
+        `/api/suggestions?status=${status}&portfolio_type=LONGTERM`
+      );
       if (!response.ok) throw new Error("Failed to fetch suggestions");
       const data = await response.json();
       setSuggestions(data.suggestions || []);

@@ -194,7 +194,7 @@ export async function getHoldings(
   // Get regular transactions filtered by portfolio type
   const result = await db
     .select({
-      isin: schema.transactions.isin,
+      isin: max(schema.transactions.isin),
       symbol: schema.transactions.symbol,
       stockName: max(schema.transactions.stockName),
       buyQty: sum(
@@ -217,14 +217,15 @@ export async function getHoldings(
         eq(schema.transactions.portfolioType, portfolioType)
       )
     )
-    .groupBy(schema.transactions.isin, schema.transactions.symbol);
+    .groupBy(schema.transactions.symbol);
 
   const holdings: Holding[] = result.map((row) => {
     const quantity = Number(row.buyQty || 0) - Number(row.sellQty || 0);
     const investedValue =
       Number(row.buyValue || 0) - Number(row.sellValue || 0);
+    const resolvedIsin = row.isin || row.symbol;
     return {
-      isin: row.isin,
+      isin: resolvedIsin,
       symbol: row.symbol,
       stockName: row.stockName || row.symbol,
       quantity,

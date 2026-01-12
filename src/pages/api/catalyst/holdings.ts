@@ -77,7 +77,11 @@ export const GET: APIRoute = async ({ request }) => {
 
     // Fetch mappings once
     const mappings = await getSymbolMappings();
-    const mapSymbol = (s: string) => mappings[s] || s;
+    const normalizeSymbol = (s: string) => s.replace(/\.NS$|\.BO$/i, "");
+    const mapSymbol = (s: string) => {
+      const normalized = normalizeSymbol(s);
+      return mappings[normalized] || normalized;
+    };
 
     // Build map of yahoo symbol -> holdings symbols
     const yahooToHoldings: Record<string, string[]> = {};

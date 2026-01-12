@@ -1,0 +1,132 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { validateSession } from "../../lib/auth";
+import CatalystPerformancePage from "../../components/catalyst/CatalystPerformancePage";
+import { db, schema } from "../../lib/db";
+import { calculateCatalystPerformanceMetrics } from "../../lib/catalyst/performance-metrics";
+import { eq, desc } from "drizzle-orm";
+
+const session = await validateSession(Astro.request);
+
+if (!session) {
+  return Astro.redirect("/login");
+}
+
+const origin = Astro.url.origin;
+const cookie = Astro.request.headers.get("cookie") ?? "";
+const headers = cookie ? { cookie } : {};
+
+const holdingsRes = await fetch(`${origin}/api/catalyst/holdings`, { headers });
+const holdingsInitial = holdingsRes.ok ? await holdingsRes.json() : null;
+
+const intradayDirect = await db
+  .select()
+  .from(schema.intradayTransactions)
+  .where(eq(schema.intradayTransactions.portfolioType, "CATALYST"))
+  .orderBy(desc(schema.intradayTransactions.createdAt));
+
+const intradayLinked = await db
+  .select({
+    id: schema.intradayTransactions.id,
+    symbol: schema.intradayTransactions.symbol,
+    stockName: schema.intradayTransactions.stockName,
+    type: schema.intradayTransactions.type,
+    quantity: schema.intradayTransactions.quantity,
+    pricePerShare: schema.intradayTransactions.pricePerShare,
+    executedAt: schema.intradayTransactions.executedAt,
+    createdAt: schema.intradayTransactions.createdAt,
+    portfolioType: schema.intradayTransactions.portfolioType,
+  })
+  .from(schema.intradaySuggestionLinks)
+  .innerJoin(
+    schema.intradayTransactions,
+    eq(
+      schema.intradaySuggestionLinks.intradayTransactionId,
+      schema.intradayTransactions.id
+    )
+  )
+  .innerJoin(
+    schema.suggestions,
+    eq(schema.intradaySuggestionLinks.suggestionId, schema.suggestions.id)
+  )
+  .where(eq(schema.suggestions.portfolioType, "CATALYST"));
+
+const intradayMerged = new Map<string, (typeof intradayDirect)[0]>();
+for (const tx of intradayDirect) intradayMerged.set(tx.id, tx);
+for (const tx of intradayLinked) intradayMerged.set(tx.id, tx);
+const intradayInitial = Array.from(intradayMerged.values()).sort((a, b) => {
+  const aTime = new Date(a.createdAt || 0).getTime();
+  const bTime = new Date(b.createdAt || 0).getTime();
+  return bTime - aTime;
+});
+
+const metricsInitial = await calculateCatalystPerformanceMetrics();
+---
+
+<Layout title="Catalyst Performance - Portfolio Mind">
+  <div class="min-h-screen">
+    <header
+      class="border-b border-surface1 bg-base/80 backdrop-blur-sm sticky top-0 z-10"
+    >
+      <div
+        class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between"
+      >
+        <div class="flex items-center gap-6">
+          <a
+            href="/dashboard"
+            class="text-xl font-bold text-mauve hover:text-mauve/80 transition-colors"
+          >
+            Portfolio Mind
+          </a>
+          <nav class="flex items-center gap-4">
+            <a
+              href="/dashboard"
+              class="text-sm text-subtext0 hover:text-text transition-colors"
+            >
+              Dashboard
+            </a>
+            <a
+              href="/watchlist"
+              class="text-sm text-subtext0 hover:text-text transition-colors"
+            >
+              Watchlist
+            </a>
+            <a
+              href="/analysis"
+              class="text-sm text-subtext0 hover:text-text transition-colors"
+            >
+              Analysis
+            </a>
+            <a
+              href="/catalyst"
+              class="text-sm text-subtext0 hover:text-text transition-colors"
+            >
+              Catalyst
+            </a>
+            <a
+              href="/catalyst/performance"
+              class="text-sm text-mauve font-medium"
+            >
+              Performance
+            </a>
+          </nav>
+        </div>
+        <div class="flex items-center gap-3">
+          <a
+            href="/settings"
+            class="px-3 py-1.5 text-sm bg-surface1 hover:bg-surface2 text-subtext1 rounded-lg transition-colors"
+          >
+            Settings
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <CatalystPerformancePage
+      client:visible
+      initialHoldings={holdingsInitial}
+      initialIntraday={intradayInitial}
+      initialMetrics={metricsInitial}
+    />
+  </div>
+</Layout>
