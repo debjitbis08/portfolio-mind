@@ -4,7 +4,12 @@ import { db } from "../db";
 import { eq, and, gte, lt } from "drizzle-orm";
 import { GoogleGenAI } from "@google/genai";
 import YahooFinance from "yahoo-finance2";
-import { isIndianMarketOpen } from "./market-hours";
+import {
+  isIndianMarketOpen,
+  getMarketMode,
+  getMarketModeDescriptor,
+  type MarketMode,
+} from "./market-hours";
 
 // Standalone-compatible API key getter (uses process.env, works without Astro)
 function getApiKey(): string {
@@ -43,6 +48,36 @@ interface DiscoveryResult {
 
 // Initialize Yahoo Finance client
 const yahooFinance = new YahooFinance();
+
+function formatMarketModePrompt(mode: MarketMode): string {
+  const modeMap = {
+    OPEN: {
+      botMode: "Active Hunter",
+      outputType: "High-velocity alerts / Immediate action.",
+    },
+    POST_CLOSE: {
+      botMode: "Post-Game Review",
+      outputType: "Performance analysis and lessons learned.",
+    },
+    OVERNIGHT: {
+      botMode: "Signal Collector",
+      outputType: "Silent queueing of overnight catalysts.",
+    },
+    PRE_OPEN: {
+      botMode: "Strategist",
+      outputType: "Top watchlist for the opening bell.",
+    },
+  } as const;
+  const descriptor = modeMap[mode];
+  const offMarket = mode !== "OPEN";
+
+  return `
+MARKET MODE: ${mode} (${descriptor.botMode})
+OUTPUT TYPE: ${descriptor.outputType}
+${offMarket ? "- No immediate action language. Frame as Tomorrow's Watchlist." : "- Market open: actionable timing is allowed."}
+${offMarket ? "- Emphasize gap-up/gap-down scenarios and opening bell catalysts." : "- Focus on real-time confirmation."}
+`;
+}
 
 /**
  * Capture and record base price for a catalyst at discovery time.
@@ -137,7 +172,8 @@ async function analyzeTickerNewsForDiscovery(
   ticker: string,
   news: NewsItem[],
   assets: CatalystAsset[],
-  existingCatalysts: Awaited<ReturnType<typeof getRelevantExistingCatalysts>>
+  existingCatalysts: Awaited<ReturnType<typeof getRelevantExistingCatalysts>>,
+  marketMode: MarketMode
 ) {
   const newsContext = news
     .map((n, i) => formatNewsItemForPrompt(n, i + 1))
@@ -171,6 +207,8 @@ ${relevantExisting
   You are an Indian Market Catalyst Analyzer specializing in TICKER-SPECIFIC analysis.
 
   TICKER UNDER ANALYSIS: ${ticker}
+
+  ${formatMarketModePrompt(marketMode)}
 
   Your goal is to analyze ALL news about ${ticker} together and determine:
   1. Overall sentiment (BULLISH/BEARISH/NEUTRAL)
@@ -219,6 +257,10 @@ ${existingContext}
   4. If UPDATE: provide reevaluated impact considering all information
   5. If NEW: create a new catalyst with watch criteria
   6. Return AT MOST ONE new catalyst for this ticker
+
+  FRESHNESS & NOISE HANDLING:
+  - Prioritize news just after close (15:30-20:00) and pre-open (08:00-09:15) for next session relevance.
+  - De-emphasize PR fluff or routine updates unless they materially shift the catalyst strength.
 
   🔖 CITATION REQUIREMENT:
   - Include inline citations [1], [2], [3] etc. in your impact descriptions
@@ -288,7 +330,8 @@ async function synthesizeTickerOutcome(
   ticker: string,
   news: NewsItem[],
   existingCatalysts: Awaited<ReturnType<typeof getRelevantExistingCatalysts>>,
-  pass1Analysis: any
+  pass1Analysis: any,
+  marketMode: MarketMode
 ): Promise<{
   shouldUpdate: boolean;
   shortTermThesis: string;
@@ -341,6 +384,9 @@ ${newsContext}
 
 ${existingContext}
 
+## MARKET MODE
+${formatMarketModePrompt(marketMode)}
+
 ## THESIS GENERATION RULES
 
 **Scoring Guide (potentialScore):**
@@ -365,6 +411,12 @@ ${existingContext}
 - Mention timeframe expectations if applicable
 - Cite sources with [1], [2], etc.
 - If multiple articles or existing catalysts are present, ALWAYS return shouldUpdate=true and produce a single unified narrative (even if neutral).
+
+**Off-Market Additions (when market is not OPEN):**
+- Frame thesis as a Pre-Market Briefing or Tomorrow's Watchlist entry.
+- Include a GAP scenario: "If open > X% gap, watch for continuation vs gap-and-trap."
+- If conviction is extremely high (confidence 9-10), mention AMO readiness and liquidity risk.
+- In keyInsight, include a short "Sector sentiment: score" on a -3 to +3 scale.
 
 ## OUTPUT FORMAT (JSON)
 {
@@ -497,6 +549,9 @@ export async function discoverCatalysts(
 ): Promise<DiscoveryResult> {
   if (newsItems.length === 0) return { newCatalysts: 0, catalysts: [] };
 
+  const marketMode = getMarketMode();
+  const marketDescriptor = getMarketModeDescriptor();
+
   // Expire old catalysts before discovering new ones
   const expired = await expireOldCatalysts();
   if (expired > 0) {
@@ -505,6 +560,9 @@ export async function discoverCatalysts(
 
   console.log(
     `\n🔍 Running Ticker-Grouped AI Discovery on ${newsItems.length} articles...`
+  );
+  console.log(
+    `   🕒 Market mode: ${marketDescriptor.botMode} (${marketDescriptor.mode})`
   );
 
   // Fetch existing catalysts for LLM context (deduplication & updates)
@@ -546,7 +604,8 @@ export async function discoverCatalysts(
       const analysis = await analyzeBatchForDiscovery(
         batch,
         assets,
-        existingCatalysts
+        existingCatalysts,
+        marketMode
       );
 
       const batchCitations = buildSourceCitations(batch);
@@ -653,6 +712,10 @@ export async function discoverCatalysts(
         // Delete all older catalysts for this ticker
         for (const oldCat of olderCatalysts) {
           await db
+            .update(suggestions)
+            .set({ catalystId: null })
+            .where(eq(suggestions.catalystId, oldCat.id));
+          await db
             .delete(potentialCatalysts)
             .where(eq(potentialCatalysts.id, oldCat.id));
           consolidatedCount++;
@@ -696,7 +759,8 @@ export async function discoverCatalysts(
         ticker,
         tickerNews,
         assets,
-        existingCatalysts
+        existingCatalysts,
+        marketMode
       );
 
       // Process UPDATES first (reevaluation of existing catalysts)
@@ -786,7 +850,8 @@ export async function discoverCatalysts(
           ticker,
           tickerNews,
           existingCatalysts,
-          analysis
+          analysis,
+          marketMode
         );
 
         if (synthesis) {
@@ -997,7 +1062,8 @@ async function getRelevantExistingCatalysts(): Promise<
 async function analyzeBatchForDiscovery(
   news: NewsItem[],
   assets: CatalystAsset[],
-  existingCatalysts: Awaited<ReturnType<typeof getRelevantExistingCatalysts>>
+  existingCatalysts: Awaited<ReturnType<typeof getRelevantExistingCatalysts>>,
+  marketMode: MarketMode
 ) {
   const availableTickers = assets
     .map((a) => `${a.ticker} (${a.keyword})`)
@@ -1031,6 +1097,8 @@ ${existingCatalysts
 
   Your goal is to find ACTIONABLE trading opportunities in this Indian business news batch.
   Focus on events that will materially impact stock prices.
+
+  ${formatMarketModePrompt(marketMode)}
 
   WHAT TO LOOK FOR:
   - Supply shocks (factory shutdowns, strikes, raw material shortages)

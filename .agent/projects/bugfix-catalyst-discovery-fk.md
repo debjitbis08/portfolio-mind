@@ -8,7 +8,8 @@
 - This causes `FOREIGN KEY constraint failed` when an older catalyst is still referenced by a suggestion.
 
 ## Changes
-- Set `suggestions.catalyst_id` to null before deleting older catalysts.
+- Set `suggestions.catalyst_id` to null before deleting older catalysts in both
+  the grouped analysis and fallback batch consolidation paths.
 
 ## Files
 - `src/lib/catalyst/discovery.ts`

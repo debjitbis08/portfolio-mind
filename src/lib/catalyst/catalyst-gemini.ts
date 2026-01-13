@@ -18,11 +18,18 @@ import {
 import { db, schema, getCatalystHoldings, type Holding } from "../db";
 import { eq, desc, inArray, and, gte } from "drizzle-orm";
 import { getRequiredEnv } from "../env";
-import { getMarketStatusMessage } from "./market-hours";
+import {
+  getMarketStatusMessage,
+  getMarketMode,
+  getMarketModeDescriptor,
+  type MarketMode,
+} from "./market-hours";
 
 function getGeminiApiKey(): string {
   return getRequiredEnv("GEMINI_API_KEY");
 }
+
+type MarketModeDescriptor = ReturnType<typeof getMarketModeDescriptor>;
 
 // ============================================================================
 // Types
@@ -45,7 +52,7 @@ export interface CatalystHoldingForAnalysis {
 export interface CatalystSuggestion {
   symbol: string;
   stock_name?: string;
-  action: "BUY" | "SELL" | "HOLD";
+  action: "BUY" | "SELL" | "HOLD" | "WATCH";
   confidence: number; // 1-10
   rationale: string;
   quantity?: number;
@@ -110,6 +117,8 @@ export class CatalystGeminiService {
 
     progress(5, "Initializing Catalyst AI agent...");
 
+    const marketDescriptor = getMarketModeDescriptor();
+
     // Dynamic import to bypass build issues
     let GoogleGenAI: any;
     try {
@@ -123,7 +132,10 @@ export class CatalystGeminiService {
     const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
     // Build system prompt for short-term trading
-    const systemPrompt = this.buildCatalystSystemPrompt(availableFunds);
+    const systemPrompt = this.buildCatalystSystemPrompt(
+      availableFunds,
+      marketDescriptor
+    );
 
     // Build holdings context
     const holdingsContext = holdings.map((h) => ({
@@ -203,6 +215,10 @@ ${
 
 ### Market Status
 ${getMarketStatusMessage()}
+
+### Market Mode
+${marketDescriptor.mode} — ${marketDescriptor.botMode}
+Output focus: ${marketDescriptor.outputType}
 
 `;
 
@@ -396,7 +412,13 @@ ${recentTrades
           return [];
         }
 
-        const suggestions = this.parseResponse(text, holdings);
+        let suggestions = this.parseResponse(text, holdings);
+        if (marketDescriptor.mode !== "OPEN") {
+          suggestions = suggestions.map((s) => ({ ...s, action: "WATCH" }));
+        }
+        if (marketDescriptor.mode === "PRE_OPEN" && suggestions.length > 3) {
+          suggestions = suggestions.slice(0, 3);
+        }
         progress(100, `Found ${suggestions.length} catalyst suggestions`);
 
         return suggestions;
@@ -419,7 +441,12 @@ ${recentTrades
   /**
    * Build system prompt focused on short-term catalyst trading.
    */
-  private static buildCatalystSystemPrompt(availableFunds: number): string {
+  private static buildCatalystSystemPrompt(
+    availableFunds: number,
+    marketDescriptor: MarketModeDescriptor
+  ): string {
+    const offMarket = marketDescriptor.mode !== "OPEN";
+
     return `You are a SHORT-TERM SWING TRADER focused on catalyst-driven opportunities.
 Your holding period is 1 day to 4 weeks maximum. This is SEPARATE from long-term investing.
 
@@ -433,6 +460,16 @@ Your holding period is 1 day to 4 weeks maximum. This is SEPARATE from long-term
 ₹${availableFunds.toLocaleString(
       "en-IN"
     )} in the catalyst portfolio (separate from long-term funds)
+
+## Market Mode
+${marketDescriptor.mode} — ${marketDescriptor.botMode}
+Output focus: ${marketDescriptor.outputType}
+
+${offMarket ? "## Off-Market Execution Rules" : "## Market-Open Execution Rules"}
+${offMarket ? "- Do NOT output BUY/SELL/HOLD. Use WATCH entries only." : "- BUY/SELL/HOLD allowed when criteria are met."}
+${offMarket ? "- Treat output as Tomorrow's Watchlist or Pre-Market Briefing." : "- Act only on high-conviction, well-timed setups."}
+${offMarket ? "- Include a gap plan in entry_trigger (e.g., \"If open > 3% gap...\")." : "- Use technical triggers for intraday confirmation."}
+${offMarket ? "- If catalyst is 10/10, mention AMO suggestion with liquidity risk in rationale." : "- Ensure stop-loss and risk-reward are valid."}
 
 ## Your Tools (Full Access to Research Data)
 - \`get_stock_news\`: **CRITICAL** - Find momentum catalysts, recent developments
@@ -456,7 +493,7 @@ Return suggestions as JSON:
 \`\`\`json
 [
   {
-    "action": "BUY" | "SELL",
+    "action": "BUY" | "SELL" | "HOLD" | "WATCH",
     "symbol": "STOCKNAME",
     "quantity": 10,
     "rationale": "Catalyst: [what]. Entry timing: [why now]. Risk: [what could go wrong].",
@@ -549,9 +586,9 @@ Better to stay in cash than force a trade.`;
           return {
             symbol: s.symbol,
             stock_name: holding?.stock_name || s.symbol,
-            action: ["BUY", "SELL", "HOLD"].includes(s.action)
+            action: ["BUY", "SELL", "HOLD", "WATCH"].includes(s.action)
               ? s.action
-              : "BUY",
+              : "WATCH",
             confidence: s.confidence ?? 5,
             rationale: s.rationale || "No rationale provided",
             quantity: s.quantity,
@@ -615,6 +652,14 @@ Better to stay in cash than force a trade.`;
     }
   ): Promise<CatalystSuggestion | null> {
     clearRequestCache();
+
+    const marketMode = getMarketMode();
+    if (marketMode !== "OPEN") {
+      console.log(
+        `[Catalyst Gemini] Skipping signal analysis (${marketMode} mode)`
+      );
+      return null;
+    }
 
     let GoogleGenAI: any;
     try {

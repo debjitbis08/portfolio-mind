@@ -10,8 +10,12 @@ const MARKET_OPEN_HOUR = 9;
 const MARKET_OPEN_MINUTE = 15;
 const MARKET_CLOSE_HOUR = 15;
 const MARKET_CLOSE_MINUTE = 30;
+const POST_CLOSE_END_HOUR = 20;
+const PRE_OPEN_START_HOUR = 8;
 const IST_OFFSET_MINUTES = 330;
 const IST_OFFSET_MS = IST_OFFSET_MINUTES * 60 * 1000;
+
+export type MarketMode = "OPEN" | "POST_CLOSE" | "OVERNIGHT" | "PRE_OPEN";
 
 // NSE holidays for 2026 (extend this list as needed)
 // Source: NSE website - https://www.nseindia.com/
@@ -44,6 +48,15 @@ function isHoliday(date: Date): boolean {
   return NSE_HOLIDAYS_2026.includes(dateStr);
 }
 
+function getIstDateParts(date: Date) {
+  const istDate = new Date(date.getTime() + IST_OFFSET_MS);
+  const istHour = istDate.getUTCHours();
+  const istMinute = istDate.getUTCMinutes();
+  const currentTimeMinutes = istHour * 60 + istMinute;
+
+  return { istDate, istHour, istMinute, currentTimeMinutes };
+}
+
 /**
  * Check if the Indian stock market (NSE/BSE) is currently open.
  *
@@ -55,18 +68,7 @@ function isHoliday(date: Date): boolean {
  */
 export function isIndianMarketOpen(now?: Date): boolean {
   const date = now || new Date();
-
-  // Convert to IST (UTC+5:30)
-  const utcMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
-  const istMinutes = utcMinutes + IST_OFFSET_MINUTES;
-
-  // Handle day rollover
-  let istHour = Math.floor(istMinutes / 60) % 24;
-  let istMinute = istMinutes % 60;
-
-  // Get IST day of week (0 = Sunday, 6 = Saturday)
-  // If IST time rolled over to next day, also adjust the day
-  const istDate = new Date(date.getTime() + IST_OFFSET_MS);
+  const { istDate, currentTimeMinutes } = getIstDateParts(date);
   const dayOfWeek = istDate.getUTCDay();
 
   // Weekend check
@@ -80,7 +82,6 @@ export function isIndianMarketOpen(now?: Date): boolean {
   }
 
   // Time check
-  const currentTimeMinutes = istHour * 60 + istMinute;
   const openTimeMinutes = MARKET_OPEN_HOUR * 60 + MARKET_OPEN_MINUTE;
   const closeTimeMinutes = MARKET_CLOSE_HOUR * 60 + MARKET_CLOSE_MINUTE;
 
@@ -88,6 +89,79 @@ export function isIndianMarketOpen(now?: Date): boolean {
     currentTimeMinutes >= openTimeMinutes &&
     currentTimeMinutes < closeTimeMinutes
   );
+}
+
+/**
+ * Returns the current market mode for Catalyst Catcher orchestration.
+ */
+export function getMarketMode(now?: Date): MarketMode {
+  const date = now || new Date();
+  const { istDate, currentTimeMinutes } = getIstDateParts(date);
+  const openTimeMinutes = MARKET_OPEN_HOUR * 60 + MARKET_OPEN_MINUTE;
+  const closeTimeMinutes = MARKET_CLOSE_HOUR * 60 + MARKET_CLOSE_MINUTE;
+  const postCloseEndMinutes = POST_CLOSE_END_HOUR * 60;
+  const preOpenStartMinutes = PRE_OPEN_START_HOUR * 60;
+
+  if (!isTradingDay(istDate)) {
+    return "OVERNIGHT";
+  }
+
+  if (
+    currentTimeMinutes >= openTimeMinutes &&
+    currentTimeMinutes < closeTimeMinutes
+  ) {
+    return "OPEN";
+  }
+
+  if (
+    currentTimeMinutes >= closeTimeMinutes &&
+    currentTimeMinutes < postCloseEndMinutes
+  ) {
+    return "POST_CLOSE";
+  }
+
+  if (
+    currentTimeMinutes >= preOpenStartMinutes &&
+    currentTimeMinutes < openTimeMinutes
+  ) {
+    return "PRE_OPEN";
+  }
+
+  return "OVERNIGHT";
+}
+
+export function getMarketModeDescriptor(now?: Date): {
+  mode: MarketMode;
+  botMode: "Active Hunter" | "Post-Game Review" | "Signal Collector" | "Strategist";
+  outputType: string;
+} {
+  const mode = getMarketMode(now);
+  switch (mode) {
+    case "OPEN":
+      return {
+        mode,
+        botMode: "Active Hunter",
+        outputType: "High-velocity alerts / Immediate action.",
+      };
+    case "POST_CLOSE":
+      return {
+        mode,
+        botMode: "Post-Game Review",
+        outputType: "Performance analysis and lessons learned.",
+      };
+    case "PRE_OPEN":
+      return {
+        mode,
+        botMode: "Strategist",
+        outputType: "Top watchlist for the opening bell.",
+      };
+    default:
+      return {
+        mode,
+        botMode: "Signal Collector",
+        outputType: "Silent queueing of overnight catalysts.",
+      };
+  }
 }
 
 function isTradingDay(istDate: Date): boolean {

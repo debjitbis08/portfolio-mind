@@ -313,6 +313,12 @@ export default function CatalystPage() {
     }
   );
 
+  const watchlistSuggestions = () =>
+    (catalystSuggestions() || []).filter((s) => s.action === "WATCH");
+
+  const tradeSuggestions = () =>
+    (catalystSuggestions() || []).filter((s) => s.action !== "WATCH");
+
   const updateSignalStatus = async (id: string, status: string) => {
     await fetch(`${getBaseUrl()}/api/catalyst/signals`, {
       method: "PATCH",
@@ -330,6 +336,169 @@ export default function CatalystPage() {
     });
     refetchSuggestions();
   };
+
+  const renderSuggestionCard = (suggestion: CatalystSuggestion) => (
+    <div class="bg-surface0 border border-surface1 rounded-xl p-5">
+      <div class="flex items-start justify-between mb-3">
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-lg font-bold text-mauve">
+              {suggestion.symbol}
+            </span>
+            <span
+              class={`px-2 py-0.5 text-sm font-medium rounded ${
+                suggestion.action === "BUY"
+                  ? "bg-green/20 text-green"
+                  : suggestion.action === "SELL"
+                  ? "bg-red/20 text-red"
+                  : suggestion.action === "WATCH"
+                  ? "bg-blue/20 text-blue"
+                  : "bg-overlay0 text-subtext0"
+              }`}
+            >
+              {suggestion.action}
+            </span>
+            <span
+              class={`px-2 py-0.5 text-xs rounded ${
+                suggestion.status === "pending"
+                  ? "bg-yellow/20 text-yellow"
+                  : suggestion.status === "approved"
+                  ? "bg-green/20 text-green"
+                  : suggestion.status === "rejected"
+                  ? "bg-red/20 text-red"
+                  : "bg-overlay0 text-subtext0"
+              }`}
+            >
+              {suggestion.status === "approved"
+                ? "executed"
+                : suggestion.status}
+            </span>
+          </div>
+          <Show when={suggestion.stockName}>
+            <p class="text-sm text-subtext0">{suggestion.stockName}</p>
+          </Show>
+        </div>
+        <div class="text-right">
+          <Show when={suggestion.currentPrice}>
+            <div class="text-sm font-medium text-text">
+              ₹{suggestion.currentPrice?.toLocaleString("en-IN")}
+            </div>
+          </Show>
+          <Show when={suggestion.confidence}>
+            <div class="text-xs text-subtext0">
+              Confidence: {suggestion.confidence}/10
+            </div>
+          </Show>
+        </div>
+      </div>
+
+      <p class="text-text mb-3">{suggestion.rationale}</p>
+
+      <Show when={suggestion.status === "pending"}>
+        <div class="flex flex-wrap gap-2 mb-4">
+          <button
+            onClick={() => updateSuggestionStatus(suggestion.id, "approved")}
+            class="px-3 py-1 bg-green/20 text-green rounded-lg text-sm hover:bg-green/30 transition-colors"
+          >
+            Mark Executed
+          </button>
+          <button
+            onClick={() => updateSuggestionStatus(suggestion.id, "rejected")}
+            class="px-3 py-1 bg-red/20 text-red rounded-lg text-sm hover:bg-red/30 transition-colors"
+          >
+            Reject
+          </button>
+          <button
+            onClick={() => updateSuggestionStatus(suggestion.id, "expired")}
+            class="px-3 py-1 bg-overlay0 text-subtext0 rounded-lg text-sm hover:bg-overlay1 transition-colors"
+          >
+            Expire
+          </button>
+        </div>
+      </Show>
+
+      <Show when={suggestion.action === "BUY" || suggestion.action === "SELL"}>
+        <IntradayTransactionForm
+          suggestionId={suggestion.id}
+          symbol={suggestion.symbol}
+          stockName={suggestion.stockName || undefined}
+          suggestedAction={suggestion.action}
+        />
+      </Show>
+
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <Show when={suggestion.stopLoss}>
+          <div class="bg-surface1 rounded-lg p-2">
+            <div class="text-xs text-subtext1">Stop Loss</div>
+            <div class="text-sm font-medium text-red">
+              ₹{suggestion.stopLoss?.toLocaleString("en-IN")}
+            </div>
+          </div>
+        </Show>
+        <Show when={suggestion.riskRewardRatio}>
+          <div class="bg-surface1 rounded-lg p-2">
+            <div class="text-xs text-subtext1">Risk:Reward</div>
+            <div
+              class={`text-sm font-medium ${
+                (suggestion.riskRewardRatio || 0) >= 2.0
+                  ? "text-green"
+                  : "text-yellow"
+              }`}
+            >
+              1:{suggestion.riskRewardRatio?.toFixed(1)}
+            </div>
+          </div>
+        </Show>
+        <Show when={suggestion.maxHoldDays}>
+          <div class="bg-surface1 rounded-lg p-2">
+            <div class="text-xs text-subtext1">Max Hold</div>
+            <div class="text-sm font-medium text-text">
+              {suggestion.maxHoldDays} days
+            </div>
+          </div>
+        </Show>
+        <Show when={suggestion.trailingStop !== null}>
+          <div class="bg-surface1 rounded-lg p-2">
+            <div class="text-xs text-subtext1">Stop Type</div>
+            <div class="text-sm font-medium text-text">
+              {suggestion.trailingStop ? "Trailing" : "Fixed"}
+            </div>
+          </div>
+        </Show>
+      </div>
+
+      <Show when={suggestion.entryTrigger}>
+        <div class="mb-2 p-2 bg-blue/10 rounded-lg border-l-2 border-blue">
+          <div class="text-xs text-blue font-medium mb-1">Entry Trigger</div>
+          <div class="text-sm text-text">{suggestion.entryTrigger}</div>
+        </div>
+      </Show>
+      <Show when={suggestion.exitCondition}>
+        <div class="mb-2 p-2 bg-yellow/10 rounded-lg border-l-2 border-yellow">
+          <div class="text-xs text-yellow font-medium mb-1">Exit Condition</div>
+          <div class="text-sm text-text">{suggestion.exitCondition}</div>
+        </div>
+      </Show>
+
+      <div class="flex flex-wrap gap-4 text-sm text-subtext0">
+        <Show when={suggestion.targetPrice}>
+          <span>
+            Target: ₹{suggestion.targetPrice?.toLocaleString("en-IN")}
+          </span>
+        </Show>
+        <Show when={suggestion.allocationAmount}>
+          <span>
+            Allocation: ₹
+            {suggestion.allocationAmount?.toLocaleString("en-IN")}
+          </span>
+        </Show>
+        <Show when={suggestion.volatilityAtEntry}>
+          <span>ATR: {suggestion.volatilityAtEntry}</span>
+        </Show>
+        <span>Created: {formatDate(suggestion.createdAt)}</span>
+      </div>
+    </div>
+  );
 
   const toggleWatchlistItem = async (id: string, enabled: boolean) => {
     await fetch(`${getBaseUrl()}/api/catalyst/watchlist`, {
@@ -1269,215 +1438,45 @@ export default function CatalystPage() {
                   </div>
                 }
               >
-                <div class="space-y-4">
-                  <For each={catalystSuggestions()}>
-                    {(suggestion) => (
-                      <div class="bg-surface0 border border-surface1 rounded-xl p-5">
-                        <div class="flex items-start justify-between mb-3">
-                          <div>
-                            <div class="flex items-center gap-2 mb-1">
-                              <span class="text-lg font-bold text-mauve">
-                                {suggestion.symbol}
-                              </span>
-                              <span
-                                class={`px-2 py-0.5 text-sm font-medium rounded ${
-                                  suggestion.action === "BUY"
-                                    ? "bg-green/20 text-green"
-                                    : suggestion.action === "SELL"
-                                    ? "bg-red/20 text-red"
-                                    : suggestion.action === "WATCH"
-                                    ? "bg-blue/20 text-blue"
-                                    : "bg-overlay0 text-subtext0"
-                                }`}
-                              >
-                                {suggestion.action}
-                              </span>
-                              <span
-                                class={`px-2 py-0.5 text-xs rounded ${
-                                  suggestion.status === "pending"
-                                    ? "bg-yellow/20 text-yellow"
-                                    : suggestion.status === "approved"
-                                    ? "bg-green/20 text-green"
-                                    : suggestion.status === "rejected"
-                                    ? "bg-red/20 text-red"
-                                    : "bg-overlay0 text-subtext0"
-                                }`}
-                              >
-                                {suggestion.status === "approved"
-                                  ? "executed"
-                                  : suggestion.status}
-                              </span>
-                            </div>
-                            <Show when={suggestion.stockName}>
-                              <p class="text-sm text-subtext0">
-                                {suggestion.stockName}
-                              </p>
-                            </Show>
-                          </div>
-                          <div class="text-right">
-                            <Show when={suggestion.currentPrice}>
-                              <div class="text-sm font-medium text-text">
-                                ₹
-                                {suggestion.currentPrice?.toLocaleString(
-                                  "en-IN"
-                                )}
-                              </div>
-                            </Show>
-                            <Show when={suggestion.confidence}>
-                              <div class="text-xs text-subtext0">
-                                Confidence: {suggestion.confidence}/10
-                              </div>
-                            </Show>
-                          </div>
-                        </div>
-
-                        <p class="text-text mb-3">{suggestion.rationale}</p>
-
-                        <Show when={suggestion.status === "pending"}>
-                          <div class="flex flex-wrap gap-2 mb-4">
-                            <button
-                              onClick={() =>
-                                updateSuggestionStatus(
-                                  suggestion.id,
-                                  "approved"
-                                )
-                              }
-                              class="px-3 py-1 bg-green/20 text-green rounded-lg text-sm hover:bg-green/30 transition-colors"
-                            >
-                              Mark Executed
-                            </button>
-                            <button
-                              onClick={() =>
-                                updateSuggestionStatus(
-                                  suggestion.id,
-                                  "rejected"
-                                )
-                              }
-                              class="px-3 py-1 bg-red/20 text-red rounded-lg text-sm hover:bg-red/30 transition-colors"
-                            >
-                              Reject
-                            </button>
-                            <button
-                              onClick={() =>
-                                updateSuggestionStatus(
-                                  suggestion.id,
-                                  "expired"
-                                )
-                              }
-                              class="px-3 py-1 bg-overlay0 text-subtext0 rounded-lg text-sm hover:bg-overlay1 transition-colors"
-                            >
-                              Expire
-                            </button>
-                          </div>
-                        </Show>
-
-                        <IntradayTransactionForm
-                          suggestionId={suggestion.id}
-                          symbol={suggestion.symbol}
-                          stockName={suggestion.stockName || undefined}
-                          suggestedAction={
-                            suggestion.action === "BUY" ||
-                            suggestion.action === "SELL"
-                              ? suggestion.action
-                              : undefined
-                          }
-                        />
-
-                        {/* Catalyst-specific risk management display */}
-                        <div class="grid grid-cols-2 gap-3 mb-3">
-                          <Show when={suggestion.stopLoss}>
-                            <div class="bg-surface1 rounded-lg p-2">
-                              <div class="text-xs text-subtext1">Stop Loss</div>
-                              <div class="text-sm font-medium text-red">
-                                ₹{suggestion.stopLoss?.toLocaleString("en-IN")}
-                              </div>
-                            </div>
-                          </Show>
-                          <Show when={suggestion.riskRewardRatio}>
-                            <div class="bg-surface1 rounded-lg p-2">
-                              <div class="text-xs text-subtext1">
-                                Risk:Reward
-                              </div>
-                              <div
-                                class={`text-sm font-medium ${
-                                  (suggestion.riskRewardRatio || 0) >= 2.0
-                                    ? "text-green"
-                                    : "text-yellow"
-                                }`}
-                              >
-                                1:{suggestion.riskRewardRatio?.toFixed(1)}
-                              </div>
-                            </div>
-                          </Show>
-                          <Show when={suggestion.maxHoldDays}>
-                            <div class="bg-surface1 rounded-lg p-2">
-                              <div class="text-xs text-subtext1">Max Hold</div>
-                              <div class="text-sm font-medium text-text">
-                                {suggestion.maxHoldDays} days
-                              </div>
-                            </div>
-                          </Show>
-                          <Show when={suggestion.trailingStop !== null}>
-                            <div class="bg-surface1 rounded-lg p-2">
-                              <div class="text-xs text-subtext1">
-                                Stop Type
-                              </div>
-                              <div class="text-sm font-medium text-text">
-                                {suggestion.trailingStop
-                                  ? "Trailing"
-                                  : "Fixed"}
-                              </div>
-                            </div>
-                          </Show>
-                        </div>
-
-                        {/* Entry and exit conditions */}
-                        <Show when={suggestion.entryTrigger}>
-                          <div class="mb-2 p-2 bg-blue/10 rounded-lg border-l-2 border-blue">
-                            <div class="text-xs text-blue font-medium mb-1">
-                              Entry Trigger
-                            </div>
-                            <div class="text-sm text-text">
-                              {suggestion.entryTrigger}
-                            </div>
-                          </div>
-                        </Show>
-                        <Show when={suggestion.exitCondition}>
-                          <div class="mb-2 p-2 bg-yellow/10 rounded-lg border-l-2 border-yellow">
-                            <div class="text-xs text-yellow font-medium mb-1">
-                              Exit Condition
-                            </div>
-                            <div class="text-sm text-text">
-                              {suggestion.exitCondition}
-                            </div>
-                          </div>
-                        </Show>
-
-                        <div class="flex flex-wrap gap-4 text-sm text-subtext0">
-                          <Show when={suggestion.targetPrice}>
-                            <span>
-                              Target: ₹
-                              {suggestion.targetPrice?.toLocaleString("en-IN")}
-                            </span>
-                          </Show>
-                          <Show when={suggestion.allocationAmount}>
-                            <span>
-                              Allocation: ₹
-                              {suggestion.allocationAmount?.toLocaleString(
-                                "en-IN"
-                              )}
-                            </span>
-                          </Show>
-                          <Show when={suggestion.volatilityAtEntry}>
-                            <span>ATR: {suggestion.volatilityAtEntry}</span>
-                          </Show>
-                          <span>
-                            Created: {formatDate(suggestion.createdAt)}
-                          </span>
-                        </div>
+                <div class="space-y-6">
+                  <Show when={watchlistSuggestions().length > 0}>
+                    <div class="space-y-3">
+                      <div>
+                        <h3 class="text-base font-semibold text-text">
+                          Tomorrow&apos;s Watchlist
+                        </h3>
+                        <p class="text-xs text-subtext0">
+                          Pre-market briefing items queued for the next open.
+                        </p>
                       </div>
-                    )}
-                  </For>
+                      <div class="space-y-4">
+                        <For each={watchlistSuggestions()}>
+                          {(suggestion) => renderSuggestionCard(suggestion)}
+                        </For>
+                      </div>
+                    </div>
+                  </Show>
+
+                  <Show
+                    when={tradeSuggestions().length > 0}
+                    fallback={
+                      <div class="text-subtext0">
+                        No trade suggestions yet. Run catalyst analysis to
+                        generate recommendations.
+                      </div>
+                    }
+                  >
+                    <div class="space-y-4">
+                      <Show when={watchlistSuggestions().length > 0}>
+                        <h3 class="text-base font-semibold text-text">
+                          Trade Suggestions
+                        </h3>
+                      </Show>
+                      <For each={tradeSuggestions()}>
+                        {(suggestion) => renderSuggestionCard(suggestion)}
+                      </For>
+                    </div>
+                  </Show>
                 </div>
               </Show>
             </Show>
