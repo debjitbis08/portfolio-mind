@@ -7,6 +7,7 @@ import {
   isPriceStale,
 } from "../db";
 import { getSymbolMappings } from "../mappings";
+import { normalizeSymbol } from "../symbol-matcher";
 import {
   CatalystGeminiService,
   type CatalystHoldingForAnalysis,
@@ -126,9 +127,20 @@ export async function runCatalystSuggestions(options?: {
   const suggestionSymbols = [
     ...new Set(suggestions.map((s) => s.symbol).filter(Boolean)),
   ];
+  const normalizedSuggestionSymbols = [
+    ...new Set(suggestionSymbols.map((s) => normalizeSymbol(s))),
+  ];
+  const pendingSymbolCandidates = new Set<string>();
+  for (const symbol of normalizedSuggestionSymbols) {
+    pendingSymbolCandidates.add(symbol);
+    pendingSymbolCandidates.add(`${symbol}.NS`);
+    pendingSymbolCandidates.add(`${symbol}.BO`);
+    pendingSymbolCandidates.add(`${symbol}.BSE`);
+    pendingSymbolCandidates.add(`${symbol}.NSE`);
+  }
 
   const pendingBySymbol = new Map<string, { id: string }>();
-  if (suggestionSymbols.length > 0) {
+  if (pendingSymbolCandidates.size > 0) {
     const pendingSuggestions = await db
       .select({
         id: schema.suggestions.id,
@@ -140,14 +152,18 @@ export async function runCatalystSuggestions(options?: {
         and(
           eq(schema.suggestions.portfolioType, "CATALYST"),
           eq(schema.suggestions.status, "pending"),
-          inArray(schema.suggestions.symbol, suggestionSymbols)
+          inArray(
+            schema.suggestions.symbol,
+            Array.from(pendingSymbolCandidates)
+          )
         )
       )
       .orderBy(desc(schema.suggestions.createdAt));
 
     for (const pending of pendingSuggestions) {
-      if (!pendingBySymbol.has(pending.symbol)) {
-        pendingBySymbol.set(pending.symbol, { id: pending.id });
+      const normalizedSymbol = normalizeSymbol(pending.symbol);
+      if (!pendingBySymbol.has(normalizedSymbol)) {
+        pendingBySymbol.set(normalizedSymbol, { id: pending.id });
       }
     }
   }
@@ -189,7 +205,9 @@ export async function runCatalystSuggestions(options?: {
       );
     }
 
-    const existingPending = pendingBySymbol.get(suggestion.symbol);
+    const existingPending = pendingBySymbol.get(
+      normalizeSymbol(suggestion.symbol)
+    );
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 

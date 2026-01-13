@@ -8,6 +8,7 @@
 - Added pending-suggestion lookup by symbol for catalyst portfolio.
 - Updated pending records in place (refreshing fields, createdAt, expiresAt).
 - Left insert path unchanged for symbols with no pending suggestion.
+- Normalize symbols to dedupe across suffix variants (e.g., `PREMIERENE` vs `PREMIERENE.NS`).
 
 ## Files
 - `src/lib/catalyst/suggestions-runner.ts`
