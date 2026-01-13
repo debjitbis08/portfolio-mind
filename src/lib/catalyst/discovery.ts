@@ -1,5 +1,5 @@
 import { type NewsItem, type CatalystAsset } from "./types";
-import { potentialCatalysts } from "../db/schema";
+import { potentialCatalysts, suggestions } from "../db/schema";
 import { db } from "../db";
 import { eq, and, gte, lt } from "drizzle-orm";
 import { GoogleGenAI } from "@google/genai";
@@ -841,6 +841,10 @@ export async function discoverCatalysts(
           // Delete all older catalysts for this ticker to ensure ONE entry per symbol
           if (olderCatalysts.length > 0) {
             for (const oldCat of olderCatalysts) {
+              await db
+                .update(suggestions)
+                .set({ catalystId: null })
+                .where(eq(suggestions.catalystId, oldCat.id));
               await db
                 .delete(potentialCatalysts)
                 .where(eq(potentialCatalysts.id, oldCat.id));
