@@ -497,6 +497,12 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
         executedAt: schema.intradayTransactions.executedAt,
         createdAt: schema.intradayTransactions.createdAt,
         note: schema.actionNotes.content,
+        suggestionId: schema.intradaySuggestionLinks.suggestionId,
+        suggestionSymbol: schema.suggestions.symbol,
+        suggestionAction: schema.suggestions.action,
+        suggestionRationale: schema.suggestions.rationale,
+        suggestionStatus: schema.suggestions.status,
+        suggestionCreatedAt: schema.suggestions.createdAt,
       })
       .from(schema.intradayTransactions)
       .leftJoin(
@@ -505,6 +511,10 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
           schema.intradayTransactions.id,
           schema.intradaySuggestionLinks.intradayTransactionId
         )
+      )
+      .leftJoin(
+        schema.suggestions,
+        eq(schema.intradaySuggestionLinks.suggestionId, schema.suggestions.id)
       )
       .leftJoin(
         schema.actionNotes,
@@ -521,10 +531,34 @@ Holdings: ${JSON.stringify(holdingsContext, null, 2)}
         intradayMap.set(row.id, {
           ...row,
           notes: [] as string[],
+          suggestions: [] as Array<{
+            id: string;
+            symbol: string | null;
+            action: string | null;
+            rationale: string | null;
+            status: string | null;
+            createdAt: string | null;
+          }>,
         });
       }
       if (row.note) {
         intradayMap.get(row.id).notes.push(row.note);
+      }
+      if (row.suggestionId) {
+        const suggestions = intradayMap.get(row.id).suggestions;
+        const exists = suggestions.some(
+          (s: { id: string }) => s.id === row.suggestionId
+        );
+        if (!exists) {
+          suggestions.push({
+            id: row.suggestionId,
+            symbol: row.suggestionSymbol,
+            action: row.suggestionAction,
+            rationale: row.suggestionRationale,
+            status: row.suggestionStatus,
+            createdAt: row.suggestionCreatedAt,
+          });
+        }
       }
     }
 
@@ -649,18 +683,39 @@ The positions shown in the table above ALREADY include these shares.
 
 ${recentIntraday
   .map(
-    (tx) =>
-      `- **${tx.stockName || tx.symbol}** (${tx.symbol}): ${tx.type} ${
-        tx.quantity
-      } shares @ ₹${tx.pricePerShare} (${new Date(
-        tx.executedAt || tx.createdAt || ""
-      ).toLocaleDateString("en-IN")})${
+    (tx) => {
+      const suggestionSummary =
+        tx.suggestions && tx.suggestions.length > 0
+          ? `\n  Linked Suggestions:\n${tx.suggestions
+              .map(
+                (s: {
+                  id: string;
+                  symbol: string | null;
+                  action: string | null;
+                  rationale: string | null;
+                  status: string | null;
+                  createdAt: string | null;
+                }) =>
+                  `  - ${s.action || "ACTION"} ${s.symbol || tx.symbol} (${
+                    s.status || "unknown"
+                  }, ${new Date(s.createdAt || "").toLocaleDateString("en-IN")})${
+                    s.rationale ? `: ${s.rationale}` : ""
+                  }`
+              )
+              .join("\n")}`
+          : "";
+      const notesSummary =
         tx.notes && tx.notes.length > 0
           ? `\n  User Notes:\n${tx.notes
               .map((n: string) => `  - "${n}"`)
               .join("\n")}`
-          : ""
-      }`
+          : "";
+      return `- **${tx.stockName || tx.symbol}** (${tx.symbol}): ${tx.type} ${
+        tx.quantity
+      } shares @ ₹${tx.pricePerShare} (${new Date(
+        tx.executedAt || tx.createdAt || ""
+      ).toLocaleDateString("en-IN")})${suggestionSummary}${notesSummary}`;
+    }
   )
   .join("\n\n")}
 
