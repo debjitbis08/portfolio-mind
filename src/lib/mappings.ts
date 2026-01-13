@@ -21,6 +21,7 @@ export const BUILT_IN_MAPPINGS: Record<string, string> = {
   // For price fetching, we need to force BOM exchange to avoid wrong prices
   FRONTSP: "522195", // Broker code → canonical BSE scrip code
   KPL: "539997",
+  BONDADA: "543971",
 
   // ICICI Direct mappings
   RELIND: "RELIANCE",

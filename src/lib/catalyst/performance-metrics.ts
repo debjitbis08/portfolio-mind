@@ -32,6 +32,9 @@ type PerformanceTransaction = {
   executedAt: string | null;
 };
 
+const normalizeSymbol = (symbol: string) =>
+  symbol.replace(/\.NS$|\.BO$/i, "").trim();
+
 export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPerformanceMetrics> {
   const brokerTransactions = await db
     .select({
@@ -51,6 +54,31 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
     )
     .orderBy(asc(schema.transactions.executedAt));
 
+  const brokerLinked = await db
+    .select({
+      id: schema.transactions.id,
+      symbol: schema.transactions.symbol,
+      type: schema.transactions.type,
+      quantity: schema.transactions.quantity,
+      value: schema.transactions.value,
+      executedAt: schema.transactions.executedAt,
+    })
+    .from(schema.suggestionTransactions)
+    .innerJoin(
+      schema.transactions,
+      eq(schema.suggestionTransactions.transactionId, schema.transactions.id)
+    )
+    .innerJoin(
+      schema.suggestions,
+      eq(schema.suggestionTransactions.suggestionId, schema.suggestions.id)
+    )
+    .where(
+      and(
+        eq(schema.suggestions.portfolioType, "CATALYST"),
+        eq(schema.transactions.status, "Executed")
+      )
+    );
+
   const intradayTransactions = await db
     .select({
       id: schema.intradayTransactions.id,
@@ -64,9 +92,54 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
     .from(schema.intradayTransactions)
     .where(eq(schema.intradayTransactions.portfolioType, "CATALYST"));
 
+  const intradayLinked = await db
+    .select({
+      id: schema.intradayTransactions.id,
+      symbol: schema.intradayTransactions.symbol,
+      type: schema.intradayTransactions.type,
+      quantity: schema.intradayTransactions.quantity,
+      pricePerShare: schema.intradayTransactions.pricePerShare,
+      executedAt: schema.intradayTransactions.executedAt,
+      createdAt: schema.intradayTransactions.createdAt,
+    })
+    .from(schema.intradaySuggestionLinks)
+    .innerJoin(
+      schema.intradayTransactions,
+      eq(
+        schema.intradaySuggestionLinks.intradayTransactionId,
+        schema.intradayTransactions.id
+      )
+    )
+    .innerJoin(
+      schema.suggestions,
+      eq(schema.intradaySuggestionLinks.suggestionId, schema.suggestions.id)
+    )
+    .where(eq(schema.suggestions.portfolioType, "CATALYST"));
+
+  const brokerMerged = new Map<string, (typeof brokerTransactions)[0]>();
+  for (const tx of brokerTransactions) brokerMerged.set(tx.id, tx);
+  for (const tx of brokerLinked) brokerMerged.set(tx.id, tx);
+
+  const intradayMerged = new Map<string, (typeof intradayTransactions)[0]>();
+  for (const tx of intradayTransactions) intradayMerged.set(tx.id, tx);
+  for (const tx of intradayLinked) {
+    intradayMerged.set(tx.id, {
+      id: tx.id,
+      symbol: tx.symbol,
+      type: tx.type,
+      quantity: tx.quantity,
+      pricePerShare: tx.pricePerShare,
+      executedAt: tx.executedAt,
+      createdAt: tx.createdAt,
+    });
+  }
+
+  const brokerRows = Array.from(brokerMerged.values());
+  const intradayRows = Array.from(intradayMerged.values());
+
   const transactions: PerformanceTransaction[] = [
-    ...brokerTransactions,
-    ...intradayTransactions.map((tx) => ({
+    ...brokerRows,
+    ...intradayRows.map((tx) => ({
       id: tx.id,
       symbol: tx.symbol,
       type: tx.type,
@@ -95,8 +168,8 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
     };
   }
 
-  const brokerTransactionIds = brokerTransactions.map((t) => t.id);
-  const intradayTransactionIds = intradayTransactions.map((t) => t.id);
+  const brokerTransactionIds = brokerRows.map((t) => t.id);
+  const intradayTransactionIds = intradayRows.map((t) => t.id);
   const brokerSuggestionLinks =
     brokerTransactionIds.length > 0
       ? await db
@@ -166,23 +239,24 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
     if (tx.type === "OPENING_BALANCE") continue;
 
     const pricePerShare = tx.quantity > 0 ? tx.value / tx.quantity : 0;
+    const symbolKey = normalizeSymbol(tx.symbol);
 
     if (tx.type === "BUY") {
-      const lots = lotsBySymbol.get(tx.symbol) || [];
+      const lots = lotsBySymbol.get(symbolKey) || [];
       lots.push({
         quantity: tx.quantity,
         pricePerShare,
         executedAt: tx.executedAt,
         stopLoss: stopLossByTransactionId.get(tx.id) ?? null,
       });
-      lotsBySymbol.set(tx.symbol, lots);
+      lotsBySymbol.set(symbolKey, lots);
       continue;
     }
 
     if (tx.type !== "SELL") continue;
 
     let remaining = tx.quantity;
-    const lots = lotsBySymbol.get(tx.symbol) || [];
+    const lots = lotsBySymbol.get(symbolKey) || [];
     while (remaining > 0 && lots.length > 0) {
       const lot = lots[0];
       const matchedQty = Math.min(remaining, lot.quantity);
@@ -214,7 +288,7 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
         lots.shift();
       }
     }
-    lotsBySymbol.set(tx.symbol, lots);
+    lotsBySymbol.set(symbolKey, lots);
   }
 
   if (tradePnL.length === 0) {

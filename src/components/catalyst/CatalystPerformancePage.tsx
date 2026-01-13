@@ -28,7 +28,7 @@ type HoldingsSummary = {
   holdings_count: number;
 };
 
-type IntradayTransaction = {
+type CatalystTrade = {
   id: string;
   symbol: string;
   stockName: string | null;
@@ -38,6 +38,7 @@ type IntradayTransaction = {
   executedAt: string | null;
   createdAt: string | null;
   portfolioType: "LONGTERM" | "CATALYST";
+  source: "BROKER" | "INTRADAY";
 };
 
 type HoldingsResponse = {
@@ -76,7 +77,7 @@ const normalizeSymbol = (symbol: string) =>
 
 type Props = {
   initialHoldings?: HoldingsResponse | null;
-  initialIntraday?: IntradayTransaction[];
+  initialTrades?: CatalystTrade[];
   initialMetrics?: CatalystPerformanceMetrics | null;
 };
 
@@ -97,8 +98,8 @@ export default function CatalystPerformancePage(props: Props) {
   const [holdings, setHoldings] = createSignal<HoldingsResponse | null>(
     props.initialHoldings ?? null
   );
-  const [intraday, setIntraday] = createSignal<IntradayTransaction[]>(
-    props.initialIntraday ?? []
+  const [trades, setTrades] = createSignal<CatalystTrade[]>(
+    props.initialTrades ?? []
   );
   const [metrics, setMetrics] =
     createSignal<CatalystPerformanceMetrics | null>(
@@ -119,11 +120,9 @@ export default function CatalystPerformancePage(props: Props) {
   onMount(async () => {
     try {
       setLoading(true);
-      const [holdingsRes, intradayRes] = await Promise.all([
+      const [holdingsRes, tradesRes] = await Promise.all([
         fetch(`${getBaseUrl()}/api/catalyst/holdings`),
-        fetch(
-          `${getBaseUrl()}/api/intraday-transactions?portfolioType=CATALYST`
-        ),
+        fetch(`${getBaseUrl()}/api/catalyst/trades`),
       ]);
       const metricsRes = await fetch(
         `${getBaseUrl()}/api/catalyst/performance-metrics`
@@ -133,9 +132,9 @@ export default function CatalystPerformancePage(props: Props) {
         setHoldings((await holdingsRes.json()) as HoldingsResponse);
       }
 
-      if (intradayRes.ok) {
-        const data = await intradayRes.json();
-        setIntraday((data.transactions || []) as IntradayTransaction[]);
+      if (tradesRes.ok) {
+        const data = await tradesRes.json();
+        setTrades((data.trades || []) as CatalystTrade[]);
       }
 
       if (metricsRes.ok) {
@@ -158,8 +157,8 @@ export default function CatalystPerformancePage(props: Props) {
     return map;
   });
 
-  const sortedIntraday = createMemo(() => {
-    const rows = [...(intraday() || [])];
+  const sortedTrades = createMemo(() => {
+    const rows = [...(trades() || [])];
     rows.sort((a, b) => {
       const aTime = new Date(a.executedAt || a.createdAt || 0).getTime();
       const bTime = new Date(b.executedAt || b.createdAt || 0).getTime();
@@ -168,8 +167,8 @@ export default function CatalystPerformancePage(props: Props) {
     return rows;
   });
 
-  const intradaySummary = createMemo(() => {
-    const rows = sortedIntraday();
+  const tradeSummary = createMemo(() => {
+    const rows = sortedTrades();
     let totalPnl = 0;
     let pricedCount = 0;
     for (const trade of rows) {
@@ -187,7 +186,7 @@ export default function CatalystPerformancePage(props: Props) {
     return { totalPnl, pricedCount };
   });
 
-  const latestTrade = createMemo(() => sortedIntraday()[0] || null);
+  const latestTrade = createMemo(() => sortedTrades()[0] || null);
 
   const latestTradePnl = createMemo(() => {
     const trade = latestTrade();
@@ -205,6 +204,21 @@ export default function CatalystPerformancePage(props: Props) {
 
   const summary = () => holdings()?.summary;
   const positions = () => holdings()?.holdings || [];
+  const realizedPnL = createMemo(() => {
+    const data = metrics();
+    if (!data) return null;
+    return data.grossProfit - data.grossLoss;
+  });
+  const unrealizedPnL = createMemo(() => {
+    const data = summary();
+    return data ? data.total_returns : null;
+  });
+  const totalPnL = createMemo(() => {
+    const realized = realizedPnL();
+    const unrealized = unrealizedPnL();
+    if (realized === null && unrealized === null) return null;
+    return (realized ?? 0) + (unrealized ?? 0);
+  });
 
   return (
     <div class="max-w-7xl mx-auto px-4 py-6">
@@ -213,8 +227,7 @@ export default function CatalystPerformancePage(props: Props) {
           Catalyst Performance
         </h1>
         <p class="text-subtext0">
-          Live snapshot of swing positions and intraday trades for catalyst
-          ideas.
+          Live snapshot of swing positions and trades linked to catalyst ideas.
         </p>
       </div>
 
@@ -282,36 +295,36 @@ export default function CatalystPerformancePage(props: Props) {
             <div class="text-xs text-subtext0 mb-2">Total P&amp;L</div>
             <div
               class={`text-2xl font-semibold ${
-                summary() ? pnlClass(summary()!.total_returns) : "text-text"
+                totalPnL() !== null ? pnlClass(totalPnL()!) : "text-text"
               }`}
             >
-              {summary()
-                ? formatCurrency(summary()!.total_returns)
-                : "—"}
+              {totalPnL() !== null ? formatCurrency(totalPnL()!) : "—"}
             </div>
             <div class="text-xs text-subtext1">
-              {summary()
-                ? formatPercent(summary()!.total_returns_percent)
+              {totalPnL() !== null
+                ? `Unrealized ${formatCurrency(
+                    unrealizedPnL() ?? 0
+                  )} • Realized ${formatCurrency(realizedPnL() ?? 0)}`
                 : "No positions yet"}
             </div>
           </div>
           <div class="bg-surface0 border border-surface1 rounded-xl p-4">
-            <div class="text-xs text-subtext0 mb-2">Intraday P&amp;L</div>
+            <div class="text-xs text-subtext0 mb-2">Trade P&amp;L</div>
             <div
               class={`text-2xl font-semibold ${pnlClass(
-                intradaySummary().totalPnl
+                tradeSummary().totalPnl
               )}`}
             >
-              {sortedIntraday().length > 0
-                ? formatCurrency(intradaySummary().totalPnl)
+              {sortedTrades().length > 0
+                ? formatCurrency(tradeSummary().totalPnl)
                 : "—"}
             </div>
             <div class="text-xs text-subtext1">
-              {sortedIntraday().length > 0
-                ? `${intradaySummary().pricedCount} priced trade${
-                    intradaySummary().pricedCount === 1 ? "" : "s"
+              {sortedTrades().length > 0
+                ? `${tradeSummary().pricedCount} priced trade${
+                    tradeSummary().pricedCount === 1 ? "" : "s"
                   }`
-                : "No intraday trades yet"}
+                : "No trades yet"}
             </div>
           </div>
           <div class="bg-surface0 border border-surface1 rounded-xl p-4">
@@ -339,6 +352,43 @@ export default function CatalystPerformancePage(props: Props) {
                 )}
               </div>
             </Show>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          <div class="bg-surface0 border border-surface1 rounded-xl p-4">
+            <div class="text-xs text-subtext0 mb-2">Unrealized P&amp;L</div>
+            <div
+              class={`text-2xl font-semibold ${
+                unrealizedPnL() !== null ? pnlClass(unrealizedPnL()!) : "text-text"
+              }`}
+            >
+              {unrealizedPnL() !== null
+                ? formatCurrency(unrealizedPnL()!)
+                : "—"}
+            </div>
+            <div class="text-xs text-subtext1">
+              {summary()
+                ? formatPercent(summary()!.total_returns_percent)
+                : "No open positions yet"}
+            </div>
+          </div>
+          <div class="bg-surface0 border border-surface1 rounded-xl p-4">
+            <div class="text-xs text-subtext0 mb-2">Realized P&amp;L</div>
+            <div
+              class={`text-2xl font-semibold ${
+                realizedPnL() !== null ? pnlClass(realizedPnL()!) : "text-text"
+              }`}
+            >
+              {realizedPnL() !== null ? formatCurrency(realizedPnL()!) : "—"}
+            </div>
+            <div class="text-xs text-subtext1">
+              {metrics()?.closedTrades
+                ? `${metrics()!.closedTrades} closed trade${
+                    metrics()!.closedTrades === 1 ? "" : "s"
+                  }`
+                : "No closed trades yet"}
+            </div>
           </div>
         </div>
 
@@ -433,25 +483,23 @@ export default function CatalystPerformancePage(props: Props) {
           <div class="lg:col-span-2 bg-surface0 border border-surface1 rounded-xl p-5">
             <div class="flex items-center justify-between mb-4">
               <div>
-                <h2 class="text-lg font-semibold text-text">
-                  Intraday Trades
-                </h2>
+                <h2 class="text-lg font-semibold text-text">Trades</h2>
                 <p class="text-xs text-subtext0">
-                  Manual trades awaiting broker import
+                  Broker and intraday trades linked to catalyst
                 </p>
               </div>
             </div>
 
             <Show
-              when={sortedIntraday().length > 0}
+              when={sortedTrades().length > 0}
               fallback={
                 <div class="text-subtext0 text-sm">
-                  No intraday trades logged.
+                  No trades logged.
                 </div>
               }
             >
               <div class="space-y-3">
-                <For each={sortedIntraday()}>
+                <For each={sortedTrades()}>
                   {(trade) => {
                     const currentPrice = () =>
                       priceMap().get(trade.symbol) ||
@@ -478,14 +526,19 @@ export default function CatalystPerformancePage(props: Props) {
                               )}
                             </div>
                           </div>
-                          <div
-                            class={`text-xs font-medium px-2 py-0.5 rounded ${
-                              trade.type === "BUY"
-                                ? "bg-green/20 text-green"
-                                : "bg-red/20 text-red"
-                            }`}
-                          >
-                            {trade.type}
+                          <div class="flex items-center gap-2">
+                            <div
+                              class={`text-xs font-medium px-2 py-0.5 rounded ${
+                                trade.type === "BUY"
+                                  ? "bg-green/20 text-green"
+                                  : "bg-red/20 text-red"
+                              }`}
+                            >
+                              {trade.type}
+                            </div>
+                            <div class="text-[10px] uppercase text-subtext0">
+                              {trade.source}
+                            </div>
                           </div>
                         </div>
                         <div class="grid grid-cols-2 gap-3 text-xs text-subtext0">

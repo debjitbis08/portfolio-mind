@@ -2,9 +2,8 @@
 import Layout from "../../layouts/Layout.astro";
 import { validateSession } from "../../lib/auth";
 import CatalystPerformancePage from "../../components/catalyst/CatalystPerformancePage";
-import { db, schema } from "../../lib/db";
 import { calculateCatalystPerformanceMetrics } from "../../lib/catalyst/performance-metrics";
-import { eq, desc } from "drizzle-orm";
+import { getCatalystTrades } from "../../lib/catalyst/trades";
 
 const session = await validateSession(Astro.request);
 
@@ -19,46 +18,7 @@ const headers = cookie ? { cookie } : {};
 const holdingsRes = await fetch(`${origin}/api/catalyst/holdings`, { headers });
 const holdingsInitial = holdingsRes.ok ? await holdingsRes.json() : null;
 
-const intradayDirect = await db
-  .select()
-  .from(schema.intradayTransactions)
-  .where(eq(schema.intradayTransactions.portfolioType, "CATALYST"))
-  .orderBy(desc(schema.intradayTransactions.createdAt));
-
-const intradayLinked = await db
-  .select({
-    id: schema.intradayTransactions.id,
-    symbol: schema.intradayTransactions.symbol,
-    stockName: schema.intradayTransactions.stockName,
-    type: schema.intradayTransactions.type,
-    quantity: schema.intradayTransactions.quantity,
-    pricePerShare: schema.intradayTransactions.pricePerShare,
-    executedAt: schema.intradayTransactions.executedAt,
-    createdAt: schema.intradayTransactions.createdAt,
-    portfolioType: schema.intradayTransactions.portfolioType,
-  })
-  .from(schema.intradaySuggestionLinks)
-  .innerJoin(
-    schema.intradayTransactions,
-    eq(
-      schema.intradaySuggestionLinks.intradayTransactionId,
-      schema.intradayTransactions.id
-    )
-  )
-  .innerJoin(
-    schema.suggestions,
-    eq(schema.intradaySuggestionLinks.suggestionId, schema.suggestions.id)
-  )
-  .where(eq(schema.suggestions.portfolioType, "CATALYST"));
-
-const intradayMerged = new Map<string, (typeof intradayDirect)[0]>();
-for (const tx of intradayDirect) intradayMerged.set(tx.id, tx);
-for (const tx of intradayLinked) intradayMerged.set(tx.id, tx);
-const intradayInitial = Array.from(intradayMerged.values()).sort((a, b) => {
-  const aTime = new Date(a.createdAt || 0).getTime();
-  const bTime = new Date(b.createdAt || 0).getTime();
-  return bTime - aTime;
-});
+const tradesInitial = await getCatalystTrades();
 
 const metricsInitial = await calculateCatalystPerformanceMetrics();
 ---
@@ -125,7 +85,7 @@ const metricsInitial = await calculateCatalystPerformanceMetrics();
     <CatalystPerformancePage
       client:visible
       initialHoldings={holdingsInitial}
-      initialIntraday={intradayInitial}
+      initialTrades={tradesInitial}
       initialMetrics={metricsInitial}
     />
   </div>

@@ -6,7 +6,7 @@
  */
 
 import { registerToolExecutor, type ToolResponse } from "./registry";
-import { db, schema } from "../db";
+import { db, schema, type PortfolioType } from "../db";
 import { eq, and, inArray, desc, gt } from "drizzle-orm";
 
 interface GetPreviousSuggestionsArgs {
@@ -160,7 +160,10 @@ export async function supersedeSuggestion(
 /**
  * Get suggestions context for AI (Pending + Recent History)
  */
-export async function getSuggestionsContext(symbols?: string[]): Promise<
+export async function getSuggestionsContext(
+  symbols?: string[],
+  portfolioType: PortfolioType = "LONGTERM"
+): Promise<
   Array<{
     id: string;
     symbol: string;
@@ -175,7 +178,10 @@ export async function getSuggestionsContext(symbols?: string[]): Promise<
   const cleanSymbols = symbols?.map((s) => s.trim().toUpperCase()) || [];
 
   // 1. Fetch ALL pending suggestions (or filter by symbol if provided)
-  const pendingConditions = [eq(schema.suggestions.status, "pending")];
+  const pendingConditions = [
+    eq(schema.suggestions.status, "pending"),
+    eq(schema.suggestions.portfolioType, portfolioType),
+  ];
   if (cleanSymbols.length > 0) {
     pendingConditions.push(inArray(schema.suggestions.symbol, cleanSymbols));
   }
@@ -187,6 +193,7 @@ export async function getSuggestionsContext(symbols?: string[]): Promise<
   const historyConditions = [
     inArray(schema.suggestions.status, ["approved", "rejected"]),
     gt(schema.suggestions.createdAt, thirtyDaysAgo.toISOString()),
+    eq(schema.suggestions.portfolioType, portfolioType),
   ];
   if (cleanSymbols.length > 0) {
     historyConditions.push(inArray(schema.suggestions.symbol, cleanSymbols));
