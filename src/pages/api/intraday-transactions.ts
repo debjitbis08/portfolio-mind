@@ -13,6 +13,7 @@ import type { APIRoute } from "astro";
 import { requireAuth } from "../../lib/middleware/requireAuth";
 import { db, schema } from "../../lib/db";
 import { and, eq } from "drizzle-orm";
+import { calculateTransactionCharges } from "../../lib/charges";
 
 export const GET: APIRoute = async ({ request }) => {
   const authError = await requireAuth(request);
@@ -173,6 +174,13 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     // Create intraday transaction with same portfolio type as the suggestion
+    const tradeValue = Number(quantity) * Number(pricePerShare);
+    const charges = calculateTransactionCharges({
+      tradeValue,
+      side: type as "BUY" | "SELL",
+      productType: "INTRADAY",
+    });
+
     const txResult = await db
       .insert(schema.intradayTransactions)
       .values({
@@ -181,6 +189,15 @@ export const POST: APIRoute = async ({ request }) => {
         type: type as "BUY" | "SELL",
         quantity: Number(quantity),
         pricePerShare: Number(pricePerShare),
+        brokerage: charges.brokerage,
+        stt: charges.stt,
+        stampDuty: charges.stampDuty,
+        exchangeCharges: charges.exchangeCharges,
+        sebiCharges: charges.sebiCharges,
+        ipftCharges: charges.ipftCharges,
+        dpCharges: charges.dpCharges,
+        gst: charges.gst,
+        totalCharges: charges.totalCharges,
         portfolioType: suggestion[0].portfolioType || "LONGTERM",
       })
       .returning();

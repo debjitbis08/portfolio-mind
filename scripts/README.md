@@ -4,6 +4,18 @@
 
 This script uses AI to analyze existing suggestions and recommend portfolio roles WITHOUT modifying the database. You can review the output and manually apply the changes.
 
+## Backfill Charges Script
+
+Backfills brokerage/statutory charges for existing transactions after schema changes.
+
+```bash
+tsx scripts/backfill-charges.ts
+```
+
+Optional flags:
+- `--dry-run` prints how many rows would be updated
+- `--force` recomputes charges even if `totalCharges` is already set
+
 ## Usage
 
 ### 1. Run the Script

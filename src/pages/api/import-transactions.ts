@@ -18,6 +18,7 @@ import {
   type GrowwTransaction,
   type GrowwHolding,
 } from "../../lib/xlsx-importer";
+import { calculateTransactionCharges } from "../../lib/charges";
 import {
   findMatchesForTransactions,
   autoLinkHighConfidenceMatches,
@@ -187,18 +188,36 @@ export const POST: APIRoute = async ({ request }) => {
     // Insert transactions with deduplication
     const transactionsToInsert = transactions
       .filter((tx) => tx.status === "Executed")
-      .map((tx) => ({
-        isin: tx.isin,
-        symbol: tx.symbol.replace(/[$]/g, ""), // Clean up special chars
-        stockName: tx.stockName,
-        type: tx.type as "BUY" | "SELL" | "OPENING_BALANCE",
-        quantity: tx.quantity,
-        value: tx.value,
-        exchange: tx.exchange,
-        exchangeOrderId: tx.exchangeOrderId,
-        executedAt: tx.executedAt.toISOString(),
-        status: tx.status,
-      }));
+      .map((tx) => {
+        const charges = calculateTransactionCharges({
+          tradeValue: tx.value,
+          side: tx.type,
+          productType: tx.productType || "DELIVERY",
+          exchange: tx.exchange,
+        });
+
+        return {
+          isin: tx.isin,
+          symbol: tx.symbol.replace(/[$]/g, ""), // Clean up special chars
+          stockName: tx.stockName,
+          type: tx.type as "BUY" | "SELL" | "OPENING_BALANCE",
+          quantity: tx.quantity,
+          value: tx.value,
+          brokerage: charges.brokerage,
+          stt: charges.stt,
+          stampDuty: charges.stampDuty,
+          exchangeCharges: charges.exchangeCharges,
+          sebiCharges: charges.sebiCharges,
+          ipftCharges: charges.ipftCharges,
+          dpCharges: charges.dpCharges,
+          gst: charges.gst,
+          totalCharges: charges.totalCharges,
+          exchange: tx.exchange,
+          exchangeOrderId: tx.exchangeOrderId,
+          executedAt: tx.executedAt.toISOString(),
+          status: tx.status,
+        };
+      });
 
     let insertedCount = 0;
     for (const tx of transactionsToInsert) {
@@ -250,6 +269,15 @@ export const POST: APIRoute = async ({ request }) => {
           type: "OPENING_BALANCE",
           quantity: holding.quantity,
           value: holding.buyValue,
+          brokerage: 0,
+          stt: 0,
+          stampDuty: 0,
+          exchangeCharges: 0,
+          sebiCharges: 0,
+          ipftCharges: 0,
+          dpCharges: 0,
+          gst: 0,
+          totalCharges: 0,
           exchange: null,
           exchangeOrderId: `OPENING_BAL_${adj.symbol}`,
           executedAt: new Date("2020-04-01").toISOString(),

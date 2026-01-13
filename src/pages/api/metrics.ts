@@ -61,8 +61,14 @@ export const GET: APIRoute = async ({ request, url }) => {
       type: "BUY" | "SELL" | "OPENING_BALANCE";
       quantity: number;
       value: number;
+      totalCharges: number;
       executedAt: string;
     };
+
+    const getNetValue = (tx: MetricsTransaction) =>
+      tx.type === "SELL"
+        ? tx.value - (tx.totalCharges || 0)
+        : tx.value + (tx.totalCharges || 0);
 
     const daysBack = parseInt(url.searchParams.get("days") || "365", 10);
     const cutoffDate = new Date();
@@ -139,6 +145,7 @@ export const GET: APIRoute = async ({ request, url }) => {
         type: tx.type,
         quantity: tx.quantity,
         value: tx.value,
+        totalCharges: tx.totalCharges || 0,
         executedAt: tx.executedAt,
       })
     );
@@ -149,6 +156,7 @@ export const GET: APIRoute = async ({ request, url }) => {
         type: tx.type,
         quantity: tx.quantity,
         value: tx.quantity * tx.pricePerShare,
+        totalCharges: tx.totalCharges || 0,
         executedAt: tx.executedAt || tx.createdAt || "",
       }));
 
@@ -216,6 +224,7 @@ export const GET: APIRoute = async ({ request, url }) => {
         type: tx.type,
         quantity: tx.quantity,
         value: tx.value,
+        totalCharges: tx.totalCharges || 0,
         executedAt: tx.executedAt,
       }));
     const intradaySymbolTransactions: MetricsTransaction[] =
@@ -225,6 +234,7 @@ export const GET: APIRoute = async ({ request, url }) => {
         type: tx.type,
         quantity: tx.quantity,
         value: tx.quantity * tx.pricePerShare,
+        totalCharges: tx.totalCharges || 0,
         executedAt: tx.executedAt || tx.createdAt || "",
       }));
     const allSymbolTransactions = [
@@ -269,7 +279,7 @@ export const GET: APIRoute = async ({ request, url }) => {
       const currentPrice = priceBySymbol.get(symbol);
 
       if (suggestion.action === "BUY") {
-        const buyValue = transaction.value;
+        const buyValue = getNetValue(transaction);
         const quantity = transaction.quantity;
         const pricePerShare = quantity > 0 ? buyValue / quantity : 0;
 
@@ -293,7 +303,7 @@ export const GET: APIRoute = async ({ request, url }) => {
           status = "closed";
           const sellPricePerShare =
             matchingSell.quantity > 0
-              ? matchingSell.value / matchingSell.quantity
+              ? getNetValue(matchingSell) / matchingSell.quantity
               : 0;
           currentValue = sellPricePerShare * quantity; // Proportional to original quantity
           gainAmount = currentValue - buyValue;
@@ -326,7 +336,7 @@ export const GET: APIRoute = async ({ request, url }) => {
         // Find corresponding BUY to calculate average cost
         const symbolTxs = transactionsBySymbol.get(symbol) || [];
         const sellDate = new Date(transaction.executedAt);
-        const sellValue = transaction.value;
+        const sellValue = getNetValue(transaction);
         const sellQuantity = transaction.quantity;
         const sellPricePerShare =
           sellQuantity > 0 ? sellValue / sellQuantity : 0;
@@ -340,7 +350,7 @@ export const GET: APIRoute = async ({ request, url }) => {
         let totalBoughtValue = 0;
         for (const buy of priorBuys) {
           totalBoughtQty += buy.quantity;
-          totalBoughtValue += buy.value;
+          totalBoughtValue += getNetValue(buy);
         }
 
         const avgBuyPrice =

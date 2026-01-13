@@ -9,6 +9,7 @@ export interface GrowwTransaction {
   type: "BUY" | "SELL";
   quantity: number;
   value: number;
+  productType: "DELIVERY" | "INTRADAY";
   exchange: string;
   exchangeOrderId: string;
   executedAt: Date;
@@ -64,6 +65,36 @@ export function parseOrderHistory(buffer: ArrayBuffer): GrowwTransaction[] {
     );
   }
 
+  const headerRow = data[headerRowIndex] || [];
+  const normalizeHeader = (value: unknown) =>
+    String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  const findHeaderIndex = (candidates: string[]) =>
+    headerRow.findIndex((cell) =>
+      candidates.includes(normalizeHeader(cell))
+    );
+  const productTypeIndex = findHeaderIndex([
+    "product",
+    "product type",
+    "trade type",
+    "order type",
+  ]);
+
+  const resolveProductType = (value: unknown): "DELIVERY" | "INTRADAY" => {
+    const normalized = String(value || "")
+      .trim()
+      .toUpperCase();
+    if (normalized.includes("INTRADAY") || normalized === "MIS") {
+      return "INTRADAY";
+    }
+    if (normalized.includes("DELIVERY") || normalized === "CNC") {
+      return "DELIVERY";
+    }
+    return "DELIVERY";
+  };
+
   // Parse data rows
   for (let i = headerRowIndex + 1; i < data.length; i++) {
     const row = data[i];
@@ -82,6 +113,11 @@ export function parseOrderHistory(buffer: ArrayBuffer): GrowwTransaction[] {
       status,
     ] = row;
 
+    const productType =
+      productTypeIndex >= 0
+        ? resolveProductType(row[productTypeIndex])
+        : "DELIVERY";
+
     // Parse date: "25-04-2022 10:51 AM"
     const executedAt = parseGrowwDateTime(executionDateTime);
 
@@ -92,6 +128,7 @@ export function parseOrderHistory(buffer: ArrayBuffer): GrowwTransaction[] {
       type: String(type).toUpperCase() as "BUY" | "SELL",
       quantity: Number(quantity),
       value: Number(value),
+      productType,
       exchange: String(exchange),
       exchangeOrderId: String(exchangeOrderId),
       executedAt,
@@ -751,6 +788,7 @@ export async function convertICICIToGrowwFormat(
     type: tx.action,
     quantity: tx.quantity,
     value: tx.quantity * tx.transactionPrice,
+    productType: "DELIVERY",
     exchange: tx.exchange,
     exchangeOrderId: "",
     executedAt: tx.transactionDate,

@@ -209,6 +209,12 @@ export async function getHoldings(
       sellValue: sum(
         sql`CASE WHEN ${schema.transactions.type} = 'SELL' THEN ${schema.transactions.value} ELSE 0 END`
       ),
+      buyCharges: sum(
+        sql`CASE WHEN ${schema.transactions.type} IN ('BUY', 'OPENING_BALANCE') THEN ${schema.transactions.totalCharges} ELSE 0 END`
+      ),
+      sellCharges: sum(
+        sql`CASE WHEN ${schema.transactions.type} = 'SELL' THEN ${schema.transactions.totalCharges} ELSE 0 END`
+      ),
     })
     .from(schema.transactions)
     .where(
@@ -222,7 +228,9 @@ export async function getHoldings(
   const holdings: Holding[] = result.map((row) => {
     const quantity = Number(row.buyQty || 0) - Number(row.sellQty || 0);
     const investedValue =
-      Number(row.buyValue || 0) - Number(row.sellValue || 0);
+      Number(row.buyValue || 0) +
+      Number(row.buyCharges || 0) -
+      (Number(row.sellValue || 0) - Number(row.sellCharges || 0));
     const resolvedIsin = row.isin || row.symbol;
     return {
       isin: resolvedIsin,
@@ -242,8 +250,12 @@ export async function getHoldings(
 
   for (const tx of intradayTxs) {
     const value = tx.quantity * tx.pricePerShare;
+    const netValue =
+      tx.type === "BUY"
+        ? value + (tx.totalCharges || 0)
+        : value - (tx.totalCharges || 0);
     const qtyDelta = tx.type === "BUY" ? tx.quantity : -tx.quantity;
-    const valDelta = tx.type === "BUY" ? value : -value;
+    const valDelta = tx.type === "BUY" ? netValue : -netValue;
 
     const existing = holdings.find((h) => h.symbol === tx.symbol);
 
@@ -259,7 +271,7 @@ export async function getHoldings(
         symbol: tx.symbol,
         stockName: tx.stockName || tx.symbol,
         quantity: tx.quantity,
-        investedValue: value,
+        investedValue: netValue,
         avgBuyPrice: tx.pricePerShare,
       });
     }

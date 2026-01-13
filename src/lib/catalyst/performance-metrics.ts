@@ -29,11 +29,17 @@ type PerformanceTransaction = {
   type: "BUY" | "SELL" | "OPENING_BALANCE";
   quantity: number;
   value: number;
+  totalCharges: number;
   executedAt: string | null;
 };
 
 const normalizeSymbol = (symbol: string) =>
   symbol.replace(/\.NS$|\.BO$/i, "").trim();
+
+const getNetValue = (tx: PerformanceTransaction) =>
+  tx.type === "SELL"
+    ? tx.value - (tx.totalCharges || 0)
+    : tx.value + (tx.totalCharges || 0);
 
 export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPerformanceMetrics> {
   const brokerTransactions = await db
@@ -43,6 +49,7 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: schema.transactions.type,
       quantity: schema.transactions.quantity,
       value: schema.transactions.value,
+      totalCharges: schema.transactions.totalCharges,
       executedAt: schema.transactions.executedAt,
     })
     .from(schema.transactions)
@@ -61,6 +68,7 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: schema.transactions.type,
       quantity: schema.transactions.quantity,
       value: schema.transactions.value,
+      totalCharges: schema.transactions.totalCharges,
       executedAt: schema.transactions.executedAt,
     })
     .from(schema.suggestionTransactions)
@@ -86,6 +94,7 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: schema.intradayTransactions.type,
       quantity: schema.intradayTransactions.quantity,
       pricePerShare: schema.intradayTransactions.pricePerShare,
+      totalCharges: schema.intradayTransactions.totalCharges,
       executedAt: schema.intradayTransactions.executedAt,
       createdAt: schema.intradayTransactions.createdAt,
     })
@@ -99,6 +108,7 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: schema.intradayTransactions.type,
       quantity: schema.intradayTransactions.quantity,
       pricePerShare: schema.intradayTransactions.pricePerShare,
+      totalCharges: schema.intradayTransactions.totalCharges,
       executedAt: schema.intradayTransactions.executedAt,
       createdAt: schema.intradayTransactions.createdAt,
     })
@@ -129,6 +139,7 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: tx.type,
       quantity: tx.quantity,
       pricePerShare: tx.pricePerShare,
+      totalCharges: tx.totalCharges,
       executedAt: tx.executedAt,
       createdAt: tx.createdAt,
     });
@@ -145,6 +156,7 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: tx.type,
       quantity: tx.quantity,
       value: tx.quantity * tx.pricePerShare,
+      totalCharges: tx.totalCharges || 0,
       executedAt: tx.executedAt || tx.createdAt,
     })),
   ].sort((a, b) => {
@@ -238,7 +250,8 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
   for (const tx of transactions) {
     if (tx.type === "OPENING_BALANCE") continue;
 
-    const pricePerShare = tx.quantity > 0 ? tx.value / tx.quantity : 0;
+    const netValue = getNetValue(tx);
+    const pricePerShare = tx.quantity > 0 ? netValue / tx.quantity : 0;
     const symbolKey = normalizeSymbol(tx.symbol);
 
     if (tx.type === "BUY") {
