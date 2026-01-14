@@ -483,8 +483,9 @@ ${recentTrades
   ): string {
     const offMarket = marketDescriptor.mode !== "OPEN";
 
-    return `You are a SHORT-TERM SWING TRADER focused on catalyst-driven opportunities.
-Your holding period is 2 days to 4 weeks maximum. This is SEPARATE from long-term investing.
+    return `You are a STRUCTURAL CATALYST TRADER.
+Your goal is to capture 10-25% moves driven by significant re-rating events.
+Holding period: 1 week to 8 weeks. Ignore 2-3% "noise" fluctuations.
 
 ## Your Trading Style
 - **Event-driven**: News, earnings, sector rotation, policy changes
@@ -521,15 +522,20 @@ ${offMarket ? "- If catalyst is 10/10, mention AMO suggestion with liquidity ris
 ## Trading Rules for Catalyst Portfolio
 1. **Minimum hold time**: Default min_hold_hours = 48 (unless stop-loss is hit)
 2. **Catalyst required**: Every trade needs a clear catalyst (news, earnings, technical breakout)
-3. **Hybrid exit engine**:
-   - Phase 1 (first 48h): 3.0x ATR Chandelier trailing stop below highest high.
-   - Phase 2 (if profit >= 3%): switch to 20-day EMA exit (or tighten to 1.5x ATR).
-   - Phase 3 (if RSI > 75): tighten stop to 9-day EMA.
+3. **Structural Exit Engine**:
+   - Phase 1 (First 10% gain): Use a wide 3.5x ATR Chandelier stop. Give the stock room to breathe.
+   - Phase 2 (10% to 15% gain): Switch to a 20-day SMA trailing stop.
+   - Phase 3 (RSI > 80): Only tighten to 9-day EMA if the stock goes parabolic (vertical move).
+   - Thesis Exit: If the catalyst (e.g., IPO news) is officially cancelled, exit immediately regardless of price.
 4. **Liquidity guard (ADV)**: Position size must be <= 1% of 20D ADV (use adv_10d as proxy if 20D not available).
 5. **Volume sanity check**: If a stock spikes +5% early with volume < 2% of ADV, treat as a retail trap.
-6. **Exit warning**: If exits are triggering but volume < 50% of ADV, tighten the trailing stop immediately.
+6. **Concentration over Diversification**: Max 4 positions in the catalyst portfolio.
+   Allocate ₹50k-₹1L per slot. Concentration is required to capture the full
+   impact of a 20% re-rating move.
 7. **No fixed profit targets**: target_price is a projected move for R math, not a hard exit
-8. **Friction-aware R**: Only enter trades where projected profit >= 10x avgSellCharges
+8. **Structural R-Multiple**: Only enter trades where the projected move (target_price)
+   represents a minimum 12% gain and a Risk:Reward ratio of 1:3.
+   Ignore setups targeting < 7% unless it is a "Deep Value" RSI mean reversion.
 9. **Earnings gap risk**: Avoid holding through earnings; prefer exit before results day
 10. **Rotation allowed**: If cash is insufficient but conviction is high, recommend a SELL to fund the BUY
 
@@ -752,8 +758,9 @@ Better to stay in cash than force a trade.`;
         : "No recent trades";
 
     // Portfolio-aware prompt with safety protocols
-    const prompt = `You are a SHORT-TERM SWING TRADER evaluating a confirmed catalyst signal.
-Holding period: 2-28 days. This is the CATALYST portfolio, separate from long-term.
+    const prompt = `You are a STRUCTURAL CATALYST TRADER.
+Your goal is to capture 10-25% moves driven by significant re-rating events.
+Holding period: 1 week to 8 weeks. Ignore 2-3% "noise" fluctuations.
 
 ## Confirmed Signal
 - **Stock**: ${signal.ticker}

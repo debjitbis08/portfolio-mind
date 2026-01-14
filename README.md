@@ -156,6 +156,11 @@ Your real data in `data/investor.db` remains untouched. To switch back, just run
 
 For detailed workflows, see the **[User Guide](docs/USER_GUIDE.md)**.
 
+## Documentation
+
+- [Catalyst Catcher](docs/catalyst/README.md)
+- [Database Migrations](docs/DATABASE_MIGRATIONS.md)
+
 ### 1. Import Your Portfolio
 
 Supports both **Groww** and **ICICI Direct**:

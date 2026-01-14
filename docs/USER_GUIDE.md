@@ -199,3 +199,13 @@ Once a month:
 ├── 3. Review reconciliation for any adjustments
 └── 4. Check for symbol mapping issues in Settings
 ```
+
+## Catalyst Catcher
+
+Catalyst Catcher is the discovery-first system that monitors news and generates market-moving signals. Use it to review early catalysts and decide whether to act on them.
+
+- Open the Catalyst dashboard at `http://localhost:4328/catalyst`.
+- Review active signals and their reasoning.
+- Mark signals as acted or dismiss them when done.
+
+For setup and operational details, see `docs/catalyst/README.md`.
