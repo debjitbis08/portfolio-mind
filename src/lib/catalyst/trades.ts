@@ -8,6 +8,15 @@ export type CatalystTrade = {
   type: "BUY" | "SELL";
   quantity: number;
   pricePerShare: number;
+  brokerage: number;
+  stt: number;
+  stampDuty: number;
+  exchangeCharges: number;
+  sebiCharges: number;
+  ipftCharges: number;
+  dpCharges: number;
+  gst: number;
+  totalCharges: number;
   executedAt: string | null;
   createdAt: string | null;
   portfolioType: "LONGTERM" | "CATALYST";
@@ -21,6 +30,15 @@ type BrokerRow = {
   type: "BUY" | "SELL" | "OPENING_BALANCE";
   quantity: number;
   value: number;
+  brokerage: number;
+  stt: number;
+  stampDuty: number;
+  exchangeCharges: number;
+  sebiCharges: number;
+  ipftCharges: number;
+  dpCharges: number;
+  gst: number;
+  totalCharges: number;
   executedAt: string;
   createdAt: string | null;
   portfolioType: "LONGTERM" | "CATALYST";
@@ -33,6 +51,15 @@ type IntradayRow = {
   type: "BUY" | "SELL";
   quantity: number;
   pricePerShare: number;
+  brokerage: number;
+  stt: number;
+  stampDuty: number;
+  exchangeCharges: number;
+  sebiCharges: number;
+  ipftCharges: number;
+  dpCharges: number;
+  gst: number;
+  totalCharges: number;
   executedAt: string | null;
   createdAt: string | null;
   portfolioType: "LONGTERM" | "CATALYST";
@@ -59,6 +86,15 @@ const mapBrokerRow = (row: BrokerRow): CatalystTrade | null => {
     type: row.type,
     quantity: row.quantity,
     pricePerShare,
+    brokerage: row.brokerage,
+    stt: row.stt,
+    stampDuty: row.stampDuty,
+    exchangeCharges: row.exchangeCharges,
+    sebiCharges: row.sebiCharges,
+    ipftCharges: row.ipftCharges,
+    dpCharges: row.dpCharges,
+    gst: row.gst,
+    totalCharges: row.totalCharges,
     executedAt: normalizeTradeTime(row),
     createdAt: row.createdAt,
     portfolioType: row.portfolioType,
@@ -73,6 +109,15 @@ const mapIntradayRow = (row: IntradayRow): CatalystTrade => ({
   type: row.type,
   quantity: row.quantity,
   pricePerShare: row.pricePerShare,
+  brokerage: row.brokerage,
+  stt: row.stt,
+  stampDuty: row.stampDuty,
+  exchangeCharges: row.exchangeCharges,
+  sebiCharges: row.sebiCharges,
+  ipftCharges: row.ipftCharges,
+  dpCharges: row.dpCharges,
+  gst: row.gst,
+  totalCharges: row.totalCharges,
   executedAt: normalizeTradeTime(row),
   createdAt: row.createdAt,
   portfolioType: row.portfolioType,
@@ -88,6 +133,15 @@ export async function getCatalystTrades(): Promise<CatalystTrade[]> {
       type: schema.transactions.type,
       quantity: schema.transactions.quantity,
       value: schema.transactions.value,
+      brokerage: schema.transactions.brokerage,
+      stt: schema.transactions.stt,
+      stampDuty: schema.transactions.stampDuty,
+      exchangeCharges: schema.transactions.exchangeCharges,
+      sebiCharges: schema.transactions.sebiCharges,
+      ipftCharges: schema.transactions.ipftCharges,
+      dpCharges: schema.transactions.dpCharges,
+      gst: schema.transactions.gst,
+      totalCharges: schema.transactions.totalCharges,
       executedAt: schema.transactions.executedAt,
       createdAt: schema.transactions.createdAt,
       portfolioType: schema.transactions.portfolioType,
@@ -109,6 +163,15 @@ export async function getCatalystTrades(): Promise<CatalystTrade[]> {
       type: schema.transactions.type,
       quantity: schema.transactions.quantity,
       value: schema.transactions.value,
+      brokerage: schema.transactions.brokerage,
+      stt: schema.transactions.stt,
+      stampDuty: schema.transactions.stampDuty,
+      exchangeCharges: schema.transactions.exchangeCharges,
+      sebiCharges: schema.transactions.sebiCharges,
+      ipftCharges: schema.transactions.ipftCharges,
+      dpCharges: schema.transactions.dpCharges,
+      gst: schema.transactions.gst,
+      totalCharges: schema.transactions.totalCharges,
       executedAt: schema.transactions.executedAt,
       createdAt: schema.transactions.createdAt,
       portfolioType: schema.transactions.portfolioType,
@@ -137,6 +200,15 @@ export async function getCatalystTrades(): Promise<CatalystTrade[]> {
       type: schema.intradayTransactions.type,
       quantity: schema.intradayTransactions.quantity,
       pricePerShare: schema.intradayTransactions.pricePerShare,
+      brokerage: schema.intradayTransactions.brokerage,
+      stt: schema.intradayTransactions.stt,
+      stampDuty: schema.intradayTransactions.stampDuty,
+      exchangeCharges: schema.intradayTransactions.exchangeCharges,
+      sebiCharges: schema.intradayTransactions.sebiCharges,
+      ipftCharges: schema.intradayTransactions.ipftCharges,
+      dpCharges: schema.intradayTransactions.dpCharges,
+      gst: schema.intradayTransactions.gst,
+      totalCharges: schema.intradayTransactions.totalCharges,
       executedAt: schema.intradayTransactions.executedAt,
       createdAt: schema.intradayTransactions.createdAt,
       portfolioType: schema.intradayTransactions.portfolioType,
@@ -153,6 +225,15 @@ export async function getCatalystTrades(): Promise<CatalystTrade[]> {
       type: schema.intradayTransactions.type,
       quantity: schema.intradayTransactions.quantity,
       pricePerShare: schema.intradayTransactions.pricePerShare,
+      brokerage: schema.intradayTransactions.brokerage,
+      stt: schema.intradayTransactions.stt,
+      stampDuty: schema.intradayTransactions.stampDuty,
+      exchangeCharges: schema.intradayTransactions.exchangeCharges,
+      sebiCharges: schema.intradayTransactions.sebiCharges,
+      ipftCharges: schema.intradayTransactions.ipftCharges,
+      dpCharges: schema.intradayTransactions.dpCharges,
+      gst: schema.intradayTransactions.gst,
+      totalCharges: schema.intradayTransactions.totalCharges,
       executedAt: schema.intradayTransactions.executedAt,
       createdAt: schema.intradayTransactions.createdAt,
       portfolioType: schema.intradayTransactions.portfolioType,

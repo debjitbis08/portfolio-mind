@@ -6,19 +6,45 @@ export type CatalystPerformanceMetrics = {
   winRate: number | null;
   maxDrawdownPercent: number | null;
   expectancyR: number | null;
+  grossExpectancyR: number | null;
   avgWinR: number | null;
   avgLossR: number | null;
   grossProfit: number;
   grossLoss: number;
   closedTrades: number;
   defaultRiskUsed: number;
+  grossProfitBeforeCharges: number | null;
+  grossLossBeforeCharges: number | null;
+  netPnL: number | null;
+  grossPnL: number | null;
+  leakage: number | null;
+  impactRatioPercent: number | null;
+  breakevenRR: number | null;
+  breakevenCapital: number | null;
+  efficiencyPercent: number | null;
+  efficiencyGrade: "A" | "B" | "C" | "D" | "E" | "F" | null;
+  avgDpChargePerSell: number | null;
+  avgSellCharges: number | null;
+  charges: {
+    brokerage: number;
+    statutory: number;
+    dpCharges: number;
+    totalCharges: number;
+    stt: number;
+    gst: number;
+    stampDuty: number;
+    exchangeCharges: number;
+    sebiCharges: number;
+    ipftCharges: number;
+  };
 };
 
 const DEFAULT_RISK_PERCENT = 0.02;
 
 type Lot = {
   quantity: number;
-  pricePerShare: number;
+  pricePerShareNet: number;
+  pricePerShareGross: number;
   executedAt: string;
   stopLoss: number | null;
 };
@@ -29,6 +55,14 @@ type PerformanceTransaction = {
   type: "BUY" | "SELL" | "OPENING_BALANCE";
   quantity: number;
   value: number;
+  brokerage: number;
+  stt: number;
+  stampDuty: number;
+  exchangeCharges: number;
+  sebiCharges: number;
+  ipftCharges: number;
+  dpCharges: number;
+  gst: number;
   totalCharges: number;
   executedAt: string | null;
 };
@@ -41,6 +75,33 @@ const getNetValue = (tx: PerformanceTransaction) =>
     ? tx.value - (tx.totalCharges || 0)
     : tx.value + (tx.totalCharges || 0);
 
+const getGrossValue = (tx: PerformanceTransaction) => tx.value;
+
+const calculateRiskPerShare = (
+  entryPrice: number,
+  stopLoss: number | null
+) => {
+  if (stopLoss !== null && stopLoss < entryPrice) {
+    return { riskPerShare: entryPrice - stopLoss, usedDefault: false };
+  }
+  return {
+    riskPerShare: entryPrice * DEFAULT_RISK_PERCENT,
+    usedDefault: true,
+  };
+};
+
+const getEfficiencyGrade = (efficiencyPercent: number | null) => {
+  if (efficiencyPercent === null || !Number.isFinite(efficiencyPercent)) {
+    return null;
+  }
+  if (efficiencyPercent >= 90) return "A";
+  if (efficiencyPercent >= 75) return "B";
+  if (efficiencyPercent >= 60) return "C";
+  if (efficiencyPercent >= 40) return "D";
+  if (efficiencyPercent >= 20) return "E";
+  return "F";
+};
+
 export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPerformanceMetrics> {
   const brokerTransactions = await db
     .select({
@@ -49,6 +110,14 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: schema.transactions.type,
       quantity: schema.transactions.quantity,
       value: schema.transactions.value,
+      brokerage: schema.transactions.brokerage,
+      stt: schema.transactions.stt,
+      stampDuty: schema.transactions.stampDuty,
+      exchangeCharges: schema.transactions.exchangeCharges,
+      sebiCharges: schema.transactions.sebiCharges,
+      ipftCharges: schema.transactions.ipftCharges,
+      dpCharges: schema.transactions.dpCharges,
+      gst: schema.transactions.gst,
       totalCharges: schema.transactions.totalCharges,
       executedAt: schema.transactions.executedAt,
     })
@@ -68,6 +137,14 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: schema.transactions.type,
       quantity: schema.transactions.quantity,
       value: schema.transactions.value,
+      brokerage: schema.transactions.brokerage,
+      stt: schema.transactions.stt,
+      stampDuty: schema.transactions.stampDuty,
+      exchangeCharges: schema.transactions.exchangeCharges,
+      sebiCharges: schema.transactions.sebiCharges,
+      ipftCharges: schema.transactions.ipftCharges,
+      dpCharges: schema.transactions.dpCharges,
+      gst: schema.transactions.gst,
       totalCharges: schema.transactions.totalCharges,
       executedAt: schema.transactions.executedAt,
     })
@@ -94,6 +171,14 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: schema.intradayTransactions.type,
       quantity: schema.intradayTransactions.quantity,
       pricePerShare: schema.intradayTransactions.pricePerShare,
+      brokerage: schema.intradayTransactions.brokerage,
+      stt: schema.intradayTransactions.stt,
+      stampDuty: schema.intradayTransactions.stampDuty,
+      exchangeCharges: schema.intradayTransactions.exchangeCharges,
+      sebiCharges: schema.intradayTransactions.sebiCharges,
+      ipftCharges: schema.intradayTransactions.ipftCharges,
+      dpCharges: schema.intradayTransactions.dpCharges,
+      gst: schema.intradayTransactions.gst,
       totalCharges: schema.intradayTransactions.totalCharges,
       executedAt: schema.intradayTransactions.executedAt,
       createdAt: schema.intradayTransactions.createdAt,
@@ -108,6 +193,14 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: schema.intradayTransactions.type,
       quantity: schema.intradayTransactions.quantity,
       pricePerShare: schema.intradayTransactions.pricePerShare,
+      brokerage: schema.intradayTransactions.brokerage,
+      stt: schema.intradayTransactions.stt,
+      stampDuty: schema.intradayTransactions.stampDuty,
+      exchangeCharges: schema.intradayTransactions.exchangeCharges,
+      sebiCharges: schema.intradayTransactions.sebiCharges,
+      ipftCharges: schema.intradayTransactions.ipftCharges,
+      dpCharges: schema.intradayTransactions.dpCharges,
+      gst: schema.intradayTransactions.gst,
       totalCharges: schema.intradayTransactions.totalCharges,
       executedAt: schema.intradayTransactions.executedAt,
       createdAt: schema.intradayTransactions.createdAt,
@@ -133,15 +226,23 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
   const intradayMerged = new Map<string, (typeof intradayTransactions)[0]>();
   for (const tx of intradayTransactions) intradayMerged.set(tx.id, tx);
   for (const tx of intradayLinked) {
-    intradayMerged.set(tx.id, {
-      id: tx.id,
-      symbol: tx.symbol,
-      type: tx.type,
-      quantity: tx.quantity,
-      pricePerShare: tx.pricePerShare,
-      totalCharges: tx.totalCharges,
-      executedAt: tx.executedAt,
-      createdAt: tx.createdAt,
+      intradayMerged.set(tx.id, {
+        id: tx.id,
+        symbol: tx.symbol,
+        type: tx.type,
+        quantity: tx.quantity,
+        pricePerShare: tx.pricePerShare,
+        brokerage: tx.brokerage,
+        stt: tx.stt,
+        stampDuty: tx.stampDuty,
+        exchangeCharges: tx.exchangeCharges,
+        sebiCharges: tx.sebiCharges,
+        ipftCharges: tx.ipftCharges,
+        dpCharges: tx.dpCharges,
+        gst: tx.gst,
+        totalCharges: tx.totalCharges,
+        executedAt: tx.executedAt,
+        createdAt: tx.createdAt,
     });
   }
 
@@ -156,6 +257,14 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       type: tx.type,
       quantity: tx.quantity,
       value: tx.quantity * tx.pricePerShare,
+      brokerage: tx.brokerage,
+      stt: tx.stt,
+      stampDuty: tx.stampDuty,
+      exchangeCharges: tx.exchangeCharges,
+      sebiCharges: tx.sebiCharges,
+      ipftCharges: tx.ipftCharges,
+      dpCharges: tx.dpCharges,
+      gst: tx.gst,
       totalCharges: tx.totalCharges || 0,
       executedAt: tx.executedAt || tx.createdAt,
     })),
@@ -177,6 +286,30 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
       grossLoss: 0,
       closedTrades: 0,
       defaultRiskUsed: 0,
+      grossProfitBeforeCharges: null,
+      grossLossBeforeCharges: null,
+      netPnL: null,
+      grossPnL: null,
+      leakage: null,
+      impactRatioPercent: null,
+      breakevenRR: null,
+      breakevenCapital: null,
+      efficiencyPercent: null,
+      efficiencyGrade: null,
+      avgDpChargePerSell: null,
+      grossExpectancyR: null,
+      charges: {
+        brokerage: 0,
+        statutory: 0,
+        dpCharges: 0,
+        totalCharges: 0,
+        stt: 0,
+        gst: 0,
+        stampDuty: 0,
+        exchangeCharges: 0,
+        sebiCharges: 0,
+        ipftCharges: 0,
+      },
     };
   }
 
@@ -243,22 +376,30 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
   }
 
   const lotsBySymbol = new Map<string, Lot[]>();
-  const tradePnL: number[] = [];
-  const tradeR: number[] = [];
+  const tradePnLNet: number[] = [];
+  const tradePnLGross: number[] = [];
+  const tradeRNet: number[] = [];
+  const tradeRGross: number[] = [];
+  let totalEntryNotionalGross = 0;
   let defaultRiskUsed = 0;
+  let sellTransactionCount = 0;
+  let sellChargesTotal = 0;
 
   for (const tx of transactions) {
     if (tx.type === "OPENING_BALANCE") continue;
 
     const netValue = getNetValue(tx);
-    const pricePerShare = tx.quantity > 0 ? netValue / tx.quantity : 0;
+    const grossValue = getGrossValue(tx);
+    const netPricePerShare = tx.quantity > 0 ? netValue / tx.quantity : 0;
+    const grossPricePerShare = tx.quantity > 0 ? grossValue / tx.quantity : 0;
     const symbolKey = normalizeSymbol(tx.symbol);
 
     if (tx.type === "BUY") {
       const lots = lotsBySymbol.get(symbolKey) || [];
       lots.push({
         quantity: tx.quantity,
-        pricePerShare,
+        pricePerShareNet: netPricePerShare,
+        pricePerShareGross: grossPricePerShare,
         executedAt: tx.executedAt,
         stopLoss: stopLossByTransactionId.get(tx.id) ?? null,
       });
@@ -267,32 +408,40 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
     }
 
     if (tx.type !== "SELL") continue;
+    sellTransactionCount += 1;
+    sellChargesTotal += tx.totalCharges || 0;
 
     let remaining = tx.quantity;
     const lots = lotsBySymbol.get(symbolKey) || [];
     while (remaining > 0 && lots.length > 0) {
       const lot = lots[0];
       const matchedQty = Math.min(remaining, lot.quantity);
-      const pnl = (pricePerShare - lot.pricePerShare) * matchedQty;
-      tradePnL.push(pnl);
+      const pnlNet =
+        (netPricePerShare - lot.pricePerShareNet) * matchedQty;
+      const pnlGross =
+        (grossPricePerShare - lot.pricePerShareGross) * matchedQty;
+      tradePnLNet.push(pnlNet);
+      tradePnLGross.push(pnlGross);
+      totalEntryNotionalGross += lot.pricePerShareGross * matchedQty;
 
       const stopLoss = lot.stopLoss;
-      let riskPerShare =
-        stopLoss !== null && stopLoss < lot.pricePerShare
-          ? lot.pricePerShare - stopLoss
-          : lot.pricePerShare * DEFAULT_RISK_PERCENT;
-
-      if (!stopLoss || stopLoss >= lot.pricePerShare) {
+      const netRisk = calculateRiskPerShare(
+        lot.pricePerShareNet,
+        stopLoss
+      );
+      if (netRisk.usedDefault) {
         defaultRiskUsed += 1;
       }
 
-      if (riskPerShare <= 0) {
-        riskPerShare = lot.pricePerShare * DEFAULT_RISK_PERCENT;
-        defaultRiskUsed += 1;
-      }
+      const grossRisk = calculateRiskPerShare(
+        lot.pricePerShareGross,
+        stopLoss
+      );
 
-      const risk = riskPerShare * matchedQty;
-      tradeR.push(risk > 0 ? pnl / risk : 0);
+      const netRiskValue = netRisk.riskPerShare * matchedQty;
+      const grossRiskValue = grossRisk.riskPerShare * matchedQty;
+      tradeRNet.push(netRiskValue > 0 ? pnlNet / netRiskValue : 0);
+      tradeRGross.push(grossRiskValue > 0 ? pnlGross / grossRiskValue : 0);
 
       lot.quantity -= matchedQty;
       remaining -= matchedQty;
@@ -304,33 +453,82 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
     lotsBySymbol.set(symbolKey, lots);
   }
 
-  if (tradePnL.length === 0) {
+  if (tradePnLNet.length === 0) {
+    const charges = {
+      brokerage: 0,
+      statutory: 0,
+      dpCharges: 0,
+      totalCharges: 0,
+      stt: 0,
+      gst: 0,
+      stampDuty: 0,
+      exchangeCharges: 0,
+      sebiCharges: 0,
+      ipftCharges: 0,
+    };
+    for (const tx of transactions) {
+      if (tx.type === "OPENING_BALANCE") continue;
+      charges.brokerage += tx.brokerage || 0;
+      charges.stt += tx.stt || 0;
+      charges.gst += tx.gst || 0;
+      charges.stampDuty += tx.stampDuty || 0;
+      charges.exchangeCharges += tx.exchangeCharges || 0;
+      charges.sebiCharges += tx.sebiCharges || 0;
+      charges.ipftCharges += tx.ipftCharges || 0;
+      charges.dpCharges += tx.dpCharges || 0;
+      charges.totalCharges += tx.totalCharges || 0;
+    }
+    charges.statutory =
+      charges.stt +
+      charges.gst +
+      charges.stampDuty +
+      charges.exchangeCharges +
+      charges.sebiCharges +
+      charges.ipftCharges;
     return {
       profitFactor: null,
       winRate: null,
       maxDrawdownPercent: null,
       expectancyR: null,
+      grossExpectancyR: null,
       avgWinR: null,
       avgLossR: null,
       grossProfit: 0,
       grossLoss: 0,
       closedTrades: 0,
       defaultRiskUsed,
+      grossProfitBeforeCharges: null,
+      grossLossBeforeCharges: null,
+      netPnL: null,
+      grossPnL: null,
+      leakage: null,
+      impactRatioPercent: null,
+      breakevenRR: null,
+      breakevenCapital: null,
+      efficiencyPercent: null,
+      efficiencyGrade: null,
+      avgDpChargePerSell: null,
+      avgSellCharges: null,
+      charges,
     };
   }
 
-  const grossProfit = tradePnL.filter((p) => p > 0).reduce((a, b) => a + b, 0);
-  const grossLoss = tradePnL.filter((p) => p < 0).reduce((a, b) => a + b, 0);
+  const grossProfit = tradePnLNet
+    .filter((p) => p > 0)
+    .reduce((a, b) => a + b, 0);
+  const grossLoss = tradePnLNet
+    .filter((p) => p < 0)
+    .reduce((a, b) => a + b, 0);
   const profitFactor =
     grossLoss !== 0 ? Math.abs(grossProfit / grossLoss) : null;
 
-  const winningTrades = tradePnL.filter((p) => p > 0).length;
-  const winRate = (winningTrades / tradePnL.length) * 100;
+  const winningTrades = tradePnLNet.filter((p) => p > 0).length;
+  const winRate = (winningTrades / tradePnLNet.length) * 100;
 
   let equity = 0;
   let peak = 0;
   let maxDrawdownPercent = 0;
-  for (const pnl of tradePnL) {
+  for (const pnl of tradePnLNet) {
     equity += pnl;
     if (equity > peak) peak = equity;
     if (peak > 0) {
@@ -342,23 +540,127 @@ export async function calculateCatalystPerformanceMetrics(): Promise<CatalystPer
   }
 
   const avgWinR =
-    tradeR.filter((r) => r > 0).reduce((a, b) => a + b, 0) /
-    Math.max(1, tradeR.filter((r) => r > 0).length);
+    tradeRNet.filter((r) => r > 0).reduce((a, b) => a + b, 0) /
+    Math.max(1, tradeRNet.filter((r) => r > 0).length);
   const avgLossR =
-    tradeR.filter((r) => r < 0).reduce((a, b) => a + b, 0) /
-    Math.max(1, tradeR.filter((r) => r < 0).length);
-  const expectancyR = tradeR.reduce((a, b) => a + b, 0) / tradeR.length;
+    tradeRNet.filter((r) => r < 0).reduce((a, b) => a + b, 0) /
+    Math.max(1, tradeRNet.filter((r) => r < 0).length);
+  const expectancyR =
+    tradeRNet.reduce((a, b) => a + b, 0) / tradeRNet.length;
+  const grossExpectancyR =
+    tradeRGross.reduce((a, b) => a + b, 0) / tradeRGross.length;
+
+  const grossProfitBeforeCharges = tradePnLGross
+    .filter((p) => p > 0)
+    .reduce((a, b) => a + b, 0);
+  const grossLossBeforeCharges = tradePnLGross
+    .filter((p) => p < 0)
+    .reduce((a, b) => a + b, 0);
+  const grossPnL = grossProfitBeforeCharges + grossLossBeforeCharges;
+  const netPnL = grossProfit + grossLoss;
+
+  const charges = {
+    brokerage: 0,
+    statutory: 0,
+    dpCharges: 0,
+    totalCharges: 0,
+    stt: 0,
+    gst: 0,
+    stampDuty: 0,
+    exchangeCharges: 0,
+    sebiCharges: 0,
+    ipftCharges: 0,
+  };
+  for (const tx of transactions) {
+    if (tx.type === "OPENING_BALANCE") continue;
+    charges.brokerage += tx.brokerage || 0;
+    charges.stt += tx.stt || 0;
+    charges.gst += tx.gst || 0;
+    charges.stampDuty += tx.stampDuty || 0;
+    charges.exchangeCharges += tx.exchangeCharges || 0;
+    charges.sebiCharges += tx.sebiCharges || 0;
+    charges.ipftCharges += tx.ipftCharges || 0;
+    charges.dpCharges += tx.dpCharges || 0;
+    charges.totalCharges += tx.totalCharges || 0;
+  }
+  charges.statutory =
+    charges.stt +
+    charges.gst +
+    charges.stampDuty +
+    charges.exchangeCharges +
+    charges.sebiCharges +
+    charges.ipftCharges;
+
+  const impactRatioPercent =
+    grossProfitBeforeCharges > 0
+      ? (charges.totalCharges / grossProfitBeforeCharges) * 100
+      : null;
+
+  const leakage = grossPnL - netPnL;
+  const breakevenRR =
+    winRate > 0 && avgLossR < 0
+      ? Math.abs(avgLossR) * ((100 - winRate) / winRate)
+      : null;
+  const efficiencyPercent =
+    grossProfitBeforeCharges !== 0
+      ? (netPnL / grossProfitBeforeCharges) * 100
+      : null;
+  const efficiencyGrade = getEfficiencyGrade(efficiencyPercent);
+  const avgDpChargePerSell =
+    sellTransactionCount > 0
+      ? charges.dpCharges / sellTransactionCount
+      : null;
+  const avgSellCharges =
+    sellTransactionCount > 0 ? sellChargesTotal / sellTransactionCount : null;
+  const grossReturnRate =
+    totalEntryNotionalGross > 0
+      ? grossProfitBeforeCharges / totalEntryNotionalGross
+      : null;
+  const avgChargesPerTrade =
+    tradePnLNet.length > 0
+      ? charges.totalCharges / tradePnLNet.length
+      : null;
+  const breakevenCapital =
+    grossReturnRate && grossReturnRate > 0 && avgChargesPerTrade
+      ? avgChargesPerTrade / (0.1 * grossReturnRate)
+      : null;
 
   return {
     profitFactor,
     winRate,
     maxDrawdownPercent,
     expectancyR,
+    grossExpectancyR: Number.isFinite(grossExpectancyR)
+      ? grossExpectancyR
+      : null,
     avgWinR: Number.isFinite(avgWinR) ? avgWinR : null,
     avgLossR: Number.isFinite(avgLossR) ? avgLossR : null,
     grossProfit,
     grossLoss: Math.abs(grossLoss),
-    closedTrades: tradePnL.length,
+    closedTrades: tradePnLNet.length,
     defaultRiskUsed,
+    grossProfitBeforeCharges: Number.isFinite(grossProfitBeforeCharges)
+      ? grossProfitBeforeCharges
+      : null,
+    grossLossBeforeCharges: Number.isFinite(grossLossBeforeCharges)
+      ? Math.abs(grossLossBeforeCharges)
+      : null,
+    netPnL: Number.isFinite(netPnL) ? netPnL : null,
+    grossPnL: Number.isFinite(grossPnL) ? grossPnL : null,
+    leakage: Number.isFinite(leakage) ? leakage : null,
+    impactRatioPercent,
+    breakevenRR,
+    breakevenCapital: Number.isFinite(breakevenCapital)
+      ? breakevenCapital
+      : null,
+    efficiencyPercent: Number.isFinite(efficiencyPercent)
+      ? efficiencyPercent
+      : null,
+    efficiencyGrade,
+    avgDpChargePerSell: Number.isFinite(avgDpChargePerSell)
+      ? avgDpChargePerSell
+      : null,
+    avgSellCharges: Number.isFinite(avgSellCharges) ? avgSellCharges : null,
+    charges,
   };
 }

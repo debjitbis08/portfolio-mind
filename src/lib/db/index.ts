@@ -7,7 +7,7 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { sql, eq, and, gt, lt, sum, max, desc } from "drizzle-orm";
+import { sql, eq, and, gt, lt, sum, max, desc, inArray, or } from "drizzle-orm";
 import * as schema from "./schema";
 
 // ============================================================================
@@ -242,13 +242,31 @@ export async function getHoldings(
     };
   });
 
+  const normalizeSymbol = (symbol: string) =>
+    symbol.replace(/\.NS$|\.BO$/i, "").trim();
+  const holdingsBySymbol = new Map<string, Holding>();
+  for (const holding of holdings) {
+    holdingsBySymbol.set(normalizeSymbol(holding.symbol), holding);
+  }
+
   // Merge intraday transactions (temporary manual trades) filtered by portfolio type
   const intradayTxs = await db
     .select()
     .from(schema.intradayTransactions)
     .where(eq(schema.intradayTransactions.portfolioType, portfolioType));
+  const intradayBySymbol = new Map<
+    string,
+    {
+      symbol: string;
+      stockName: string;
+      quantity: number;
+      investedValue: number;
+      lastPrice: number;
+    }
+  >();
 
   for (const tx of intradayTxs) {
+    const normalizedSymbol = normalizeSymbol(tx.symbol);
     const value = tx.quantity * tx.pricePerShare;
     const netValue =
       tx.type === "BUY"
@@ -256,23 +274,39 @@ export async function getHoldings(
         : value - (tx.totalCharges || 0);
     const qtyDelta = tx.type === "BUY" ? tx.quantity : -tx.quantity;
     const valDelta = tx.type === "BUY" ? netValue : -netValue;
+    const existing = intradayBySymbol.get(normalizedSymbol) || {
+      symbol: tx.symbol,
+      stockName: tx.stockName || tx.symbol,
+      quantity: 0,
+      investedValue: 0,
+      lastPrice: tx.pricePerShare,
+    };
 
-    const existing = holdings.find((h) => h.symbol === tx.symbol);
+    if (!existing.stockName && tx.stockName) existing.stockName = tx.stockName;
+    existing.quantity += qtyDelta;
+    existing.investedValue += valDelta;
+    existing.lastPrice = tx.pricePerShare;
+    intradayBySymbol.set(normalizedSymbol, existing);
+  }
 
+  for (const intraday of intradayBySymbol.values()) {
+    const existing = holdingsBySymbol.get(normalizeSymbol(intraday.symbol));
     if (existing) {
-      existing.quantity += qtyDelta;
-      existing.investedValue += valDelta;
+      existing.quantity += intraday.quantity;
+      existing.investedValue += intraday.investedValue;
       existing.avgBuyPrice =
         existing.quantity > 0 ? existing.investedValue / existing.quantity : 0;
-    } else if (tx.type === "BUY") {
-      // Only create new holding entry for BUY (can't sell what you don't have)
+    } else if (intraday.quantity > 0) {
       holdings.push({
         isin: "", // Intraday transactions don't have ISIN
-        symbol: tx.symbol,
-        stockName: tx.stockName || tx.symbol,
-        quantity: tx.quantity,
-        investedValue: netValue,
-        avgBuyPrice: tx.pricePerShare,
+        symbol: intraday.symbol,
+        stockName: intraday.stockName || intraday.symbol,
+        quantity: intraday.quantity,
+        investedValue: intraday.investedValue,
+        avgBuyPrice:
+          intraday.quantity > 0
+            ? intraday.investedValue / intraday.quantity
+            : intraday.lastPrice,
       });
     }
   }
@@ -285,7 +319,151 @@ export async function getHoldings(
  * Convenience wrapper for getHoldings("CATALYST").
  */
 export async function getCatalystHoldings(): Promise<Holding[]> {
-  return getHoldings("CATALYST");
+  const linkedIds = await db
+    .select({ transactionId: schema.suggestionTransactions.transactionId })
+    .from(schema.suggestionTransactions)
+    .innerJoin(
+      schema.suggestions,
+      eq(schema.suggestionTransactions.suggestionId, schema.suggestions.id)
+    )
+    .where(eq(schema.suggestions.portfolioType, "CATALYST"));
+
+  const linkedTransactionIds = linkedIds.map((row) => row.transactionId);
+
+  const catalystTransactions = await db
+    .select({
+      isin: schema.transactions.isin,
+      symbol: schema.transactions.symbol,
+      stockName: schema.transactions.stockName,
+      type: schema.transactions.type,
+      quantity: schema.transactions.quantity,
+      value: schema.transactions.value,
+      totalCharges: schema.transactions.totalCharges,
+    })
+    .from(schema.transactions)
+    .where(
+      and(
+        eq(schema.transactions.status, "Executed"),
+        linkedTransactionIds.length > 0
+          ? or(
+              eq(schema.transactions.portfolioType, "CATALYST"),
+              inArray(schema.transactions.id, linkedTransactionIds)
+            )
+          : eq(schema.transactions.portfolioType, "CATALYST")
+      )
+    );
+
+  const holdingsBySymbol = new Map<
+    string,
+    { isin: string; symbol: string; stockName: string; quantity: number; investedValue: number }
+  >();
+
+  for (const tx of catalystTransactions) {
+    const existing = holdingsBySymbol.get(tx.symbol) || {
+      isin: tx.isin,
+      symbol: tx.symbol,
+      stockName: tx.stockName,
+      quantity: 0,
+      investedValue: 0,
+    };
+
+    if (!existing.isin) existing.isin = tx.isin;
+    if (!existing.stockName) existing.stockName = tx.stockName;
+
+    if (tx.type === "BUY" || tx.type === "OPENING_BALANCE") {
+      existing.quantity += tx.quantity;
+      existing.investedValue += tx.value + (tx.totalCharges || 0);
+    } else if (tx.type === "SELL") {
+      existing.quantity -= tx.quantity;
+      existing.investedValue -= tx.value - (tx.totalCharges || 0);
+    }
+
+    holdingsBySymbol.set(tx.symbol, existing);
+  }
+
+  const holdings: Holding[] = Array.from(holdingsBySymbol.values()).map(
+    (row) => ({
+      isin: row.isin || row.symbol,
+      symbol: row.symbol,
+      stockName: row.stockName || row.symbol,
+      quantity: row.quantity,
+      investedValue: row.investedValue,
+      avgBuyPrice: row.quantity > 0 ? row.investedValue / row.quantity : 0,
+    })
+  );
+
+  const normalizeSymbol = (symbol: string) =>
+    symbol.replace(/\.NS$|\.BO$/i, "").trim();
+  const holdingsByNormalizedSymbol = new Map<string, Holding>();
+  for (const holding of holdings) {
+    holdingsByNormalizedSymbol.set(normalizeSymbol(holding.symbol), holding);
+  }
+
+  // Merge intraday transactions (temporary manual trades) filtered by portfolio type
+  const intradayTxs = await db
+    .select()
+    .from(schema.intradayTransactions)
+    .where(eq(schema.intradayTransactions.portfolioType, "CATALYST"));
+  const intradayBySymbol = new Map<
+    string,
+    {
+      symbol: string;
+      stockName: string;
+      quantity: number;
+      investedValue: number;
+      lastPrice: number;
+    }
+  >();
+
+  for (const tx of intradayTxs) {
+    const normalizedSymbol = normalizeSymbol(tx.symbol);
+    const value = tx.quantity * tx.pricePerShare;
+    const netValue =
+      tx.type === "BUY"
+        ? value + (tx.totalCharges || 0)
+        : value - (tx.totalCharges || 0);
+    const qtyDelta = tx.type === "BUY" ? tx.quantity : -tx.quantity;
+    const valDelta = tx.type === "BUY" ? netValue : -netValue;
+    const existing = intradayBySymbol.get(normalizedSymbol) || {
+      symbol: tx.symbol,
+      stockName: tx.stockName || tx.symbol,
+      quantity: 0,
+      investedValue: 0,
+      lastPrice: tx.pricePerShare,
+    };
+
+    if (!existing.stockName && tx.stockName) existing.stockName = tx.stockName;
+    existing.quantity += qtyDelta;
+    existing.investedValue += valDelta;
+    existing.lastPrice = tx.pricePerShare;
+    intradayBySymbol.set(normalizedSymbol, existing);
+  }
+
+  for (const intraday of intradayBySymbol.values()) {
+    const existing = holdingsByNormalizedSymbol.get(
+      normalizeSymbol(intraday.symbol)
+    );
+    if (existing) {
+      existing.quantity += intraday.quantity;
+      existing.investedValue += intraday.investedValue;
+      existing.avgBuyPrice =
+        existing.quantity > 0 ? existing.investedValue / existing.quantity : 0;
+    } else if (intraday.quantity > 0) {
+      holdings.push({
+        isin: "",
+        symbol: intraday.symbol,
+        stockName: intraday.stockName || intraday.symbol,
+        quantity: intraday.quantity,
+        investedValue: intraday.investedValue,
+        avgBuyPrice:
+          intraday.quantity > 0
+            ? intraday.investedValue / intraday.quantity
+            : intraday.lastPrice,
+      });
+    }
+  }
+
+  return holdings.filter((h) => h.quantity > 0);
 }
 
 // ============================================================================

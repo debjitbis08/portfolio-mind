@@ -24,6 +24,7 @@ import {
   getMarketModeDescriptor,
   type MarketMode,
 } from "./market-hours";
+import type { CatalystPerformanceMetrics } from "./performance-metrics";
 
 function getGeminiApiKey(): string {
   return getRequiredEnv("GEMINI_API_KEY");
@@ -100,6 +101,7 @@ export class CatalystGeminiService {
   static async analyzeCatalystPortfolio(
     holdings: CatalystHoldingForAnalysis[],
     availableFunds: number = 0,
+    performanceMetrics: CatalystPerformanceMetrics | null,
     onProgress?: CatalystProgressCallback,
     toolConfig?: ToolConfig | null
   ): Promise<CatalystSuggestion[]> {
@@ -131,10 +133,17 @@ export class CatalystGeminiService {
 
     const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
+    const totalHoldingsValue = holdings.reduce(
+      (sum, holding) => sum + holding.current_price * holding.quantity,
+      0
+    );
+    const totalCapital = totalHoldingsValue + availableFunds;
+
     // Build system prompt for short-term trading
     const systemPrompt = this.buildCatalystSystemPrompt(
       availableFunds,
-      marketDescriptor
+      marketDescriptor,
+      totalCapital
     );
 
     // Build holdings context
@@ -213,12 +222,35 @@ ${
 ### Available Cash
 ₹${availableFunds.toLocaleString("en-IN")}
 
+### Total Catalyst Capital
+₹${totalCapital.toLocaleString("en-IN")}
+
 ### Market Status
 ${getMarketStatusMessage()}
 
 ### Market Mode
 ${marketDescriptor.mode} — ${marketDescriptor.botMode}
 Output focus: ${marketDescriptor.outputType}
+
+### Trading Cost Impact (Recent Realized)
+${
+  performanceMetrics
+    ? JSON.stringify(
+        {
+          impactRatioPercent: performanceMetrics.impactRatioPercent,
+          efficiencyPercent: performanceMetrics.efficiencyPercent,
+          efficiencyGrade: performanceMetrics.efficiencyGrade,
+          avgSellCharges: performanceMetrics.avgSellCharges,
+          avgDpChargePerSell: performanceMetrics.avgDpChargePerSell,
+          breakevenCapital: performanceMetrics.breakevenCapital,
+          grossExpectancyR: performanceMetrics.grossExpectancyR,
+          netExpectancyR: performanceMetrics.expectancyR,
+        },
+        null,
+        2
+      )
+    : "No realized trade metrics yet."
+}
 
 `;
 
@@ -443,7 +475,8 @@ ${recentTrades
    */
   private static buildCatalystSystemPrompt(
     availableFunds: number,
-    marketDescriptor: MarketModeDescriptor
+    marketDescriptor: MarketModeDescriptor,
+    totalCapital: number
   ): string {
     const offMarket = marketDescriptor.mode !== "OPEN";
 
@@ -460,6 +493,9 @@ Your holding period is 1 day to 4 weeks maximum. This is SEPARATE from long-term
 ₹${availableFunds.toLocaleString(
       "en-IN"
     )} in the catalyst portfolio (separate from long-term funds)
+
+## Total Catalyst Capital
+₹${totalCapital.toLocaleString("en-IN")} (holdings market value + cash)
 
 ## Market Mode
 ${marketDescriptor.mode} — ${marketDescriptor.botMode}
@@ -485,6 +521,7 @@ ${offMarket ? "- If catalyst is 10/10, mention AMO suggestion with liquidity ris
 3. **Stop-loss mandatory**: Define exit before entry
 4. **Take profits**: Partial profits at technical resistance
 5. **Cut failures fast**: Exit if catalyst thesis invalidated
+6. **Rotation allowed**: If cash is insufficient but conviction is high, recommend a SELL to fund the BUY
 
 ## Output Format
 

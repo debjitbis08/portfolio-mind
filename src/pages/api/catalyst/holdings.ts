@@ -113,75 +113,235 @@ export const GET: APIRoute = async ({ request }) => {
 
     // Fetch stale/missing from Yahoo Finance
     if (staleSymbols.length > 0) {
-      try {
-        const nseSymbols = staleSymbols.map((s) => `${s}.NS`);
-        const nseResults = await fetchQuoteWithRetry(nseSymbols);
-        const nseArray = Array.isArray(nseResults) ? nseResults : [nseResults];
+      const bseOnlySymbols: string[] = [];
+      const regularSymbols: string[] = [];
 
-        const pricesToCache: Array<{ symbol: string; price: number }> = [];
-
-        for (const quote of nseArray) {
-          if (quote?.symbol && quote.regularMarketPrice) {
-            const yahoo = quote.symbol.replace(".NS", "");
-            freshPrices[yahoo] = quote.regularMarketPrice;
-            pricesToCache.push({
-              symbol: yahoo,
-              price: quote.regularMarketPrice,
-            });
-          }
+      for (const symbol of staleSymbols) {
+        if (/^\d{5,6}$/.test(symbol)) {
+          bseOnlySymbols.push(symbol);
+        } else {
+          regularSymbols.push(symbol);
         }
+      }
 
-        // Try BSE for remaining
-        const stillMissing = staleSymbols.filter((s) => !freshPrices[s]);
-        if (stillMissing.length > 0) {
-          try {
-            const bseSymbols = stillMissing.map((s) => `${s}.BO`);
-            const bseResults = await fetchQuoteWithRetry(bseSymbols);
-            const bseArray = Array.isArray(bseResults)
-              ? bseResults
-              : [bseResults];
+      if (bseOnlySymbols.length > 0) {
+        try {
+          const { getGoogleFinanceQuote } = await import(
+            "../../../lib/scrapers/google-finance"
+          );
 
-            for (const quote of bseArray) {
-              if (quote?.symbol && quote.regularMarketPrice) {
-                const yahoo = quote.symbol.replace(".BO", "");
-                freshPrices[yahoo] = quote.regularMarketPrice;
+          const pricesToCache: Array<{ symbol: string; price: number }> = [];
+
+          for (const yahoo of bseOnlySymbols) {
+            try {
+              const gfQuote = await getGoogleFinanceQuote(yahoo);
+              if (gfQuote) {
+                freshPrices[yahoo] = gfQuote.price;
                 pricesToCache.push({
                   symbol: yahoo,
-                  price: quote.regularMarketPrice,
+                  price: gfQuote.price,
                 });
               }
+              await new Promise((r) => setTimeout(r, 200));
+            } catch (gfErr) {
+              console.warn(
+                `[Catalyst Holdings] Google Finance failed for BSE-only ${yahoo}:`,
+                gfErr instanceof Error ? gfErr.message : "Unknown error"
+              );
             }
-          } catch (bseErr) {
-            console.error("[Catalyst Holdings] BSE fetch error:", bseErr);
           }
-        }
 
-        // Update cache
-        for (const p of pricesToCache) {
-          await db
-            .insert(schema.priceCache)
-            .values({
-              symbol: p.symbol,
-              price: p.price,
-              updatedAt: new Date().toISOString(),
-            })
-            .onConflictDoUpdate({
-              target: schema.priceCache.symbol,
-              set: {
+          for (const p of pricesToCache) {
+            await db
+              .insert(schema.priceCache)
+              .values({
+                symbol: p.symbol,
                 price: p.price,
                 updatedAt: new Date().toISOString(),
-              },
-            });
+              })
+              .onConflictDoUpdate({
+                target: schema.priceCache.symbol,
+                set: {
+                  price: p.price,
+                  updatedAt: new Date().toISOString(),
+                },
+              });
+          }
+        } catch (gfError) {
+          console.error(
+            "[Catalyst Holdings] Google Finance for BSE-only symbols failed:",
+            gfError
+          );
         }
-      } catch (err) {
-        console.error("[Catalyst Holdings] Yahoo Finance error:", err);
-        // Use stale cache as fallback
-        for (const yahoo of staleSymbols) {
-          const cached = cachedPrices.find((c) => c.symbol === yahoo);
-          if (cached && !freshPrices[yahoo]) {
-            freshPrices[yahoo] = cached.price;
+      }
+
+      if (regularSymbols.length > 0) {
+        try {
+          const nseSymbols = regularSymbols.map((s) => `${s}.NS`);
+          const nseResults = await fetchQuoteWithRetry(nseSymbols);
+          const nseArray = Array.isArray(nseResults)
+            ? nseResults
+            : [nseResults];
+
+          const pricesToCache: Array<{ symbol: string; price: number }> = [];
+
+          for (const quote of nseArray) {
+            if (quote?.symbol && quote.regularMarketPrice) {
+              const yahoo = quote.symbol.replace(".NS", "");
+              freshPrices[yahoo] = quote.regularMarketPrice;
+              pricesToCache.push({
+                symbol: yahoo,
+                price: quote.regularMarketPrice,
+              });
+            }
+          }
+
+          const stillMissing = regularSymbols.filter((s) => !freshPrices[s]);
+          if (stillMissing.length > 0) {
+            try {
+              const bseSymbols = stillMissing.map((s) => `${s}.BO`);
+              const bseResults = await fetchQuoteWithRetry(bseSymbols);
+              const bseArray = Array.isArray(bseResults)
+                ? bseResults
+                : [bseResults];
+
+              for (const quote of bseArray) {
+                if (quote?.symbol && quote.regularMarketPrice) {
+                  const yahoo = quote.symbol.replace(".BO", "");
+                  freshPrices[yahoo] = quote.regularMarketPrice;
+                  pricesToCache.push({
+                    symbol: yahoo,
+                    price: quote.regularMarketPrice,
+                  });
+                }
+              }
+            } catch (bseErr) {
+              console.error("[Catalyst Holdings] BSE fetch error:", bseErr);
+            }
+          }
+
+          for (const p of pricesToCache) {
+            await db
+              .insert(schema.priceCache)
+              .values({
+                symbol: p.symbol,
+                price: p.price,
+                updatedAt: new Date().toISOString(),
+              })
+              .onConflictDoUpdate({
+                target: schema.priceCache.symbol,
+                set: {
+                  price: p.price,
+                  updatedAt: new Date().toISOString(),
+                },
+              });
+          }
+        } catch (err) {
+          console.error("[Catalyst Holdings] Yahoo Finance error:", err);
+
+          const remainingSymbols = regularSymbols.filter(
+            (s) => !freshPrices[s]
+          );
+          if (remainingSymbols.length > 0) {
+            try {
+              const { getGoogleFinanceQuote } = await import(
+                "../../../lib/scrapers/google-finance"
+              );
+
+              const pricesToCache: Array<{ symbol: string; price: number }> =
+                [];
+
+              for (const yahoo of remainingSymbols) {
+                try {
+                  const gfQuote = await getGoogleFinanceQuote(yahoo);
+                  if (gfQuote) {
+                    freshPrices[yahoo] = gfQuote.price;
+                    pricesToCache.push({
+                      symbol: yahoo,
+                      price: gfQuote.price,
+                    });
+                  }
+                  await new Promise((r) => setTimeout(r, 200));
+                } catch (gfErr) {
+                  console.warn(
+                    `[Catalyst Holdings] Google Finance failed for ${yahoo}:`,
+                    gfErr instanceof Error ? gfErr.message : "Unknown error"
+                  );
+                }
+              }
+
+              for (const p of pricesToCache) {
+                await db
+                  .insert(schema.priceCache)
+                  .values({
+                    symbol: p.symbol,
+                    price: p.price,
+                    updatedAt: new Date().toISOString(),
+                  })
+                  .onConflictDoUpdate({
+                    target: schema.priceCache.symbol,
+                    set: {
+                      price: p.price,
+                      updatedAt: new Date().toISOString(),
+                    },
+                  });
+              }
+            } catch (gfError) {
+              console.error(
+                "[Catalyst Holdings] Google Finance fallback failed:",
+                gfError
+              );
+            }
           }
         }
+      }
+    }
+
+    // Fetch technical data
+    const technicalData = await db.select().from(schema.technicalData);
+    const techMap = new Map<string, (typeof technicalData)[0]>();
+    for (const t of technicalData) {
+      techMap.set(t.symbol, t);
+    }
+
+    const pricesFromTech: Array<{ symbol: string; price: number }> = [];
+    for (const yahoo of staleSymbols) {
+      if (!freshPrices[yahoo]) {
+        const tech = techMap.get(yahoo);
+        if (tech?.currentPrice) {
+          freshPrices[yahoo] = tech.currentPrice;
+          pricesFromTech.push({
+            symbol: yahoo,
+            price: tech.currentPrice,
+          });
+        }
+      }
+    }
+
+    if (pricesFromTech.length > 0) {
+      for (const p of pricesFromTech) {
+        await db
+          .insert(schema.priceCache)
+          .values({
+            symbol: p.symbol,
+            price: p.price,
+            updatedAt: new Date().toISOString(),
+          })
+          .onConflictDoUpdate({
+            target: schema.priceCache.symbol,
+            set: {
+              price: p.price,
+              updatedAt: new Date().toISOString(),
+            },
+          });
+      }
+    }
+
+    // Last resort: use stale cache for any still missing
+    for (const yahoo of staleSymbols) {
+      const cached = cachedPrices.find((c) => c.symbol === yahoo);
+      if (cached && !freshPrices[yahoo]) {
+        freshPrices[yahoo] = cached.price;
       }
     }
 
@@ -191,13 +351,6 @@ export const GET: APIRoute = async ({ request }) => {
       for (const hs of holdingsSyms) {
         quotes[hs] = price;
       }
-    }
-
-    // Fetch technical data
-    const technicalData = await db.select().from(schema.technicalData);
-    const techMap = new Map<string, (typeof technicalData)[0]>();
-    for (const t of technicalData) {
-      techMap.set(t.symbol, t);
     }
 
     // Enrich holdings with prices and technicals

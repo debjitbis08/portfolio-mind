@@ -11,9 +11,139 @@ import { normalizeSymbol } from "../symbol-matcher";
 import {
   CatalystGeminiService,
   type CatalystHoldingForAnalysis,
+  type CatalystSuggestion,
 } from "./catalyst-gemini";
+import { calculateCatalystPerformanceMetrics } from "./performance-metrics";
 
 const yahooFinance = new YahooFinance();
+const actionPriority: Record<CatalystSuggestion["action"], number> = {
+  BUY: 4,
+  SELL: 3,
+  HOLD: 2,
+  WATCH: 1,
+};
+
+const dedupeSuggestionsBySymbol = (
+  suggestions: CatalystSuggestion[]
+): CatalystSuggestion[] => {
+  const deduped = new Map<string, CatalystSuggestion>();
+
+  for (const suggestion of suggestions) {
+    const normalized = normalizeSymbol(suggestion.symbol);
+    if (!normalized) {
+      continue;
+    }
+
+    const existing = deduped.get(normalized);
+    if (!existing) {
+      deduped.set(normalized, suggestion);
+      continue;
+    }
+
+    const existingConfidence = existing.confidence ?? 0;
+    const candidateConfidence = suggestion.confidence ?? 0;
+    if (candidateConfidence > existingConfidence) {
+      deduped.set(normalized, suggestion);
+      continue;
+    }
+
+    if (candidateConfidence === existingConfidence) {
+      const existingPriority = actionPriority[existing.action] ?? 0;
+      const candidatePriority = actionPriority[suggestion.action] ?? 0;
+      if (candidatePriority > existingPriority) {
+        deduped.set(normalized, suggestion);
+      }
+    }
+  }
+
+  return Array.from(deduped.values());
+};
+
+const clampAllocationAmount = (
+  suggestion: CatalystSuggestion,
+  totalCapital: number
+): CatalystSuggestion => {
+  if (suggestion.action !== "BUY") {
+    return suggestion;
+  }
+
+  const rawAllocation =
+    typeof suggestion.allocation_amount === "number"
+      ? suggestion.allocation_amount
+      : null;
+
+  if (!rawAllocation || rawAllocation <= 0 || totalCapital <= 0) {
+    return { ...suggestion, allocation_amount: undefined };
+  }
+
+  const maxPerPosition = totalCapital * 0.2;
+  const cappedAllocation = Math.min(rawAllocation, totalCapital, maxPerPosition);
+
+  return {
+    ...suggestion,
+    allocation_amount: Number.isFinite(cappedAllocation)
+      ? Math.round(cappedAllocation)
+      : undefined,
+  };
+};
+
+const supersedeDuplicatePendingSuggestions = async (): Promise<number> => {
+  const pendingSuggestions = await db
+    .select({
+      id: schema.suggestions.id,
+      symbol: schema.suggestions.symbol,
+      createdAt: schema.suggestions.createdAt,
+    })
+    .from(schema.suggestions)
+    .where(
+      and(
+        eq(schema.suggestions.portfolioType, "CATALYST"),
+        eq(schema.suggestions.status, "pending")
+      )
+    )
+    .orderBy(desc(schema.suggestions.createdAt));
+
+  const primaryBySymbol = new Map<string, string>();
+  const supersedeTargets = new Map<string, string[]>();
+
+  for (const pending of pendingSuggestions) {
+    const normalized = normalizeSymbol(pending.symbol);
+    if (!normalized) {
+      continue;
+    }
+
+    const primaryId = primaryBySymbol.get(normalized);
+    if (!primaryId) {
+      primaryBySymbol.set(normalized, pending.id);
+      continue;
+    }
+
+    const targets = supersedeTargets.get(primaryId) ?? [];
+    targets.push(pending.id);
+    supersedeTargets.set(primaryId, targets);
+  }
+
+  let supersededCount = 0;
+  for (const [primaryId, duplicateIds] of supersedeTargets) {
+    if (duplicateIds.length === 0) {
+      continue;
+    }
+
+    await db
+      .update(schema.suggestions)
+      .set({
+        status: "superseded",
+        supersededBy: primaryId,
+        supersededReason: "Superseded by newer pending suggestion",
+        reviewedAt: new Date().toISOString(),
+      })
+      .where(inArray(schema.suggestions.id, duplicateIds));
+
+    supersededCount += duplicateIds.length;
+  }
+
+  return supersededCount;
+};
 
 export async function runCatalystSuggestions(options?: {
   onProgress?: (pct: number, msg: string) => void;
@@ -28,6 +158,13 @@ export async function runCatalystSuggestions(options?: {
   }>;
 }> {
   const onProgress = options?.onProgress;
+
+  const supersededDuplicates = await supersedeDuplicatePendingSuggestions();
+  if (supersededDuplicates > 0) {
+    console.log(
+      `[Catalyst Suggestions] Superseded ${supersededDuplicates} duplicate pending suggestions`
+    );
+  }
 
   // Get catalyst holdings
   const holdings = await getCatalystHoldings();
@@ -114,11 +251,27 @@ export async function runCatalystSuggestions(options?: {
   );
 
   // Run catalyst analysis
-  const suggestions = await CatalystGeminiService.analyzeCatalystPortfolio(
+  const totalHoldingsValue = holdingsForAnalysis.reduce(
+    (sum, holding) => sum + holding.current_price * holding.quantity,
+    0
+  );
+  const totalCapital = totalHoldingsValue + catalystFunds;
+  const performanceMetrics = await calculateCatalystPerformanceMetrics();
+  const rawSuggestions = await CatalystGeminiService.analyzeCatalystPortfolio(
     holdingsForAnalysis,
     catalystFunds,
+    performanceMetrics,
     onProgress
   );
+
+  const suggestions = dedupeSuggestionsBySymbol(rawSuggestions).map((s) =>
+    clampAllocationAmount(s, totalCapital)
+  );
+  if (suggestions.length !== rawSuggestions.length) {
+    console.log(
+      `[Catalyst Suggestions] Deduped ${rawSuggestions.length - suggestions.length} repeated suggestion(s)`
+    );
+  }
 
   console.log(
     `[Catalyst Suggestions] Generated ${suggestions.length} suggestions`

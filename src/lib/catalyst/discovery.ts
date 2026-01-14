@@ -4,6 +4,7 @@ import { db } from "../db";
 import { eq, and, gte, lt } from "drizzle-orm";
 import { GoogleGenAI } from "@google/genai";
 import YahooFinance from "yahoo-finance2";
+import { normalizeSymbol } from "../symbol-matcher";
 import {
   isIndianMarketOpen,
   getMarketMode,
@@ -97,6 +98,8 @@ async function captureBasePrice(
         tickersToTry.push(ticker.replace(".NS", ".BO"));
       } else if (ticker.endsWith(".BO")) {
         tickersToTry.push(ticker.replace(".BO", ".NS"));
+      } else {
+        tickersToTry.push(`${ticker}.NS`, `${ticker}.BO`);
       }
 
       let quote: any = null;
@@ -516,7 +519,10 @@ function groupNewsByTicker(
       }
 
       if (matched) {
-        mentionedTickers.add(asset.ticker);
+        const normalizedTicker = normalizeSymbol(asset.ticker);
+        if (normalizedTicker) {
+          mentionedTickers.add(normalizedTicker);
+        }
       }
     }
 
@@ -532,6 +538,12 @@ function groupNewsByTicker(
   }
 
   return tickerGroups;
+}
+
+function normalizeTickers(tickers: string[]): string[] {
+  return Array.from(
+    new Set(tickers.map((ticker) => normalizeSymbol(ticker)).filter(Boolean))
+  );
 }
 
 /**
@@ -627,7 +639,9 @@ export async function discoverCatalysts(
             .update(potentialCatalysts)
             .set({
               predictedImpact: update.updatedImpact,
-              affectedSymbols: JSON.stringify(update.updatedSymbols),
+              affectedSymbols: JSON.stringify(
+                normalizeTickers(update.updatedSymbols)
+              ),
               relatedArticleIds: JSON.stringify(batchRelatedArticleIds),
               sourceCitations: JSON.stringify(batchCitations),
               updatedAt: new Date().toISOString(),
@@ -646,9 +660,10 @@ export async function discoverCatalysts(
         );
 
         for (const cat of analysis.newCatalysts) {
+          const normalizedTickers = normalizeTickers(cat.affectedTickers);
           await db.insert(potentialCatalysts).values({
             predictedImpact: cat.impactSummary,
-            affectedSymbols: JSON.stringify(cat.affectedTickers),
+            affectedSymbols: JSON.stringify(normalizedTickers),
             watchCriteria: JSON.stringify(cat.watchCriteria),
             relatedArticleIds: JSON.stringify(batchRelatedArticleIds),
             sourceCitations: JSON.stringify(batchCitations),
@@ -659,7 +674,7 @@ export async function discoverCatalysts(
           results.newCatalysts++;
           results.catalysts.push({
             predictedImpact: cat.impactSummary,
-            affectedSymbols: cat.affectedTickers,
+            affectedSymbols: normalizedTickers,
             watchCriteria: cat.watchCriteria,
           });
         }
@@ -685,7 +700,7 @@ export async function discoverCatalysts(
         const symbols = JSON.parse(
           catalyst.affectedSymbols || "[]"
         ) as string[];
-        for (const ticker of symbols) {
+        for (const ticker of normalizeTickers(symbols)) {
           if (!tickerCatalystMap.has(ticker)) {
             tickerCatalystMap.set(ticker, []);
           }
@@ -789,7 +804,9 @@ export async function discoverCatalysts(
             .update(potentialCatalysts)
             .set({
               predictedImpact: update.updatedImpact,
-              affectedSymbols: JSON.stringify(update.updatedSymbols),
+              affectedSymbols: JSON.stringify(
+                normalizeTickers(update.updatedSymbols)
+              ),
               relatedArticleIds: JSON.stringify(tickerRelatedArticleIds),
               sourceCitations: JSON.stringify(tickerCitations),
               updatedAt: new Date().toISOString(),
@@ -804,6 +821,7 @@ export async function discoverCatalysts(
       // Process NEW catalysts from Pass 1 (keep only the primary entry per ticker)
       if (analysis.newCatalysts && analysis.newCatalysts.length > 0) {
         const [primary, ...extra] = analysis.newCatalysts;
+        const normalizedTickers = normalizeTickers(primary.affectedTickers);
         console.log(
           `      ✨ Pass 1 found ${analysis.newCatalysts.length} catalyst(s)`
         );
@@ -815,7 +833,7 @@ export async function discoverCatalysts(
 
         await db.insert(potentialCatalysts).values({
           predictedImpact: primary.impactSummary,
-          affectedSymbols: JSON.stringify(primary.affectedTickers),
+          affectedSymbols: JSON.stringify(normalizedTickers),
           watchCriteria: JSON.stringify(primary.watchCriteria),
           relatedArticleIds: JSON.stringify(tickerRelatedArticleIds),
           sourceCitations: JSON.stringify(tickerCitations),
@@ -826,7 +844,7 @@ export async function discoverCatalysts(
         results.newCatalysts++;
         results.catalysts.push({
           predictedImpact: primary.impactSummary,
-          affectedSymbols: primary.affectedTickers,
+          affectedSymbols: normalizedTickers,
           watchCriteria: primary.watchCriteria,
         });
       }
@@ -864,7 +882,9 @@ export async function discoverCatalysts(
             .where(eq(potentialCatalysts.status, "monitoring"));
 
           const relevantCatalysts = allTickerCatalysts.filter((c) => {
-            const symbols = JSON.parse(c.affectedSymbols || "[]") as string[];
+            const symbols = normalizeTickers(
+              JSON.parse(c.affectedSymbols || "[]") as string[]
+            );
             return symbols.includes(ticker);
           });
 
@@ -1050,7 +1070,9 @@ async function getRelevantExistingCatalysts(): Promise<
       id: cat.id.slice(0, 8), // First 8 chars for brevity in LLM prompt
       fullId: cat.id, // Keep full UUID for database lookups
       predictedImpact: cat.predictedImpact,
-      affectedSymbols: JSON.parse(cat.affectedSymbols || "[]") as string[],
+      affectedSymbols: normalizeTickers(
+        JSON.parse(cat.affectedSymbols || "[]") as string[]
+      ),
       createdAt,
       ageHours,
     };
