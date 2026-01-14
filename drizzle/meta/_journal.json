@@ -169,6 +169,13 @@
       "when": 1768304465048,
       "tag": "0023_marvelous_ma_gnuci",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1768382061007,
+      "tag": "0024_conscious_deathstrike",
+      "breakpoints": true
     }
   ]
 }

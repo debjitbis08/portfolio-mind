@@ -166,6 +166,7 @@ export const suggestions = sqliteTable(
     volatilityAtEntry: real("volatility_at_entry"), // ATR for stop calibration review
 
     // Time-Sensitivity
+    minHoldHours: integer("min_hold_hours"), // Minimum hold time before exit (unless stop hit)
     maxHoldDays: integer("max_hold_days"), // If no move in N days, invalidate thesis
   },
   (table) => [

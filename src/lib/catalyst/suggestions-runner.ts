@@ -175,7 +175,7 @@ export async function runCatalystSuggestions(options?: {
   const mapSymbol = (s: string) => mappings[s] || s;
   const uniqueYahooSymbols = [...new Set(symbols.map(mapSymbol))];
 
-  let quotes: Record<string, number> = {};
+  let quotes: Record<string, { price: number; adv10d: number | null }> = {};
 
   if (uniqueYahooSymbols.length > 0) {
     // Check cache first
@@ -186,7 +186,7 @@ export async function runCatalystSuggestions(options?: {
 
     for (const cached of cachedPrices) {
       if (!isPriceStale(cached.updatedAt)) {
-        quotes[cached.symbol] = cached.price;
+        quotes[cached.symbol] = { price: cached.price, adv10d: null };
       }
     }
 
@@ -199,7 +199,17 @@ export async function runCatalystSuggestions(options?: {
         const arr = Array.isArray(results) ? results : [results];
         for (const q of arr) {
           if (q?.symbol && q.regularMarketPrice) {
-            quotes[q.symbol.replace(".NS", "")] = q.regularMarketPrice;
+            const normalized = q.symbol.replace(".NS", "");
+            const adv10d =
+              typeof q.averageDailyVolume10Day === "number"
+                ? q.averageDailyVolume10Day
+                : typeof q.averageDailyVolume3Month === "number"
+                ? q.averageDailyVolume3Month
+                : null;
+            quotes[normalized] = {
+              price: q.regularMarketPrice,
+              adv10d,
+            };
           }
         }
       } catch (error) {
@@ -219,7 +229,11 @@ export async function runCatalystSuggestions(options?: {
   const holdingsForAnalysis: CatalystHoldingForAnalysis[] = holdings.map(
     (h) => {
       const yahooSymbol = mapSymbol(h.symbol);
-      const currentPrice = quotes[yahooSymbol] || quotes[h.symbol] || 0;
+      const quote = quotes[yahooSymbol] || quotes[h.symbol] || {
+        price: 0,
+        adv10d: null,
+      };
+      const currentPrice = quote.price;
       const tech = techMap.get(yahooSymbol) || techMap.get(h.symbol);
       const investedValue = h.investedValue;
       const currentValue = currentPrice * h.quantity;
@@ -238,6 +252,7 @@ export async function runCatalystSuggestions(options?: {
         rsi_14: tech?.rsi14 ?? null,
         price_vs_sma50: tech?.priceVsSma50 ?? null,
         price_vs_sma200: tech?.priceVsSma200 ?? null,
+        adv_10d: quote.adv10d,
       };
     }
   );
@@ -383,6 +398,7 @@ export async function runCatalystSuggestions(options?: {
               : null,
             // Catalyst-specific fields
             stopLoss: suggestion.stop_loss,
+            minHoldHours: suggestion.min_hold_hours,
             maxHoldDays: suggestion.max_hold_days,
             riskRewardRatio: suggestion.risk_reward_ratio,
             trailingStop: suggestion.trailing_stop ? 1 : 0,
@@ -415,6 +431,7 @@ export async function runCatalystSuggestions(options?: {
               : null,
             // Catalyst-specific fields
             stopLoss: suggestion.stop_loss,
+            minHoldHours: suggestion.min_hold_hours,
             maxHoldDays: suggestion.max_hold_days,
             riskRewardRatio: suggestion.risk_reward_ratio,
             trailingStop: suggestion.trailing_stop ? 1 : 0,

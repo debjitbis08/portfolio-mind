@@ -1,0 +1,1 @@
+ALTER TABLE `suggestions` ADD `min_hold_hours` integer;

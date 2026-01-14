@@ -46,6 +46,7 @@ export interface CatalystHoldingForAnalysis {
   rsi_14: number | null;
   price_vs_sma50: number | null;
   price_vs_sma200: number | null;
+  adv_10d?: number | null;
   entry_date?: string;
   catalyst_reason?: string; // Why this position was opened
 }
@@ -61,6 +62,7 @@ export interface CatalystSuggestion {
   entry_price?: number;
   target_price?: number;
   stop_loss?: number;
+  min_hold_hours?: number; // Minimum hold time before exit (unless stop hits)
   max_hold_days?: number; // Maximum holding period
   catalyst_type?: string; // News, earnings, sector rotation, etc.
   technical_score?: number;
@@ -156,6 +158,7 @@ export class CatalystGeminiService {
       returns_pct: h.returns_percent?.toFixed(1),
       rsi: h.rsi_14,
       vs_sma50: h.price_vs_sma50 ? `${h.price_vs_sma50.toFixed(1)}%` : null,
+      adv_10d: h.adv_10d ?? null,
       entry_date: h.entry_date,
       catalyst_reason: h.catalyst_reason,
     }));
@@ -347,9 +350,9 @@ ${recentTrades
 - ±1 to ±4: Low priority - only if nothing better
 - 0: Neutral - generally skip
 
-**Remember:** This is SHORT-TERM trading (1-28 days). Focus on:
+**Remember:** This is multi-day swing trading (2-28 days). Focus on:
 - Thesis-driven entries (from Pass 2 analysis)
-- Quick exits on catalyst failure
+- Trend-following exits (ATR trailing stop + indicator exhaustion)
 - Position sizing (max 20% per position)`;
 
     // Build config with ALL tools enabled
@@ -481,12 +484,12 @@ ${recentTrades
     const offMarket = marketDescriptor.mode !== "OPEN";
 
     return `You are a SHORT-TERM SWING TRADER focused on catalyst-driven opportunities.
-Your holding period is 1 day to 4 weeks maximum. This is SEPARATE from long-term investing.
+Your holding period is 2 days to 4 weeks maximum. This is SEPARATE from long-term investing.
 
 ## Your Trading Style
 - **Event-driven**: News, earnings, sector rotation, policy changes
 - **Technical confirmation**: Entry only when technicals align with catalyst
-- **Quick exits**: Cut losses fast, take profits when momentum fades
+- **Trend retention**: Prefer trailing stops and indicator exhaustion over fixed targets
 - **Position sizing**: Max 20% of catalyst portfolio per position
 
 ## Available Cash
@@ -516,12 +519,19 @@ ${offMarket ? "- If catalyst is 10/10, mention AMO suggestion with liquidity ris
 - \`browse_screener\`: Find candidates from watchlist
 
 ## Trading Rules for Catalyst Portfolio
-1. **Short holding period**: 1-28 days typical
+1. **Minimum hold time**: Default min_hold_hours = 48 (unless stop-loss is hit)
 2. **Catalyst required**: Every trade needs a clear catalyst (news, earnings, technical breakout)
-3. **Stop-loss mandatory**: Define exit before entry
-4. **Take profits**: Partial profits at technical resistance
-5. **Cut failures fast**: Exit if catalyst thesis invalidated
-6. **Rotation allowed**: If cash is insufficient but conviction is high, recommend a SELL to fund the BUY
+3. **Hybrid exit engine**:
+   - Phase 1 (first 48h): 3.0x ATR Chandelier trailing stop below highest high.
+   - Phase 2 (if profit >= 3%): switch to 20-day EMA exit (or tighten to 1.5x ATR).
+   - Phase 3 (if RSI > 75): tighten stop to 9-day EMA.
+4. **Liquidity guard (ADV)**: Position size must be <= 1% of 20D ADV (use adv_10d as proxy if 20D not available).
+5. **Volume sanity check**: If a stock spikes +5% early with volume < 2% of ADV, treat as a retail trap.
+6. **Exit warning**: If exits are triggering but volume < 50% of ADV, tighten the trailing stop immediately.
+7. **No fixed profit targets**: target_price is a projected move for R math, not a hard exit
+8. **Friction-aware R**: Only enter trades where projected profit >= 10x avgSellCharges
+9. **Earnings gap risk**: Avoid holding through earnings; prefer exit before results day
+10. **Rotation allowed**: If cash is insufficient but conviction is high, recommend a SELL to fund the BUY
 
 ## Output Format
 
@@ -538,6 +548,7 @@ Return suggestions as JSON:
     "entry_price": 150.00,
     "target_price": 170.00,
     "stop_loss": 140.00,
+    "min_hold_hours": 48,
     "max_hold_days": 14,
     "catalyst_type": "NEWS" | "EARNINGS" | "TECHNICAL" | "SECTOR",
     "technical_score": 75,
@@ -545,7 +556,7 @@ Return suggestions as JSON:
     "risk_reward_ratio": 2.0,
     "trailing_stop": false,
     "entry_trigger": "Break of HOD with volume",
-    "exit_condition": "Exit before earnings or if catalyst invalidated",
+    "exit_condition": "Phase 1: 3x ATR Chandelier (48h). Phase 2: 20 EMA if +3%. Phase 3: 9 EMA if RSI > 75. Exit before earnings.",
     "volatility_at_entry": 3.5,
     "catalyst_id": "uuid-if-linked-to-potential-catalyst",
     "citations": [
@@ -558,8 +569,9 @@ Return suggestions as JSON:
 
 **Field Definitions:**
 - \`entry_price\`: Current/target entry price
-- \`target_price\`: Where to take profits
+- \`target_price\`: Projected move for R math (not a hard exit target)
 - \`stop_loss\`: Exit point if trade goes wrong (REQUIRED)
+- \`min_hold_hours\`: Minimum time to hold unless stop_loss is hit
 - \`max_hold_days\`: Maximum days to hold before re-evaluation
 - \`catalyst_type\`: What's driving this trade
 - \`risk_reward_ratio\`: (target - entry) / (entry - stop), should be >= 2.0
@@ -633,6 +645,7 @@ Better to stay in cash than force a trade.`;
             entry_price: s.entry_price,
             target_price: s.target_price,
             stop_loss: s.stop_loss,
+            min_hold_hours: s.min_hold_hours,
             max_hold_days: s.max_hold_days,
             catalyst_type: s.catalyst_type,
             technical_score: s.technical_score,
@@ -740,7 +753,7 @@ Better to stay in cash than force a trade.`;
 
     // Portfolio-aware prompt with safety protocols
     const prompt = `You are a SHORT-TERM SWING TRADER evaluating a confirmed catalyst signal.
-Holding period: 1-28 days. This is the CATALYST portfolio, separate from long-term.
+Holding period: 2-28 days. This is the CATALYST portfolio, separate from long-term.
 
 ## Confirmed Signal
 - **Stock**: ${signal.ticker}
@@ -761,10 +774,13 @@ ${recentTradesText}
 
 ## Catalyst Portfolio Rules (Safety Protocols)
 1. **Dispassionate Execution**: You are the emotional buffer. Ignore hype; focus on volume and structure.
-2. **The 2:1 Rule**: Only recommend "BUY" if Reward:Risk ratio >= 2.0.
-3. **Concentration Guard**: Max 20% per position; Max 5 total positions.
-4. **Washout Rule**: Do not re-enter a stock within 3 days of an exit, even if a new catalyst appears.
-5. **Cash Check**: No cash = No buy. Don't recommend if funds are insufficient.
+2. **Minimum hold time**: Default min_hold_hours = 48 unless stop-loss is hit.
+3. **The 2:1 Rule**: Only recommend "BUY" if Reward:Risk ratio >= 2.0.
+4. **Hybrid exits**: Use trailing_stop with ATR/EMA phases and RSI tightening.
+5. **Friction-aware R**: Target profit must be >= 10x estimated charges (₹35-45).
+6. **Concentration Guard**: Max 20% per position; Max 5 total positions.
+7. **Washout Rule**: Do not re-enter a stock within 3 days of an exit, even if a new catalyst appears.
+8. **Cash Check**: No cash = No buy. Don't recommend if funds are insufficient.
 
 ## Task
 Evaluate if this signal warrants capital deployment.
@@ -781,7 +797,10 @@ Return JSON:
   "entry_price": 300.00,
   "target_price": 330.00,
   "stop_loss": 285.00,
-  "max_hold_days": 14
+  "min_hold_hours": 48,
+  "max_hold_days": 14,
+  "trailing_stop": true,
+  "exit_condition": "Exit on RSI < 65 or 9 EMA < 21 EMA; avoid earnings week"
 }
 \`\`\`
 
@@ -818,7 +837,12 @@ Return action="PASS" if:
         entry_price: parsed.entry_price,
         target_price: parsed.target_price,
         stop_loss: parsed.stop_loss,
+        min_hold_hours: parsed.min_hold_hours,
         max_hold_days: parsed.max_hold_days,
+        trailing_stop: parsed.trailing_stop,
+        exit_condition: parsed.exit_condition,
+        risk_reward_ratio: parsed.risk_reward_ratio,
+        volatility_at_entry: parsed.volatility_at_entry,
       };
     } catch (error) {
       console.error("[Catalyst Gemini] Signal analysis failed:", error);

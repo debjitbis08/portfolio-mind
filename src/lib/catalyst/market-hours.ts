@@ -20,6 +20,7 @@ export type MarketMode = "OPEN" | "POST_CLOSE" | "OVERNIGHT" | "PRE_OPEN";
 // NSE holidays for 2026 (extend this list as needed)
 // Source: NSE website - https://www.nseindia.com/
 const NSE_HOLIDAYS_2026: string[] = [
+  "2026-01-15", // Elections
   "2026-01-26", // Republic Day
   "2026-03-17", // Holi
   "2026-04-06", // Ram Navami
